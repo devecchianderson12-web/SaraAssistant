@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono temático (Android 13+): la «S» y las ondas en un solo color. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M62.5,44.5C60.5,41 57.5,39.5 54,39.5C49,39.5 45.5,42.5 45.5,46.5C45.5,51 49.5,52.5 54,53.8C58.8,55.2 62.8,57 62.8,61.6C62.8,65.8 59,68.6 54,68.6C50,68.6 46.6,66.8 44.8,63.4"
+        android:strokeWidth="5.2"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M54,54m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0"
+        android:strokeWidth="2.5"
+        android:strokeColor="#FF000000" />
+    <path
+        android:pathData="M83,45.5C85,48 86,51 86,54C86,57 85,60 83,62.5M25,45.5C23,48 22,51 22,54C22,57 23,60 25,62.5"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round" />
+</vector>

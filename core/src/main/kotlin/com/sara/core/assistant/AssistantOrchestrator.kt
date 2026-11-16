@@ -1,0 +1,359 @@
+package com.sara.core.assistant
+
+import com.sara.core.engine.EngineErrorType
+import com.sara.core.engine.EngineMode
+import com.sara.core.engine.EngineProvider
+import com.sara.core.engine.EngineError
+import com.sara.core.engine.RecognitionRequest
+import com.sara.core.engine.RecognitionResult
+import com.sara.core.engine.RecognitionRouter
+import com.sara.core.engine.SpeakResult
+import com.sara.core.engine.VoiceParams
+import com.sara.core.engine.VoiceRouter
+import com.sara.core.engine.WakeWordConfig
+import com.sara.core.engine.WakeWordResult
+import com.sara.core.engine.Availability
+import com.sara.core.engine.ConnectivityStatus
+import com.sara.core.engine.UnavailableReason
+import com.sara.core.execution.CommandExecutor
+import com.sara.core.execution.ResponseCatalog
+import com.sara.core.interpreter.CommandInterpreter
+import com.sara.core.model.AssistantError
+import com.sara.core.model.AssistantEvent
+import com.sara.core.model.AssistantState
+import com.sara.core.model.CommandIntent
+import com.sara.core.model.ErrorKind
+import com.sara.core.model.HistoryEntry
+import com.sara.core.model.Trigger
+import com.sara.core.model.label
+import com.sara.core.state.AssistantStateMachine
+import com.sara.core.util.SaraLogger
+import com.sara.core.util.WakeWordTuning
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.min
+
+enum class Acknowledgement { VOICE, CHIME, VOICE_AND_CHIME, NONE }
+
+/** Configuración efectiva de una interacción (instantánea de los ajustes). */
+data class AssistantConfig(
+    val wakeWordSensitivity: Float = WakeWordTuning.DEFAULT_SENSITIVITY,
+    val acknowledgement: Acknowledgement = Acknowledgement.VOICE,
+    val recognitionMode: EngineMode = EngineMode.AUTOMATIC,
+    val allowRecognitionFallback: Boolean = true,
+    val voiceMode: EngineMode = EngineMode.AUTOMATIC,
+    val languageTag: String = "es-AR",
+    val onlineVoice: VoiceParams = VoiceParams(),
+    val offlineVoice: VoiceParams = VoiceParams(),
+    val noSpeechTimeoutMillis: Long = 6_000,
+    val maxSpeechMillis: Long = 10_000,
+)
+
+/** Señales no verbales y manejo de foco de audio, implementadas por la plataforma. */
+interface ActivationFeedback {
+    suspend fun chime()
+    fun interactionStarted()
+    fun interactionEnded()
+
+    object None : ActivationFeedback {
+        override suspend fun chime() = Unit
+        override fun interactionStarted() = Unit
+        override fun interactionEnded() = Unit
+    }
+}
+
+interface CommandHistory {
+    suspend fun record(entry: HistoryEntry)
+}
+
+/**
+ * Coordina el ciclo completo: espera de la palabra de activación -> escucha -> interpretación ->
+ * ejecución -> respuesta hablada -> regreso a la espera. La activación manual y la de voz comparten
+ * exactamente el mismo flujo de reconocimiento e interpretación.
+ */
+class AssistantOrchestrator(
+    private val scope: CoroutineScope,
+    private val engines: EngineProvider,
+    private val interpreter: CommandInterpreter,
+    private val executor: CommandExecutor,
+    private val connectivity: ConnectivityStatus,
+    private val configProvider: suspend () -> AssistantConfig,
+    private val feedback: ActivationFeedback = ActivationFeedback.None,
+    private val history: CommandHistory? = null,
+    private val responses: ResponseCatalog = ResponseCatalog(),
+    private val logger: SaraLogger = SaraLogger.None,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val errorDisplayMillis: Long = 1_500,
+) {
+    private val machine = AssistantStateMachine()
+    val state: StateFlow<AssistantState> = machine.state
+
+    private val _events = MutableSharedFlow<AssistantEvent>(extraBufferCapacity = 64)
+    val events: SharedFlow<AssistantEvent> = _events.asSharedFlow()
+
+    private val recognitionRouter = RecognitionRouter(connectivity, logger)
+    private val voiceRouter = VoiceRouter(connectivity, logger)
+
+    private val lock = Any()
+    @Volatile private var wakeWordEnabled = false
+    private var wakeJob: Job? = null
+    private var interactionJob: Job? = null
+
+    val isWakeWordEnabled: Boolean get() = wakeWordEnabled
+    val isInteractionActive: Boolean get() = synchronized(lock) { interactionJob?.isActive == true }
+
+    /** Activa o desactiva la escucha continua de "Sara". */
+    fun setWakeWordEnabled(enabled: Boolean) = synchronized(lock) {
+        wakeWordEnabled = enabled
+        if (enabled) {
+            if (interactionJob?.isActive != true && wakeJob?.isActive != true) startWakeLoopLocked()
+        } else {
+            wakeJob?.cancel()
+            wakeJob = null
+            if (interactionJob?.isActive != true) machine.reset(AssistantState.Inactive)
+        }
+    }
+
+    /** Inicia una interacción (botón, gesto de asistente, notificación). Devuelve `false` si ya hay una en curso. */
+    fun activate(trigger: Trigger = Trigger.MANUAL): Boolean = synchronized(lock) {
+        if (interactionJob?.isActive == true) return false
+        val toCancel = wakeJob
+        wakeJob = null
+        launchInteractionLocked(trigger, toCancel)
+        true
+    }
+
+    /**
+     * Procesa una orden escrita (sin reconocimiento de voz) con el mismo intérprete, ejecutor y
+     * respuesta hablada. Útil para entrada de texto y para pruebas en emulador.
+     */
+    fun submitText(text: String): Boolean = synchronized(lock) {
+        if (interactionJob?.isActive == true) return false
+        val toCancel = wakeJob
+        wakeJob = null
+        launchInteractionLocked(Trigger.MANUAL, toCancel, presetText = text)
+        true
+    }
+
+    /** Cancela la interacción actual; si la detección continua está activa, Sara vuelve a esperar. */
+    fun cancelInteraction() {
+        synchronized(lock) { interactionJob }?.cancel()
+    }
+
+    fun shutdown() {
+        setWakeWordEnabled(false)
+        cancelInteraction()
+    }
+
+    /**
+     * Libera el micrófono (pausando la detección) mientras se ejecuta [block], por ejemplo para
+     * atender un pedido del RecognitionService del sistema. Luego restaura la detección.
+     */
+    suspend fun <T> withMicrophoneReleased(block: suspend () -> T): T {
+        val job = synchronized(lock) { wakeJob.also { wakeJob = null } }
+        job?.cancelAndJoin()
+        try {
+            return block()
+        } finally {
+            synchronized(lock) {
+                if (wakeWordEnabled && interactionJob?.isActive != true && wakeJob?.isActive != true) startWakeLoopLocked()
+            }
+        }
+    }
+
+    /** Hace hablar a Sara fuera de una interacción (por ejemplo, "Probar voz" en ajustes). */
+    suspend fun speakPreview(text: String): SpeakResult {
+        val cfg = configProvider()
+        return voiceRouter.speak(cfg.voiceMode, engines.onlineVoice(), engines.offlineVoice(), text, cfg.onlineVoice, cfg.offlineVoice)
+    }
+
+    // -----------------------------------------------------------------------------------------
+
+    private fun startWakeLoopLocked() {
+        wakeJob = scope.launch {
+            var failures = 0
+            while (isActive) {
+                val engine = engines.wakeWordEngine()
+                if (engine == null) {
+                    reportError(AssistantError(ErrorKind.ENGINE_UNAVAILABLE, "No hay motor de activación configurado."))
+                    return@launch
+                }
+                val availability = engine.availability()
+                if (availability is Availability.Unavailable) {
+                    val kind = when (availability.reason) {
+                        UnavailableReason.PERMISSION_DENIED -> ErrorKind.PERMISSION_MISSING
+                        UnavailableReason.MISSING_CREDENTIALS -> ErrorKind.CREDENTIALS
+                        else -> ErrorKind.ENGINE_UNAVAILABLE
+                    }
+                    reportError(AssistantError(kind, availability.detail))
+                    return@launch
+                }
+                machine.moveTo(AssistantState.WaitingForWakeWord)
+                val cfg = configProvider()
+                when (val result = engine.awaitWakeWord(WakeWordConfig(cfg.wakeWordSensitivity))) {
+                    is WakeWordResult.Detected -> {
+                        logger.d(TAG, "Palabra de activación detectada (${result.confidence})")
+                        val self = currentCoroutineContext()[Job]
+                        synchronized(lock) {
+                            if (wakeJob === self) wakeJob = null
+                            if (interactionJob?.isActive != true) launchInteractionLocked(Trigger.WAKE_WORD, null)
+                        }
+                        return@launch
+                    }
+                    is WakeWordResult.Failed -> {
+                        failures++
+                        val kind = errorKindOf(result.error)
+                        reportError(AssistantError(kind, result.error.message))
+                        if (result.error.type in FATAL_WAKE_ERRORS) return@launch
+                        delay(min(30_000L, 1_000L shl min(failures, 5)))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun launchInteractionLocked(trigger: Trigger, toCancel: Job?, presetText: String? = null) {
+        interactionJob = scope.launch {
+            try {
+                toCancel?.cancelAndJoin()
+                if (presetText != null) runTextInteraction(presetText) else runInteraction(trigger)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                logger.w(TAG, "Error inesperado en la interacción", t)
+                reportError(AssistantError(ErrorKind.UNKNOWN, t.message ?: "Error inesperado"))
+            } finally {
+                withContext(NonCancellable) { runCatching { feedback.interactionEnded() } }
+                val self = currentCoroutineContext()[Job]
+                synchronized(lock) {
+                    if (interactionJob === self) interactionJob = null
+                    if (wakeWordEnabled) {
+                        if (wakeJob?.isActive != true) startWakeLoopLocked()
+                    } else {
+                        machine.reset(AssistantState.Inactive)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun runInteraction(trigger: Trigger) {
+        val cfg = configProvider()
+        feedback.interactionStarted()
+        _events.emit(AssistantEvent.Activated(trigger))
+
+        when {
+            trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE -> speak(responses.listening(), cfg)
+            trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE_AND_CHIME -> {
+                feedback.chime()
+                speak(responses.listening(), cfg)
+            }
+            cfg.acknowledgement != Acknowledgement.NONE -> feedback.chime()
+        }
+
+        machine.moveTo(AssistantState.Listening())
+        val result = recognitionRouter.recognize(
+            mode = cfg.recognitionMode,
+            online = engines.onlineRecognizer(),
+            offline = engines.offlineRecognizer(),
+            request = RecognitionRequest(cfg.languageTag, cfg.maxSpeechMillis, cfg.noSpeechTimeoutMillis),
+            allowOfflineFallback = cfg.allowRecognitionFallback,
+            onPartial = { partial -> machine.moveTo(AssistantState.Listening(partial)) },
+            onSwitch = { notice ->
+                _events.emit(AssistantEvent.Notice(notice.message))
+                if (notice.requiresRepeat) {
+                    speak(notice.message, cfg)
+                    machine.moveTo(AssistantState.Listening())
+                    feedback.chime()
+                }
+            },
+        )
+
+        when (result) {
+            is RecognitionResult.Failure -> handleRecognitionFailure(result.error, cfg)
+            is RecognitionResult.Success -> processText(result.text.trim(), result.engineId, cfg)
+        }
+    }
+
+    private suspend fun runTextInteraction(text: String) {
+        val cfg = configProvider()
+        feedback.interactionStarted()
+        _events.emit(AssistantEvent.Activated(Trigger.MANUAL))
+        machine.moveTo(AssistantState.Listening())
+        processText(text.trim(), "texto", cfg)
+    }
+
+    /** Interpretación -> ejecución -> historial -> respuesta hablada. Compartido por voz y texto. */
+    private suspend fun processText(text: String, engineId: String, cfg: AssistantConfig) {
+        _events.emit(AssistantEvent.Heard(text, engineId))
+        machine.moveTo(AssistantState.Processing(text))
+        val interpretation = interpreter.interpret(text)
+        val intent = interpretation.intent
+        logger.d(TAG, "\"$text\" -> ${intent.label()} (${interpretation.ruleId}, ${interpretation.confidence})")
+        if (intent !is CommandIntent.Unknown && intent !is CommandIntent.Cancel) {
+            machine.moveTo(AssistantState.Executing(intent))
+        }
+        val execution = executor.execute(intent)
+        runCatching {
+            history?.record(HistoryEntry(clock(), text, intent.label(), execution.response, execution.success))
+        }.onFailure { logger.w(TAG, "No se pudo guardar el historial", it) }
+        _events.emit(AssistantEvent.Responded(execution.response, execution.success, intent))
+        if (execution.response.isNotBlank()) speak(execution.response, cfg)
+    }
+
+    private suspend fun handleRecognitionFailure(error: EngineError, cfg: AssistantConfig) {
+        when (error.type) {
+            EngineErrorType.NO_SPEECH, EngineErrorType.NO_MATCH -> {
+                _events.emit(AssistantEvent.Notice(responses.didNotHear()))
+                speak(responses.didNotHear(), cfg)
+            }
+            else -> {
+                val assistantError = AssistantError(errorKindOf(error), error.message)
+                reportError(assistantError)
+                speak(error.message, cfg, showErrors = false)
+            }
+        }
+    }
+
+    private suspend fun speak(text: String, cfg: AssistantConfig, showErrors: Boolean = true) {
+        machine.moveTo(AssistantState.Speaking(text))
+        val result = voiceRouter.speak(cfg.voiceMode, engines.onlineVoice(), engines.offlineVoice(), text, cfg.onlineVoice, cfg.offlineVoice)
+        if (result is SpeakResult.Failure && showErrors) {
+            reportError(AssistantError(ErrorKind.VOICE_FAILED, "No pude hablar: ${result.error.message}"))
+        }
+    }
+
+    private suspend fun reportError(error: AssistantError) {
+        logger.w(TAG, "${error.kind}: ${error.message}")
+        machine.moveTo(AssistantState.Error(error))
+        _events.emit(AssistantEvent.Failed(error))
+        delay(errorDisplayMillis)
+    }
+
+    private fun errorKindOf(error: EngineError): ErrorKind = when (error.type) {
+        EngineErrorType.NETWORK, EngineErrorType.SERVER -> ErrorKind.NETWORK
+        EngineErrorType.CREDENTIALS -> ErrorKind.CREDENTIALS
+        EngineErrorType.PERMISSION -> ErrorKind.PERMISSION_MISSING
+        EngineErrorType.AUDIO_INPUT, EngineErrorType.BUSY -> ErrorKind.MICROPHONE_UNAVAILABLE
+        EngineErrorType.NOT_AVAILABLE -> ErrorKind.ENGINE_UNAVAILABLE
+        EngineErrorType.NO_SPEECH, EngineErrorType.NO_MATCH -> ErrorKind.NO_SPEECH
+        EngineErrorType.UNKNOWN -> ErrorKind.RECOGNITION_FAILED
+    }
+
+    private companion object {
+        const val TAG = "Orchestrator"
+        val FATAL_WAKE_ERRORS = setOf(EngineErrorType.PERMISSION, EngineErrorType.NOT_AVAILABLE, EngineErrorType.CREDENTIALS)
+    }
+}
