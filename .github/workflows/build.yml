@@ -93,5 +93,7 @@ jobs:
           make_latest: true
           files: SaraAssistant-*.apk
           body: |
+            ${{ github.event.head_commit.message }}
+
             APK debug generado automáticamente desde ${{ github.sha }}.
             Instalación: descargá el APK, abrilo en el teléfono y permití «instalar apps desconocidas».
