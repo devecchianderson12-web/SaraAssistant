@@ -76,6 +76,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _voices = MutableStateFlow<Map<Boolean, List<VoiceOption>>>(emptyMap())
     val voices: StateFlow<Map<Boolean, List<VoiceOption>>> = _voices.asStateFlow()
 
+    // Rutinas programadas y recordatorios (se editan desde Ajustes).
+    private val _routines = MutableStateFlow(c.scheduler.routines())
+    val routines: StateFlow<List<com.sara.assistant.skills.ScheduledRoutine>> = _routines.asStateFlow()
+    private val _reminders = MutableStateFlow(c.scheduler.reminders())
+    val reminders: StateFlow<List<com.sara.assistant.skills.Reminder>> = _reminders.asStateFlow()
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -177,11 +183,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val memories = c.memory.entries
     fun forget(key: String) { c.memory.remove(key) }
 
-    // Rutinas programadas y recordatorios (se editan desde Ajustes).
-    private val _routines = MutableStateFlow(c.scheduler.routines())
-    val routines: StateFlow<List<com.sara.assistant.skills.ScheduledRoutine>> = _routines.asStateFlow()
-    private val _reminders = MutableStateFlow(c.scheduler.reminders())
-    val reminders: StateFlow<List<com.sara.assistant.skills.Reminder>> = _reminders.asStateFlow()
 
     fun refreshSchedule() {
         _routines.value = c.scheduler.routines()
