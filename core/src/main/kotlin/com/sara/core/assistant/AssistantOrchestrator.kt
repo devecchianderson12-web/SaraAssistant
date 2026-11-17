@@ -68,6 +68,8 @@ data class AssistantConfig(
     val retryOnce: Boolean = true,
     /** Después de responder sigue escuchando unos segundos para seguir la charla sin decir «Sara». */
     val continuousConversation: Boolean = false,
+    /** Palabra de activación «Ey Sara» (true) o «Sara» sola (false). */
+    val wakeRequiresPrefix: Boolean = true,
     val followUpSilenceMillis: Long = 5_000,
 )
 
@@ -229,7 +231,7 @@ class AssistantOrchestrator(
                 }
                 machine.moveTo(AssistantState.WaitingForWakeWord)
                 val cfg = configProvider()
-                when (val result = engine.awaitWakeWord(WakeWordConfig(cfg.wakeWordSensitivity))) {
+                when (val result = engine.awaitWakeWord(WakeWordConfig(cfg.wakeWordSensitivity, cfg.wakeRequiresPrefix))) {
                     is WakeWordResult.Detected -> {
                         logger.d(TAG, "Palabra de activación detectada (${result.confidence})")
                         val self = currentCoroutineContext()[Job]

@@ -360,8 +360,15 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
             ),
             Risk.CHANGE, verification = "Relee el brillo del sistema.",
         ),
-        SkillAction("wifi", "Wi-Fi (Android sólo permite abrir el panel para cambiarlo).", listOf(state), Risk.CHANGE),
-        SkillAction("bluetooth", "Bluetooth (Android sólo permite abrir el panel para cambiarlo).", listOf(state), Risk.CHANGE),
+        SkillAction("wifi", "Prende, apaga o consulta el Wi-Fi (con Accesibilidad lo hace sola).", listOf(state), Risk.CHANGE, verification = "Relee el estado del Wi-Fi."),
+        SkillAction(
+            "bluetooth", "Prende, apaga o consulta el Bluetooth, o se conecta a un dispositivo vinculado (auriculares, parlante, auto).",
+            listOf(
+                Param("estado", ParamType.STRING, "Qué hacer.", options = listOf("prender", "apagar", "consultar", "conectar")),
+                Param("dispositivo", ParamType.STRING, "Nombre del dispositivo para «conectar».", required = false),
+            ),
+            Risk.CHANGE, verification = "Relee el estado del Bluetooth y si hay un dispositivo de audio conectado.",
+        ),
         SkillAction("no_molestar", "Modo No molestar.", listOf(state), Risk.CHANGE, setOf(), "Relee el filtro de interrupciones."),
         SkillAction("bateria", "Nivel de batería y si está cargando."),
         SkillAction("info", "Modelo, versión de Android, almacenamiento y memoria libres."),
@@ -382,22 +389,15 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
         "linterna" -> torch(args["estado"] != "apagar")
         "brillo" -> brightness(args.getValue("accion"), args["porcentaje"]?.toIntOrNull())
         "wifi" -> {
-            val enabled = context.getSystemService(WifiManager::class.java)?.isWifiEnabled == true
+            val wifi = context.getSystemService(WifiManager::class.java)
+            val enabled = wifi?.isWifiEnabled == true
             when (args["estado"]) {
                 "consultar" -> SkillResult.Done(if (enabled) "El Wi-Fi está prendido." else "El Wi-Fi está apagado.")
-                "prender" -> if (enabled) SkillResult.Done("El Wi-Fi ya está prendido.") else panel(Settings.Panel.ACTION_WIFI, "Wi-Fi")
-                else -> if (!enabled) SkillResult.Done("El Wi-Fi ya está apagado.") else panel(Settings.Panel.ACTION_WIFI, "Wi-Fi")
+                "prender" -> if (enabled) SkillResult.Done("El Wi-Fi ya está prendido.") else autoToggle(Settings.ACTION_WIFI_SETTINGS, "Wi-Fi", true) { wifi?.isWifiEnabled == true }
+                else -> if (!enabled) SkillResult.Done("El Wi-Fi ya está apagado.") else autoToggle(Settings.ACTION_WIFI_SETTINGS, "Wi-Fi", false) { wifi?.isWifiEnabled == true }
             }
         }
-        "bluetooth" -> {
-            val enabled = runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled }.getOrNull()
-            when {
-                args["estado"] == "consultar" && enabled != null -> SkillResult.Done(if (enabled) "El Bluetooth está prendido." else "El Bluetooth está apagado.")
-                args["estado"] == "prender" && enabled == true -> SkillResult.Done("El Bluetooth ya está prendido.")
-                args["estado"] == "apagar" && enabled == false -> SkillResult.Done("El Bluetooth ya está apagado.")
-                else -> panel(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth")
-            }
-        }
+        "bluetooth" -> bluetooth(args.getValue("estado"), args["dispositivo"])
         "no_molestar" -> dnd(args.getValue("estado"))
         "bateria" -> {
             val bm = context.getSystemService(BatteryManager::class.java)
@@ -462,6 +462,97 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
         val now = nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
         return if (now == on) SkillResult.Done(if (on) "No molestar activado." else "No molestar desactivado.")
         else SkillResult.Failed("El sistema no aceptó el cambio.")
+    }
+
+    private val btAdapter get() = runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter }.getOrNull()
+    private fun btEnabled(): Boolean? = runCatching { btAdapter?.isEnabled }.getOrNull()
+    private fun btPermission() = Build.VERSION.SDK_INT < 31 || granted(context, Manifest.permission.BLUETOOTH_CONNECT)
+
+    /** ¿Hay un dispositivo de audio Bluetooth conectado? (null si no se puede saber). */
+    @Suppress("MissingPermission")
+    private fun audioConnected(): Boolean? {
+        if (!btPermission()) return null
+        val adapter = btAdapter ?: return null
+        return runCatching {
+            listOf(android.bluetooth.BluetoothProfile.A2DP, android.bluetooth.BluetoothProfile.HEADSET)
+                .any { adapter.getProfileConnectionState(it) == android.bluetooth.BluetoothProfile.STATE_CONNECTED }
+        }.getOrNull()
+    }
+
+    @Suppress("MissingPermission")
+    private fun bondedName(query: String): String? {
+        if (!btPermission()) return null
+        val names = runCatching { btAdapter?.bondedDevices?.mapNotNull { it.name } }.getOrNull().orEmpty()
+        return AppMatcher.best(query, names.map { InstalledApp(it, it) })?.label
+    }
+
+    private suspend fun bluetooth(state: String, device: String?): SkillResult {
+        val enabled = btEnabled()
+        return when (state) {
+            "consultar" -> when {
+                enabled == null -> SkillResult.Failed("No pude leer el Bluetooth.")
+                !enabled -> SkillResult.Done("El Bluetooth está apagado.")
+                audioConnected() == true -> SkillResult.Done("El Bluetooth está prendido y hay un dispositivo conectado.")
+                else -> SkillResult.Done("El Bluetooth está prendido.")
+            }
+            "prender" -> if (enabled == true) SkillResult.Done("El Bluetooth ya está prendido.") else autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", true) { btEnabled() == true }
+            "apagar" -> if (enabled == false) SkillResult.Done("El Bluetooth ya está apagado.") else autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", false) { btEnabled() == true }
+            else -> connect(device?.takeIf { it.isNotBlank() } ?: return SkillResult.Failed("¿A qué dispositivo me conecto?"))
+        }
+    }
+
+    /** Conectarse a un dispositivo vinculado: prende el Bluetooth si hace falta y toca su nombre en Ajustes. */
+    private suspend fun connect(device: String): SkillResult {
+        if (!com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) {
+            return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para conectarme sola necesito Accesibilidad. Te dejé el botón.")
+        }
+        val name = bondedName(device) ?: device
+        val wasConnected = audioConnected()
+        val opened = open(starter, Intent(Settings.ACTION_BLUETOOTH_SETTINGS), "Bluetooth", "", "Tocá la notificación para abrir el Bluetooth.")
+        if (opened !is SkillResult.Partial || opened.message.isNotEmpty()) return opened
+        if (btEnabled() != true) {
+            com.sara.assistant.apps.SaraAccessibilityService.setScreenSwitch(context, true)
+            if (!waitUntil(5_000) { btEnabled() == true }) return SkillResult.Failed("No pude prender el Bluetooth.")
+            delay(1_500) // la lista de dispositivos tarda en aparecer
+        }
+        val tapped = com.sara.assistant.apps.SaraAccessibilityService.tapOnScreen(context, name)
+            ?: return SkillResult.Failed("No encontré «$device» entre tus dispositivos vinculados.").also {
+                com.sara.assistant.apps.SaraAccessibilityService.back(context)
+            }
+        // Verificación: se conecta un dispositivo de audio.
+        waitUntil(9_000) { audioConnected() == true && wasConnected != true }
+        val connected = audioConnected()
+        com.sara.assistant.apps.SaraAccessibilityService.back(context)
+        return when {
+            connected == true -> SkillResult.Done("Conectado a $tapped.")
+            connected == null -> SkillResult.Done("Toqué $tapped en Bluetooth para conectarlo.", verified = false)
+            else -> SkillResult.Failed("Toqué $tapped pero no se conectó. ¿Está prendido y cerca?")
+        }
+    }
+
+    /** Prende/apaga desde Ajustes tocando el interruptor (con Accesibilidad); si no, abre la pantalla. */
+    private suspend fun autoToggle(action: String, label: String, on: Boolean, isOn: () -> Boolean): SkillResult {
+        if (!com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) return panel(if (label == "Wi-Fi") Settings.Panel.ACTION_WIFI else action, label)
+        val opened = open(starter, Intent(action), label, "", "Tocá la notificación para abrir el $label.")
+        if (opened !is SkillResult.Partial || opened.message.isNotEmpty()) return opened
+        val switched = com.sara.assistant.apps.SaraAccessibilityService.setScreenSwitch(context, on)
+        waitUntil(5_000) { isOn() == on }
+        com.sara.assistant.apps.SaraAccessibilityService.back(context)
+        val word = if (on) "prendido" else "apagado"
+        return when {
+            isOn() == on -> SkillResult.Done("$label $word.")
+            switched == true -> SkillResult.Done("Toqué el $label, no pude confirmar que quedó $word.", verified = false)
+            else -> SkillResult.Failed("No pude cambiar el $label.")
+        }
+    }
+
+    private suspend fun waitUntil(millis: Long, condition: () -> Boolean): Boolean {
+        val end = System.currentTimeMillis() + millis
+        while (System.currentTimeMillis() < end) {
+            if (condition()) return true
+            delay(250)
+        }
+        return condition()
     }
 
     private suspend fun panel(action: String, label: String): SkillResult =

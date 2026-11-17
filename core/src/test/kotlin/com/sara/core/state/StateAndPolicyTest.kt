@@ -126,7 +126,19 @@ class WakeWordAndAudioTest {
         assertTrue(gate.onFinal(listOf("sara" to 0.9f)))
         assertEquals(1, WakeWordTuning.requiredPartialHits(0.9f))
         assertEquals(3, WakeWordTuning.requiredPartialHits(0.1f))
-        assertEquals(1, WakeWordTuning.requiredPartialHits(0.5f))
+        assertEquals(2, WakeWordTuning.requiredPartialHits(0.5f))
+        assertEquals(1, WakeWordTuning.requiredPartialHits(0.9f))
+    }
+
+    @Test
+    fun `ey sara exige el llamado antes del nombre`() {
+        assertTrue(WakeWordTuning.verifiedWithPrefix("ey sara"))
+        assertTrue(WakeWordTuning.verifiedWithPrefix("y sara poné música"))
+        assertTrue(WakeWordTuning.verifiedWithPrefix("bueno oye sarah"))
+        assertTrue(WakeWordTuning.verifiedWithPrefix("hey zara"))
+        assertFalse(WakeWordTuning.verifiedWithPrefix("sara"))
+        assertFalse(WakeWordTuning.verifiedWithPrefix("le dije a sara que venga"))
+        assertFalse(WakeWordTuning.verifiedWithPrefix("para la próxima"))
     }
 
     @Test

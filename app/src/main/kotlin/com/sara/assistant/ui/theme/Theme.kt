@@ -41,7 +41,7 @@ fun AssistantState.color(): Color = when (this) {
 
 fun AssistantState.title(): String = when (this) {
     AssistantState.Inactive -> "Inactiva"
-    AssistantState.WaitingForWakeWord -> "Esperando «Sara»"
+    AssistantState.WaitingForWakeWord -> "Esperando"
     is AssistantState.Listening -> "Escuchando"
     is AssistantState.Processing -> "Procesando"
     is AssistantState.Executing -> "Ejecutando"

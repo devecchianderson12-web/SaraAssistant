@@ -36,6 +36,8 @@ interface ConnectivityStatus {
 data class WakeWordConfig(
     /** 0 = muy estricto (menos falsas activaciones), 1 = muy sensible. */
     val sensitivity: Float,
+    /** «Ey Sara»: exige el llamado («ey», «hey», «oye») antes del nombre; «Sara» sola no activa. */
+    val requirePrefix: Boolean = true,
 )
 
 sealed interface WakeWordResult {

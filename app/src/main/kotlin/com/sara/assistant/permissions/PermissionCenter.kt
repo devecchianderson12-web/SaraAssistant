@@ -57,6 +57,7 @@ object PermissionCenter {
         PermissionKind.CALENDAR -> Info("Calendario", "Para decirte tus eventos de hoy y mañana.")
         PermissionKind.WRITE_SETTINGS -> Info("Modificar ajustes", "Para cambiar el brillo de la pantalla.")
         PermissionKind.DND_ACCESS -> Info("No molestar", "Para activar y desactivar el modo No molestar.")
+        PermissionKind.BLUETOOTH -> Info("Dispositivos cercanos", "Para saber si se conectó tu parlante o auricular Bluetooth.")
     }
 
     /** Permisos que se piden con el diálogo del sistema (un toque en «Permitir»). */
@@ -67,6 +68,7 @@ object PermissionCenter {
         PermissionKind.LOCATION -> Manifest.permission.ACCESS_COARSE_LOCATION
         PermissionKind.PHONE -> Manifest.permission.CALL_PHONE
         PermissionKind.CALENDAR -> Manifest.permission.READ_CALENDAR
+        PermissionKind.BLUETOOTH -> if (Build.VERSION.SDK_INT >= 31) Manifest.permission.BLUETOOTH_CONNECT else null
         else -> null
     }
 
@@ -75,6 +77,7 @@ object PermissionCenter {
         PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.PHONE, PermissionKind.CALENDAR -> granted(context, runtimePermission(kind)!!)
         PermissionKind.LOCATION -> granted(context, Manifest.permission.ACCESS_COARSE_LOCATION) || granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
         PermissionKind.WRITE_SETTINGS -> Settings.System.canWrite(context)
+        PermissionKind.BLUETOOTH -> Build.VERSION.SDK_INT < 31 || granted(context, Manifest.permission.BLUETOOTH_CONNECT)
         PermissionKind.DND_ACCESS -> context.getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted
         PermissionKind.NOTIFICATION_ACCESS -> NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         PermissionKind.OVERLAY -> Settings.canDrawOverlays(context)
@@ -127,7 +130,7 @@ object PermissionCenter {
             PermissionKind.WRITE_SETTINGS -> listOf(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, pkg))
             PermissionKind.DND_ACCESS -> listOf(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
             PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.NOTIFICATIONS, PermissionKind.AI_KEY,
-            PermissionKind.LOCATION, PermissionKind.PHONE, PermissionKind.CALENDAR -> emptyList()
+            PermissionKind.LOCATION, PermissionKind.PHONE, PermissionKind.CALENDAR, PermissionKind.BLUETOOTH -> emptyList()
         } + appDetails
     }
 

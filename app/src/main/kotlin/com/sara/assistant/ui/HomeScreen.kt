@@ -94,7 +94,7 @@ fun HomeScreen(
         Text(
             when (state) {
                 AssistantState.Inactive -> if (settings.manualActivationEnabled) "Tocá el círculo para hablar" else "Activación manual desactivada"
-                AssistantState.WaitingForWakeWord -> "Decí «Sara» cuando quieras"
+                AssistantState.WaitingForWakeWord -> if (settings.heySara) "Decí «Ey Sara» cuando quieras" else "Decí «Sara» cuando quieras"
                 is AssistantState.Listening -> state.partialText.ifBlank { "Decime qué necesitás" }
                 is AssistantState.Processing -> "«${state.text}»"
                 is AssistantState.Executing -> "En eso…"
@@ -133,7 +133,7 @@ fun HomeScreen(
 
             SectionCard("Activación por voz") {
                 SwitchRow(
-                    title = "Escuchar «Sara»",
+                    title = if (settings.heySara) "Escuchar «Ey Sara»" else "Escuchar «Sara»",
                     subtitle = when {
                         settings.wakeWordEnabled && serviceRunning -> "Activa · también con la pantalla apagada o bloqueada"
                         settings.wakeWordEnabled -> "Activada, esperando permisos o modelo"

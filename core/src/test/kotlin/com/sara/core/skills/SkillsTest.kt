@@ -72,6 +72,8 @@ class SkillsTest {
         assertEquals(CommandIntent.Skill("listas", "agregar", mapOf("lista" to "compras", "texto" to "leche y pan")), intentOf("agregá leche y pan a la lista de compras"))
         assertEquals(CommandIntent.Skill("listas", "leer", mapOf("lista" to "compras")), intentOf("qué tengo que comprar"))
         assertEquals(CommandIntent.Skill("listas", "agregar", mapOf("lista" to "notas", "texto" to "la clave del wifi es 1234")), intentOf("anotá la clave del wifi es 1234"))
+        assertEquals(CommandIntent.Skill("dispositivo", "bluetooth", mapOf("estado" to "conectar", "dispositivo" to "auriculares JBL")), intentOf("conectate a los auriculares JBL"))
+        assertEquals(CommandIntent.Skill("dispositivo", "bluetooth", mapOf("estado" to "prender")), intentOf("prendé el bluetooth"))
         val routine = SkillParser.parse("todos los días a las 8 decime el clima", now)!!
         assertEquals("programar", routine.action)
         assertEquals("decime el clima", routine.args["orden"])

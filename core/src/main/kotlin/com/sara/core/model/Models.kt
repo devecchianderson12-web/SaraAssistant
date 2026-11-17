@@ -157,6 +157,8 @@ enum class PermissionKind {
     WRITE_SETTINGS,
     /** Acceso a «No molestar». */
     DND_ACCESS,
+    /** «Dispositivos cercanos»: saber a qué Bluetooth estás conectado y elegir el dispositivo. */
+    BLUETOOTH,
 }
 
 data class HistoryEntry(

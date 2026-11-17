@@ -58,6 +58,8 @@ data class SaraSettings(
     val aiProvider: AiProvider = AiProvider.GOOGLE,
     /** Seguir escuchando unos segundos después de responder (charla sin repetir «Sara»). */
     val continuousConversation: Boolean = true,
+    /** Activación con «Ey Sara» (true, menos falsas activaciones) o con «Sara» sola. */
+    val heySara: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -107,6 +109,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val confirmMessages = booleanPreferencesKey("confirm_messages")
         val aiProvider = stringPreferencesKey("ai_provider")
         val continuousConversation = booleanPreferencesKey("continuous_conversation")
+        val heySara = booleanPreferencesKey("hey_sara")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -139,6 +142,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             confirmMessages = this[Keys.confirmMessages] ?: d.confirmMessages,
             aiProvider = this[Keys.aiProvider].toEnum(d.aiProvider),
             continuousConversation = this[Keys.continuousConversation] ?: d.continuousConversation,
+            heySara = this[Keys.heySara] ?: d.heySara,
         )
     }
 
@@ -167,5 +171,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.confirmMessages] = s.confirmMessages
         this[Keys.aiProvider] = s.aiProvider.name
         this[Keys.continuousConversation] = s.continuousConversation
+        this[Keys.heySara] = s.heySara
     }
 }

@@ -95,6 +95,26 @@ object WakeWordTuning {
         transcript.lowercase().split(' ').any { it in KEYWORD_ALIASES }
 
     /**
+     * Cómo transcribe el modelo el «ey» de «Ey Sara» (o «hey», «oye»): con estas palabras justo antes
+     * de «Sara» cuenta como activación. Una «Sara» suelta (o «para», «cara») ya no alcanza.
+     */
+    val WAKE_PREFIXES = setOf("ey", "hey", "ei", "hei", "e", "y", "he", "eh", "hay", "ay", "oye", "oi", "ahí", "ahi")
+
+    /** Variantes donde el modelo junta las dos palabras. */
+    private val FUSED = setOf("eysara", "heysara", "esara", "isara", "oyesara")
+
+    /** «Ey Sara»: un prefijo de llamada inmediatamente antes de «Sara». */
+    fun verifiedWithPrefix(transcript: String): Boolean {
+        val tokens = transcript.lowercase().split(' ').filter { it.isNotBlank() }
+        return tokens.indices.any { i ->
+            (tokens[i] in KEYWORD_ALIASES && i > 0 && tokens[i - 1] in WAKE_PREFIXES) || tokens[i] in FUSED
+        }
+    }
+
+    /** Frases para la gramática restringida de la primera etapa (las palabras deben existir en el modelo). */
+    val PREFIXED_PHRASES = listOf("y sara", "e sara", "hay sara", "oye sara", "ey sara", "hey sara")
+
+    /**
      * Con música de fondo la transcripción libre falla seguido; entonces se usa además una gramática
      * con palabras parecidas que compiten con «Sara»: sólo gana si realmente se pronunció.
      */
@@ -106,8 +126,8 @@ object WakeWordTuning {
 
     /** Cantidad de resultados parciales seguidos con «sara» para pasar a verificación. */
     fun requiredPartialHits(sensitivity: Float): Int = when {
-        sensitivity >= 0.4f -> 1
-        sensitivity >= 0.2f -> 2
+        sensitivity >= 0.8f -> 1
+        sensitivity >= 0.3f -> 2
         else -> 3
     }
 
@@ -150,7 +170,7 @@ object WakeWordTuning {
  * Compuerta de energía para ahorrar batería: en silencio el reconocedor no procesa audio.
  * Cuando vuelve a haber sonido se le entregan los bloques previos para no perder el comienzo.
  */
-class EnergyGate(private val idleAfterChunks: Int = 15, private val minRms: Double = 45.0, private val ratio: Double = 1.7) {
+class EnergyGate(private val idleAfterChunks: Int = 15, private val minRms: Double = 60.0, private val ratio: Double = 2.0) {
     private var noiseFloor = -1.0
     private var quietChunks = 0
     var idle = false

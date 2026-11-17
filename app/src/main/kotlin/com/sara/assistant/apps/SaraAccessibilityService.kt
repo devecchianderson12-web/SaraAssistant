@@ -136,6 +136,44 @@ class SaraAccessibilityService : AccessibilityService() {
         ChatSendResult.Failed("No pude escribir en el chat").also { log("${it.message}. En pantalla: ${screenSummary(pkg)}") }
     }
 
+    // ---------------------------------------------------------------- Ajustes del sistema
+    // Android no deja que una app prenda el Bluetooth/Wi-Fi ni elija a qué conectarse; Sara lo hace
+    // como el usuario: en la pantalla de Ajustes toca el interruptor o el nombre del dispositivo.
+
+    private fun activeNodes(): List<AccessibilityNodeInfo> =
+        (listOfNotNull(rootInActiveWindow) + windows.mapNotNull { it.root }).distinctBy { it.windowId }
+            .filter { it.packageName != packageName }.flatMap { it.descendants() }
+
+    private suspend fun toggleSwitch(on: Boolean): Boolean = withContext(Dispatchers.Main) {
+        repeat(15) { attempt ->
+            delay(if (attempt == 0) 900 else 300)
+            val sw = activeNodes().firstOrNull { n ->
+                n.isCheckable && n.isVisibleToUser && n.className?.toString()?.let { "Switch" in it || "Toggle" in it || "CheckBox" in it } == true
+            } ?: return@repeat
+            if (sw.isChecked == on) return@withContext true
+            if (tap(sw)) {
+                delay(700)
+                return@withContext true
+            }
+        }
+        log("No encontré el interruptor. En pantalla: ${activeNodes().flatMap { it.labels() }.distinct().take(40)}")
+        false
+    }
+
+    /** Toca el elemento cuyo texto más se parece a [name] (baja la lista si no está a la vista). */
+    private suspend fun tapLabel(name: String): String? = withContext(Dispatchers.Main) {
+        repeat(4) { round ->
+            delay(if (round == 0) 900 else 500)
+            val texts = activeNodes().filter { !it.text.isNullOrBlank() && it.isVisibleToUser }
+            val candidates = texts.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) }
+            val best = com.sara.core.apps.AppMatcher.best(name, candidates)
+            if (best != null && tap(texts[best.id.toInt()])) return@withContext best.label
+            activeNodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+        }
+        log("No encontré «$name». En pantalla: ${activeNodes().mapNotNull { it.text?.toString() }.distinct().take(40)}")
+        null
+    }
+
     private fun screenSummary(pkg: String) =
         pkgNodes(pkg).flatMap { it.labels() + listOfNotNull(it.viewIdResourceName?.substringAfter(":id/")) }.distinct().take(50)
 
@@ -332,6 +370,22 @@ class SaraAccessibilityService : AccessibilityService() {
         suspend fun sendToChat(context: Context, pkg: String, chat: String, message: String): ChatSendResult {
             val service = awaitInstance(context) ?: return ChatSendResult.Failed("Accesibilidad detenida")
             return service.sendBySearch(pkg, chat, message)
+        }
+
+        /** En la pantalla de Ajustes abierta, deja el interruptor principal en [on]. null = sin accesibilidad. */
+        suspend fun setScreenSwitch(context: Context, on: Boolean): Boolean? {
+            val service = awaitInstance(context) ?: return null
+            return service.toggleSwitch(on)
+        }
+
+        /** Toca en pantalla el texto que mejor coincide con [name]; devuelve el texto tocado. */
+        suspend fun tapOnScreen(context: Context, name: String): String? {
+            val service = awaitInstance(context) ?: return null
+            return service.tapLabel(name)
+        }
+
+        fun back(context: Context) {
+            instance?.takeIf { isEnabled(context) }?.performGlobalAction(GLOBAL_ACTION_BACK)
         }
 
         suspend fun clickSend(context: Context, pkg: String): Boolean {

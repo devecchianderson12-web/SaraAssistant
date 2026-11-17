@@ -52,7 +52,7 @@ class VoskWakeWordEngine(
         while (true) {
             // Si empieza o termina la música se reabre el micrófono con la fuente adecuada.
             val echoCancellation = microphone.echoCancellationWanted()
-            val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), GRAMMAR).apply { setWords(true) }
+            val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), if (config.requirePrefix) PREFIXED_GRAMMAR else GRAMMAR).apply { setWords(true) }
             val gate = WakeWordGate(config.sensitivity)
             val energy = EnergyGate()
             // Últimos ~2,4 s de audio, sólo en memoria.
@@ -90,7 +90,7 @@ class VoskWakeWordEngine(
                         gate.onPartial(JSONObject(recognizer.partialResult).optString("partial").split(' '))
                     }
                     if (candidate) {
-                        if (verify(model, window, echoCancellation, config.sensitivity)) {
+                        if (verify(model, window, echoCancellation, config.sensitivity, config.requirePrefix)) {
                             detected = true
                         } else {
                             gate.rejected()
@@ -119,13 +119,20 @@ class VoskWakeWordEngine(
      * Segunda etapa sobre la ventana de audio: transcripción libre (estricta). Con música, como la
      * transcripción libre se confunde, también vale ganarle a palabras parecidas («para», «cara»…).
      */
-    private fun verify(model: Model, window: ArrayDeque<ByteArray>, musicPlaying: Boolean, sensitivity: Float): Boolean {
+    private fun verify(model: Model, window: ArrayDeque<ByteArray>, musicPlaying: Boolean, sensitivity: Float, requirePrefix: Boolean): Boolean {
         val raw = ByteArrayOutputStream(window.sumOf { it.size }).apply { window.forEach { write(it) } }.toByteArray()
         val audio = WakeWordTuning.applyGain(raw, raw.size, WakeWordTuning.gainFor(WakeWordTuning.peakOf(raw, raw.size)))
-        if (WakeWordTuning.verifiedByTranscript(transcribe(model, audio, null))) return true
-        // La transcripción libre del modelo chico falla seguido con «Sara» dicha rápido o bajo:
-        // si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
-        if (sensitivity < 0.3f) return false
+        val free = transcribe(model, audio, null)
+        if (requirePrefix) {
+            // «Ey Sara»: el llamado tiene que estar justo antes del nombre.
+            if (WakeWordTuning.verifiedWithPrefix(free)) return true
+            // Con música la transcripción libre se confunde: se compara «ey sara» contra palabras parecidas.
+            if (!musicPlaying || sensitivity < 0.3f) return false
+            return WakeWordTuning.verifiedWithPrefix(transcribe(model, audio, PREFIXED_COMPETITORS))
+        }
+        if (WakeWordTuning.verifiedByTranscript(free)) return true
+        // Con música, si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
+        if (!musicPlaying || sensitivity < 0.3f) return false
         return "sara" in transcribe(model, audio, COMPETITORS).split(' ')
     }
 
@@ -160,6 +167,9 @@ class VoskWakeWordEngine(
         const val PREROLL_CHUNKS = 5
         const val MUSIC_CHECK_CHUNKS = 20 // cada 2 s
         val COMPETITORS: String = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
+        /** Primera etapa de «Ey Sara»: el nombre solo o con el llamado delante. */
+        val PREFIXED_GRAMMAR: String = (WakeWordTuning.PREFIXED_PHRASES + listOf("sara", "[unk]")).joinToString(",", "[", "]") { "\"$it\"" }
+        val PREFIXED_COMPETITORS: String = (WakeWordTuning.PREFIXED_PHRASES + WakeWordTuning.COMPETITOR_GRAMMAR).joinToString(",", "[", "]") { "\"$it\"" }
     }
 }
 

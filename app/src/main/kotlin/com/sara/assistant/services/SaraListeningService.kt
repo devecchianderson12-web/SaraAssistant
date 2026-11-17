@@ -195,7 +195,7 @@ class SaraListeningService : LifecycleService() {
 
     private fun statusText(state: AssistantState) = when (state) {
         AssistantState.Inactive -> "Detección en pausa"
-        AssistantState.WaitingForWakeWord -> "Esperando «Sara» · el audio se procesa en el teléfono"
+        AssistantState.WaitingForWakeWord -> "Esperando tu llamado · el audio se procesa en el teléfono"
         is AssistantState.Listening -> "Escuchando tu orden…"
         is AssistantState.Processing -> "Procesando…"
         is AssistantState.Executing -> "Ejecutando…"
