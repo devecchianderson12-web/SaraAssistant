@@ -52,6 +52,15 @@ import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
+/** Números y letras dichos en palabras («ge tres» → «g3»), para nombres de dispositivos. */
+private val SPOKEN = mapOf(
+    "cero" to "0", "uno" to "1", "una" to "1", "dos" to "2", "tres" to "3", "cuatro" to "4", "cinco" to "5", "seis" to "6",
+    "siete" to "7", "ocho" to "8", "nueve" to "9", "diez" to "10",
+    "be" to "b", "ce" to "c", "de" to "d", "efe" to "f", "ge" to "g", "je" to "g", "hache" to "h", "jota" to "j",
+    "ka" to "k", "ele" to "l", "eme" to "m", "ene" to "n", "pe" to "p", "cu" to "q", "erre" to "r", "ese" to "s", "te" to "t",
+    "uve" to "v", "ve" to "v", "doble ve" to "w", "equis" to "x", "ye" to "y", "zeta" to "z",
+)
+
 private fun granted(context: Context, permission: String) =
     context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
@@ -512,11 +521,45 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
     }
 
     @Suppress("MissingPermission")
+    private fun bonded(): List<android.bluetooth.BluetoothDevice> =
+        if (!btPermission()) emptyList() else runCatching { btAdapter?.bondedDevices?.toList() }.getOrNull().orEmpty().filter { !it.name.isNullOrBlank() }
+
+    @Suppress("MissingPermission")
+    private fun bondedNames(): List<String> = bonded().mapNotNull { it.name }
+
+    /**
+     * El dispositivo vinculado que nombraste, aunque lo digas distinto de como se llama:
+     * «gol g3» / «gol ge tres» / «golg3» → «GOL G3»; «el auto» / «la radio» → el que Android marca como
+     * equipo de auto; «los auriculares» / «el parlante» → el de ese tipo (si hay uno solo).
+     */
+    @Suppress("MissingPermission")
     private fun bondedName(query: String): String? {
-        if (!btPermission()) return null
-        val names = runCatching { btAdapter?.bondedDevices?.mapNotNull { it.name } }.getOrNull().orEmpty()
-        return AppMatcher.best(query, names.map { InstalledApp(it, it) })?.label
+        val devices = bonded()
+        if (devices.isEmpty()) return null
+        val wanted = spokenCompact(query)
+        devices.firstOrNull { spokenCompact(it.name) == wanted }?.let { return it.name }
+        if (wanted.length >= 3) devices.firstOrNull {
+            val have = spokenCompact(it.name)
+            have.length >= 3 && (have.contains(wanted) || wanted.contains(have))
+        }?.let { return it.name }
+        AppMatcher.best(query, devices.map { InstalledApp(it.name, it.name) })?.let { return it.label }
+        val n = AppMatcher.normalize(query)
+        val classes = when {
+            Regex("\\b(auto|coche|carro|radio|estereo|stereo|camioneta)\\b").containsMatchIn(n) ->
+                setOf(android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO, android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE)
+            Regex("\\b(auriculares|audifonos|cascos|headset)\\b").containsMatchIn(n) ->
+                setOf(android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES, android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET)
+            Regex("\\b(parlante|bocina|altavoz|parlantito)\\b").containsMatchIn(n) ->
+                setOf(android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER, android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO)
+            else -> return null
+        }
+        return devices.filter { runCatching { it.bluetoothClass?.deviceClass in classes }.getOrDefault(false) }.singleOrNull()?.name
     }
+
+    /** «Gol ge tres» → «golg3»: números y letras dichas en palabras, sin espacios ni acentos. */
+    private fun spokenCompact(text: String): String = AppMatcher.normalize(text).split(' ').joinToString("") { w -> SPOKEN[w] ?: w }
+
+    private fun devicesList(): String = bondedNames().take(6).joinToString(", ").ifBlank { "ninguno" }
 
     private suspend fun bluetooth(state: String, device: String?): SkillResult {
         val enabled = btEnabled()
@@ -533,7 +576,7 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
                 else -> autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", true) { btEnabled() == true }
             }
             "apagar" -> if (enabled == false) SkillResult.Done("El Bluetooth ya está apagado.") else autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", false) { btEnabled() == true }
-            else -> connect(device?.takeIf { it.isNotBlank() } ?: return SkillResult.Failed("¿A qué dispositivo me conecto?"))
+            else -> device?.takeIf { it.isNotBlank() }?.let { connect(it) } ?: connectAny()
         }
     }
 
@@ -544,12 +587,31 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
      * 3. Muchos auriculares se reconectan solos: se espera unos segundos antes de tocar.
      * 4. Recién si no se conectó, toca su nombre (nunca el interruptor ni otras filas).
      */
+    /**
+     * «Conectate a mi Bluetooth» (sin nombre): si ya hay algo conectado, listo; si no, prende el
+     * Bluetooth y espera a que se reconecte solo el de siempre. Nunca toca un nombre adivinado.
+     */
+    private suspend fun connectAny(): SkillResult {
+        connectedAudioNames()?.firstOrNull()?.let { return SkillResult.Done("Ya estás conectado a $it.") }
+        if (btEnabled() != true) {
+            val on = bluetooth("prender", null)
+            if (on is SkillResult.Failed || on is SkillResult.NeedsPermission) return on
+        }
+        if (waitUntil(8_000) { audioConnected() == true }) {
+            return SkillResult.Done("Conectado${connectedAudioNames()?.firstOrNull()?.let { " a $it" } ?: ""}.")
+        }
+        return SkillResult.Failed("Prendí el Bluetooth pero no se conectó solo. Decime a cuál: ${devicesList()}.")
+    }
+
     private suspend fun connect(device: String): SkillResult {
         if (!com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) {
             return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para conectarme sola necesito Accesibilidad. Te dejé el botón.")
         }
-        val clean = device.replace(Regex("(?i)\\b(bluetooth|blutu|los|las|el|la|mis|mi|de)\\b"), " ").replace(Regex("\\s+"), " ").trim().ifBlank { device }
-        val name = bondedName(clean) ?: clean
+        val clean = device.replace(Regex("(?i)\\b(bluetooth|blutu|los|las|el|la|mis|mi|de|al|a)\\b"), " ").replace(Regex("\\s+"), " ").trim().ifBlank { device }
+        // Sólo se toca un dispositivo que existe: si no lo reconozco, digo cuáles hay (no adivino).
+        val name = bondedName(clean) ?: bondedName(device)
+            ?: return if (btPermission()) SkillResult.Failed("No encontré «$clean» entre tus dispositivos. Tenés: ${devicesList()}.")
+            else SkillResult.NeedsPermission(PermissionKind.BLUETOOTH, "Para ver tus dispositivos necesito el permiso de Bluetooth. Te dejé el botón.")
         if (btEnabled() == true && isConnectedTo(name) == true) return SkillResult.Done("Ya estás conectado a $name.")
         val wasConnected = audioConnected()
         val opened = open(starter, Intent(Settings.ACTION_BLUETOOTH_SETTINGS), "Bluetooth", "", "Tocá la notificación para abrir el Bluetooth.")

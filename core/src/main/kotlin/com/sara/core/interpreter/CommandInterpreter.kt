@@ -69,11 +69,17 @@ private suspend fun CompositeCommandInterpreter.splitCompound(text: String): Int
 
 internal fun splitCompoundWith(text: String): InterpretationResult? {
     if (MessageParser.parse(text) != null || MemoryParser.parse(text) != null) return null
-    val parts = text.split(CONNECTOR).map { it.trim() }.filter { it.isNotBlank() }
+    // «Sara, conectate al Bluetooth y …»: el nombre del principio no es parte de la primera orden.
+    val body = text.replace(Regex("^\\s*(?:${com.sara.core.model.AssistantIdentity.NAMES})\\s*[,.]?\\s+", RegexOption.IGNORE_CASE), "")
+    val parts = body.split(CONNECTOR).map { it.trim() }.filter { it.isNotBlank() }
     if (parts.size < 2 || parts.size > 5) return null
     val rules = RuleBasedCommandInterpreter()
-    val steps = parts.map { rules.interpretNow(it).intent }
+    var steps = parts.map { rules.interpretNow(it).intent }
     if (!steps.all { it.isAction() }) return null
+    // «Conectate al Bluetooth y conectate al Gol G3»: el «conectate» sin nombre sobra si después se nombra uno.
+    fun btConnect(s: CommandIntent, named: Boolean) = s is CommandIntent.Skill && s.skill == "dispositivo" && s.action == "bluetooth" &&
+        s.args["estado"] == "conectar" && (s.args["dispositivo"] != null) == named
+    if (steps.any { btConnect(it, named = true) }) steps = steps.filterNot { btConnect(it, named = false) }
     // «Sacá la música, pará y cerrá las apps»: la misma orden dos veces seguidas cuenta una vez.
     val distinct = steps.filterIndexed { i, s -> i == 0 || s != steps[i - 1] }
     if (distinct.size == 1) return InterpretationResult(distinct[0], 0.85f, TextNormalizer.normalize(text), "sequence-single")
