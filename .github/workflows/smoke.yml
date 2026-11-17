@@ -44,7 +44,43 @@ jobs:
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué hora es" || true
             sleep 8
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "prendé la linterna" || true
-            sleep 8
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "agregá leche a la lista de compras" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué tengo que comprar" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "cuánto es 15 por ciento de 200" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "cuánta batería me queda" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "poné música y bajá el volumen al 30" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "recordame en 30 minutos sacar la ropa" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué recordatorios tengo" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "todos los días a las 8 decime la hora" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué rutinas tengo" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "cómo está el clima en Córdoba" || true
+            sleep 6
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "diagnóstico" || true
+            sleep 6
+            # Recorrer las pestañas (Historial y Ajustes) para detectar cierres en la interfaz.
+            adb shell am start -W -n com.sara.assistant/.ui.MainActivity
+            sleep 3
+            adb shell input tap 540 2300 || true
+            sleep 3
+            adb shell input tap 900 2300 || true
+            sleep 4
+            adb shell input swipe 540 1800 540 300 300 || true
+            sleep 2
+            adb shell input swipe 540 1800 540 300 300 || true
+            sleep 2
+            adb shell input swipe 540 1800 540 300 300 || true
+            sleep 3
+            adb logcat -d | grep -E "SaraDiag|Orchestrator|Sara" | tail -80 || true
             adb logcat -d > logcat.txt
             adb shell pidof com.sara.assistant || echo "LA APP NO ESTA CORRIENDO"
             grep -E "FATAL EXCEPTION|AndroidRuntime" -A40 logcat.txt | head -120 || true
