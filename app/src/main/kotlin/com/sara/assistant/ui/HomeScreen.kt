@@ -54,6 +54,7 @@ fun HomeScreen(
     onDownloadModel: () -> Unit,
     onNotificationAccess: () -> Unit,
     onGrant: (com.sara.core.model.PermissionKind) -> Unit = {},
+    onGrantAll: () -> Unit = {},
     updateBanner: @Composable () -> Unit = {},
 ) {
     val permissions = system.permissions
@@ -114,6 +115,15 @@ fun HomeScreen(
             }
 
             // Cada permiso que falta, con su botón directo. El que pidió la última orden va primero.
+            // Un solo botón para darle todo lo que necesita (cada permiso lo aprueba el usuario).
+            if (system.missing.any { it != com.sara.core.model.PermissionKind.AI_KEY }) {
+                SetupCard(
+                    title = "Darle a Sara todos los permisos",
+                    text = "Faltan ${system.missing.count { it != com.sara.core.model.PermissionKind.AI_KEY }}. Te los pido todos seguidos: aceptá cada uno y volvé con Atrás.",
+                    action = "Dar todos",
+                    onAction = onGrantAll,
+                )
+            }
             // En Inicio sólo lo esencial y lo que pidió la última orden; el resto está en Ajustes › Permisos.
             val pending = system.missing
                 .filter { it in com.sara.assistant.permissions.PermissionCenter.ESSENTIAL || it == conversation.permission }

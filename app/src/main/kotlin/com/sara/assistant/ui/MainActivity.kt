@@ -95,6 +95,53 @@ class MainActivity : ComponentActivity() {
         com.sara.core.model.PermissionKind.entries.firstOrNull { it.name == name }?.let(::grant)
     }
 
+    // ---------------------------------------------------------------- «Darle todos los permisos»
+    // Android exige que el usuario apruebe cada permiso; Sara lo hace lo más corto posible: un solo
+    // diálogo para todos los permisos comunes y después cada pantalla especial, una tras otra.
+
+    private var wizardActive = false
+    private val wizardTried = mutableSetOf<com.sara.core.model.PermissionKind>()
+
+    private val wizardRuntimeLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        viewModel.refreshSystem()
+        continueWizard()
+    }
+
+    private fun startGrantAll() {
+        wizardActive = true
+        wizardTried.clear()
+        val runtime = com.sara.assistant.permissions.PermissionCenter.missing(this)
+            .mapNotNull { com.sara.assistant.permissions.PermissionCenter.runtimePermission(it) }
+            .plus(if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList())
+            .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+            .distinct()
+        if (runtime.isNotEmpty()) wizardRuntimeLauncher.launch(runtime.toTypedArray()) else continueWizard()
+    }
+
+    /** Abre la siguiente pantalla de permiso que falta (cada una se intenta una sola vez por ronda). */
+    private fun continueWizard() {
+        if (!wizardActive) return
+        val next = com.sara.assistant.permissions.PermissionCenter.missing(this).firstOrNull { kind ->
+            kind !in wizardTried && com.sara.assistant.permissions.PermissionCenter.runtimePermission(kind) == null &&
+                kind != com.sara.core.model.PermissionKind.AI_KEY
+        }
+        if (next == null) {
+            wizardActive = false
+            viewModel.refreshSystem()
+            val left = com.sara.assistant.permissions.PermissionCenter.missing(this).filter { it != com.sara.core.model.PermissionKind.AI_KEY }
+            Toast.makeText(
+                this,
+                if (left.isEmpty()) "Listo: Sara tiene todos los permisos." else "Faltan ${left.size}: están en Ajustes › Permisos.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        wizardTried += next
+        val info = com.sara.assistant.permissions.PermissionCenter.info(next)
+        Toast.makeText(this, "Activá «${info.title}» y volvé con Atrás.", Toast.LENGTH_LONG).show()
+        grant(next)
+    }
+
     private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importModel) }
     private val keywordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = true) } }
     private val pvPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = false) } }
@@ -119,6 +166,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.onResume()
+        // Al volver de una pantalla de Ajustes, sigue con el próximo permiso.
+        if (wizardActive) window.decorView.postDelayed({ continueWizard() }, 400)
     }
 
     /** Botón de asistente de auriculares / ACTION_ASSIST: empieza a escuchar directamente. */
@@ -261,6 +310,7 @@ class MainActivity : ComponentActivity() {
                             onDownloadModel = viewModel::downloadModel,
                             onNotificationAccess = ::openNotificationAccess,
                             onGrant = ::grant,
+                            onGrantAll = ::startGrantAll,
                             updateBanner = {
                                 UpdateBanner(
                                     state = updateState,
@@ -288,6 +338,7 @@ class MainActivity : ComponentActivity() {
                                 clearAiKey = viewModel::clearAiKey,
                                 forget = viewModel::forget,
                                 grant = ::grant,
+                                grantAll = ::startGrantAll,
                                 toggleRoutine = viewModel::toggleRoutine,
                                 deleteRoutine = viewModel::deleteRoutine,
                                 deleteReminder = viewModel::deleteReminder,

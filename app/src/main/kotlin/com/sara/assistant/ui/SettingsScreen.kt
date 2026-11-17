@@ -77,6 +77,7 @@ class SettingsActions(
     val clearAiKey: (com.sara.assistant.settings.AiProvider) -> Unit = {},
     val forget: (String) -> Unit = {},
     val grant: (com.sara.core.model.PermissionKind) -> Unit = {},
+    val grantAll: () -> Unit = {},
     val toggleRoutine: (com.sara.assistant.skills.ScheduledRoutine) -> Unit = {},
     val deleteRoutine: (com.sara.assistant.skills.ScheduledRoutine) -> Unit = {},
     val deleteReminder: (com.sara.assistant.skills.Reminder) -> Unit = {},
@@ -334,6 +335,9 @@ fun SettingsScreen(
 
         // ---------------------------------------------------------------- Permisos
         SectionCard("Permisos") {
+            if (system.missing.isNotEmpty()) {
+                OutlinedButton(onClick = actions.grantAll, shape = RoundedCornerShape(50)) { Text("Dar todos los permisos") }
+            }
             com.sara.core.model.PermissionKind.entries.forEach { kind ->
                 val info = com.sara.assistant.permissions.PermissionCenter.info(kind)
                 val ok = kind !in system.missing
