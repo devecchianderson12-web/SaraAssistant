@@ -125,9 +125,9 @@ fun SettingsScreen(
             SwitchRow("Detectar «${if (settings.heySara) "Ey Sara" else "Sara"}»", "Escucha continua procesada en el teléfono", settings.wakeWordEnabled, onChange = actions.onWakeToggle)
             OptionChips(
                 "Palabra de activación",
-                listOf(true to "«Ey Sara» (recomendado)", false to "«Sara»"),
+                listOf(false to "«Sara» (reacciona al toque)", true to "«Ey Sara» (más estricto)"),
                 settings.heySara,
-                subtitle = "«Ey Sara» se activa sólo con el llamado completo: menos activaciones por error.",
+                subtitle = "«Ey Sara» se activa menos por error pero puede costar más que te escuche.",
             ) { v -> actions.update { it.copy(heySara = v) } }
             SwitchRow(
                 "Esfera al llamarla",

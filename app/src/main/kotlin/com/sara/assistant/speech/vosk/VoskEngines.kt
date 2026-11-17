@@ -124,15 +124,16 @@ class VoskWakeWordEngine(
         val audio = WakeWordTuning.applyGain(raw, raw.size, WakeWordTuning.gainFor(WakeWordTuning.peakOf(raw, raw.size)))
         val free = transcribe(model, audio, null)
         if (requirePrefix) {
-            // «Ey Sara»: el llamado tiene que estar justo antes del nombre.
+            // «Ey Sara»: el llamado tiene que estar justo antes del nombre. El modelo chico casi nunca
+            // escribe «ey», así que también vale que «y/e/hay sara» le gane a las palabras parecidas.
             if (WakeWordTuning.verifiedWithPrefix(free)) return true
-            // Con música la transcripción libre se confunde: se compara «ey sara» contra palabras parecidas.
-            if (!musicPlaying || sensitivity < 0.3f) return false
+            if (sensitivity < 0.3f) return false
             return WakeWordTuning.verifiedWithPrefix(transcribe(model, audio, PREFIXED_COMPETITORS))
         }
         if (WakeWordTuning.verifiedByTranscript(free)) return true
-        // Con música, si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
-        if (!musicPlaying || sensitivity < 0.3f) return false
+        // La transcripción libre del modelo chico falla seguido con «Sara» dicha rápido o bajo:
+        // si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
+        if (sensitivity < 0.3f) return false
         return "sara" in transcribe(model, audio, COMPETITORS).split(' ')
     }
 

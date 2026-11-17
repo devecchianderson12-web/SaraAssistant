@@ -126,7 +126,7 @@ class WakeWordAndAudioTest {
         assertTrue(gate.onFinal(listOf("sara" to 0.9f)))
         assertEquals(1, WakeWordTuning.requiredPartialHits(0.9f))
         assertEquals(3, WakeWordTuning.requiredPartialHits(0.1f))
-        assertEquals(2, WakeWordTuning.requiredPartialHits(0.5f))
+        assertEquals(1, WakeWordTuning.requiredPartialHits(0.5f))
         assertEquals(1, WakeWordTuning.requiredPartialHits(0.9f))
     }
 

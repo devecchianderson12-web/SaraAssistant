@@ -59,7 +59,7 @@ data class SaraSettings(
     /** Seguir escuchando unos segundos después de responder (charla sin repetir «Sara»). */
     val continuousConversation: Boolean = false,
     /** Activación con «Ey Sara» (true, menos falsas activaciones) o con «Sara» sola. */
-    val heySara: Boolean = true,
+    val heySara: Boolean = false,
     /** Ahorro de batería: escuchar «Ey Sara» sólo con la pantalla encendida. */
     val listenOnlyWithScreenOn: Boolean = false,
     /** Mostrar la esfera a pantalla completa al llamarla fuera de la app (también bloqueado). */
@@ -113,7 +113,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val confirmMessages = booleanPreferencesKey("confirm_messages")
         val aiProvider = stringPreferencesKey("ai_provider")
         val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
-        val heySara = booleanPreferencesKey("hey_sara")
+        val heySara = booleanPreferencesKey("hey_sara_v2")
         val listenOnlyWithScreenOn = booleanPreferencesKey("listen_only_screen_on_v2")
         val sphereOverlay = booleanPreferencesKey("sphere_overlay")
     }

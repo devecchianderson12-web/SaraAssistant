@@ -126,8 +126,8 @@ object WakeWordTuning {
 
     /** Cantidad de resultados parciales seguidos con «sara» para pasar a verificación. */
     fun requiredPartialHits(sensitivity: Float): Int = when {
-        sensitivity >= 0.8f -> 1
-        sensitivity >= 0.3f -> 2
+        sensitivity >= 0.4f -> 1
+        sensitivity >= 0.2f -> 2
         else -> 3
     }
 
@@ -170,7 +170,7 @@ object WakeWordTuning {
  * Compuerta de energía para ahorrar batería: en silencio el reconocedor no procesa audio.
  * Cuando vuelve a haber sonido se le entregan los bloques previos para no perder el comienzo.
  */
-class EnergyGate(private val idleAfterChunks: Int = 15, private val minRms: Double = 60.0, private val ratio: Double = 2.0) {
+class EnergyGate(private val idleAfterChunks: Int = 15, private val minRms: Double = 45.0, private val ratio: Double = 1.7) {
     private var noiseFloor = -1.0
     private var quietChunks = 0
     var idle = false
