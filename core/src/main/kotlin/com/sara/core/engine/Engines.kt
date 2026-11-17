@@ -41,7 +41,11 @@ data class WakeWordConfig(
 )
 
 sealed interface WakeWordResult {
-    data class Detected(val confidence: Float?) : WakeWordResult
+    /**
+     * [commandStarted]: la orden vino pegada al nombre («Lucy, poné música»); el motor ya guardó ese
+     * audio para el reconocimiento, así que no se responde «¿Sí?» y se sigue escuchando directo.
+     */
+    data class Detected(val confidence: Float?, val commandStarted: Boolean = false) : WakeWordResult
     data class Failed(val error: EngineError) : WakeWordResult
 }
 

@@ -143,6 +143,8 @@ class SelfTest(private val dir: File) {
     }
 
     private fun window(app: LucyApp) {
+        // Para que la esfera flotante quede visible en la captura.
+        app.settings.update { it.copy(sphereVisible = true, sphereAlways = true) }
         var w: MainWindow? = null
         SwingUtilities.invokeAndWait {
             w = MainWindow(app)

@@ -53,6 +53,7 @@ import com.sara.lucy.skills.WeatherSkill
 import com.sara.lucy.skills.phoneOnlySkills
 import com.sara.lucy.speech.GeminiTranscriber
 import com.sara.lucy.speech.SapiVoiceEngine
+import com.sara.lucy.speech.SpeechHandoff
 import com.sara.lucy.speech.VoskModels
 import com.sara.lucy.speech.VoskSpeechRecognitionEngine
 import com.sara.lucy.speech.VoskWakeWordEngine
@@ -162,8 +163,9 @@ class LucyApp {
 
     // ---------------------------------------------------------------- Motores
     private val transcriber = GeminiTranscriber({ secrets.get(SecretStore.GEMINI_KEY) }, connectivity::isOnline)
-    val wake = VoskWakeWordEngine(models, microphone, logger)
-    private val recognizer = VoskSpeechRecognitionEngine(models, microphone) { pcm, draft ->
+    private val handoff = SpeechHandoff()
+    val wake = VoskWakeWordEngine(models, microphone, logger, handoff)
+    private val recognizer = VoskSpeechRecognitionEngine(models, microphone, handoff) { pcm, draft ->
         if (settings.current.preciseRecognition) transcriber.transcribe(pcm, draft) else null
     }
     val voice = SapiVoiceEngine(voiceBridge)

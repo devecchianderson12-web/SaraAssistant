@@ -64,6 +64,22 @@ class VoskModels(private val logger: SaraLogger) {
     private companion object { const val TAG = "VoskModels" }
 }
 
+/**
+ * Audio que el detector le pasa al reconocimiento cuando la orden vino pegada al nombre
+ * («Lucy, poné música» de corrido): así no se pierde lo dicho mientras Lucy se activaba.
+ */
+class SpeechHandoff {
+    private var chunks: List<ByteArray>? = null
+    private var at = 0L
+
+    @Synchronized fun put(audio: List<ByteArray>) {
+        chunks = audio
+        at = System.currentTimeMillis()
+    }
+
+    @Synchronized fun take(): List<ByteArray>? = chunks?.takeIf { System.currentTimeMillis() - at < 4_000 }.also { chunks = null }
+}
+
 private const val MISSING_MODEL = "Falta el modelo de voz. Volvé a descargar Lucy."
 
 private fun microphoneError() = EngineError(
@@ -82,6 +98,7 @@ class VoskWakeWordEngine(
     private val models: VoskModels,
     private val microphone: Microphone,
     private val logger: SaraLogger,
+    private val handoff: SpeechHandoff,
 ) : WakeWordEngine {
     override val id = "vosk-wake"
     override val displayName = "Vosk (local)"
@@ -96,14 +113,26 @@ class VoskWakeWordEngine(
         val energy = EnergyGate()
         val window = ArrayDeque<ByteArray>()
         val peaks = ArrayDeque<Int>()
+        val levels = ArrayDeque<Double>()
         var detected = false
+        // Después del nombre se escucha medio segundo más: si sigue hablando, la orden vino pegada.
+        var tail = -1
+        var loudTail = 0
         try {
             val outcome = microphone.capture { buffer, length ->
                 val raw = buffer.copyOf(length)
                 window.addLast(raw)
                 peaks.addLast(WakeWordTuning.peakOf(raw, length))
+                val rms = AudioLevelMeter.rmsOfPcm16(buffer, length)
+                levels.addLast(rms)
                 while (window.size > WINDOW_CHUNKS) window.removeFirst()
                 while (peaks.size > WINDOW_CHUNKS) peaks.removeFirst()
+                while (levels.size > WINDOW_CHUNKS) levels.removeFirst()
+                if (tail >= 0) {
+                    if (rms > maxOf(levels.min() * 2.2, 60.0)) loudTail++
+                    tail++
+                    return@capture tail < TAIL_CHUNKS
+                }
                 // Voz baja o lejana: se amplifica según el pico de los últimos 2,4 s.
                 val gain = WakeWordTuning.gainFor(peaks.max())
                 val decision = energy.feed(AudioLevelMeter.rmsOfPcm16(buffer, length))
@@ -122,15 +151,22 @@ class VoskWakeWordEngine(
                     gate.onPartial(JSONObject(recognizer.partialResult).optString("partial").split(' '))
                 }
                 if (candidate) {
-                    if (verify(model, window, config.sensitivity, config.requirePrefix)) detected = true
-                    else {
+                    if (verify(model, window, config.sensitivity, config.requirePrefix)) {
+                        detected = true
+                        tail = 0
+                    } else {
                         gate.rejected()
                         logger.d(TAG, "Candidato rechazado en la verificación")
                     }
                 }
-                !detected
+                true
             }
-            if (detected) return WakeWordResult.Detected(null)
+            if (detected) {
+                val inline = loudTail >= TAIL_LOUD
+                if (inline) handoff.put(window.toList().takeLast(HANDOFF_CHUNKS + tail))
+                logger.d(TAG, "Activación" + if (inline) " con la orden pegada" else "")
+                return WakeWordResult.Detected(null, commandStarted = inline)
+            }
             return when (outcome) {
                 is CaptureOutcome.Failed -> WakeWordResult.Failed(outcome.error)
                 is CaptureOutcome.Completed -> WakeWordResult.Failed(
@@ -183,6 +219,10 @@ class VoskWakeWordEngine(
         const val TAG = "VoskWake"
         const val WINDOW_CHUNKS = 24 // 2,4 s
         const val PREROLL_CHUNKS = 5
+        const val TAIL_CHUNKS = 5
+        const val TAIL_LOUD = 3
+        /** Audio previo a la activación que se pasa (incluye el nombre, que el intérprete ignora). */
+        const val HANDOFF_CHUNKS = 14
         fun list(words: List<String>) = words.joinToString(",", "[", "]") { "\"$it\"" }
         fun grammar() = list(listOf(WakeWordTuning.profile.keyword, "[unk]"))
         fun prefixedGrammar() = list(WakeWordTuning.PREFIXED_PHRASES + listOf(WakeWordTuning.profile.keyword, "[unk]"))
@@ -197,6 +237,7 @@ class VoskWakeWordEngine(
 class VoskSpeechRecognitionEngine(
     private val models: VoskModels,
     private val microphone: Microphone,
+    private val handoff: SpeechHandoff,
     private val refine: (suspend (ByteArray, String) -> String?)? = null,
 ) : SpeechRecognitionEngine {
     override val id = "vosk-offline"
@@ -215,6 +256,16 @@ class VoskSpeechRecognitionEngine(
         var heardSpeech = false
         var lastPartial = ""
         var lastChange = start
+        // La orden que vino pegada al nombre: se reconoce primero ese audio.
+        handoff.take()?.let { chunks ->
+            chunks.forEach {
+                audio.write(it)
+                recognizer.acceptWaveForm(it, it.size)
+            }
+            heardSpeech = true
+            lastPartial = JSONObject(recognizer.partialResult).optString("partial").trim()
+            if (lastPartial.isNotEmpty()) onPartial(lastPartial)
+        }
         try {
             val outcome = microphone.capture { buffer, length ->
                 val elapsed = System.currentTimeMillis() - start

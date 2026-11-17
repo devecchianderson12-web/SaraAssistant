@@ -4,6 +4,9 @@
 > llamadas, mapas, ajustes, listas y más), un planificador con IA y conversación continua. La
 > documentación actualizada de arquitectura, permisos, limitaciones y pruebas está en
 > [docs/SARA.md](docs/SARA.md).
+>
+> **Windows:** en cada release, al lado del APK, está `Lucy-Windows-*.exe`: la misma asistente
+> (mismo cerebro) para la computadora, portable y sin administrador. Ver [docs/LUCY.md](docs/LUCY.md).
 
 
 Asistente de voz para Android, nativo en Kotlin + Jetpack Compose. Se activa diciendo **«Sara»** o tocando el círculo central, entiende órdenes en español (con preferencia rioplatense) y en la versión 1.0 controla **música** y **volumen**.

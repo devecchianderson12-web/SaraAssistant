@@ -14,5 +14,5 @@ object AssistantIdentity {
     @Volatile var capabilities: String = "Música, volumen, apps, WhatsApp y preguntas."
 
     /** Nombres con los que se la llama (las dos versiones), para quitarlos del principio de una orden. */
-    const val NAMES = "sara|sarah|zara|zarah|lucy|luci|lusi|lucie"
+    const val NAMES = "sara|sarah|zara|zarah|lucy|luci|lusi|lucie|luchi"
 }

@@ -100,6 +100,23 @@ class AssistantOrchestratorTest {
     }
 
     @Test
+    fun `orden pegada al nombre no pregunta y la ejecuta directo`() = runTest {
+        val wake = FakeWakeWord()
+        val offline = FakeRecognizer("vosk", false).willReturn("luci poné música")
+        val voice = FakeVoice("tts", false)
+        val h = Harness(this, FakeEngineProvider(wake = wake, offline = offline, offlineVoiceEngine = voice), AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE))
+
+        h.orchestrator.setWakeWordEnabled(true)
+        runCurrent()
+        wake.trigger(com.sara.core.engine.WakeWordResult.Detected(null, commandStarted = true))
+        advanceUntilIdle()
+
+        assertEquals(listOf(MediaAction.PLAY to null), h.media.calls)
+        // Sin «Decime.»: sólo confirma.
+        assertEquals(listOf("Okey, voy."), voice.spoken)
+    }
+
+    @Test
     fun `activacion manual comparte el mismo flujo y libera el microfono de la deteccion`() = runTest {
         val wake = FakeWakeWord()
         val offline = FakeRecognizer("vosk", false).willReturn("subí el volumen al 50%")

@@ -122,6 +122,8 @@ class AssistantOrchestrator(
     @Volatile private var wakeWordEnabled = false
     private var wakeJob: Job? = null
     private var interactionJob: Job? = null
+    /** La orden vino pegada al nombre: no se pregunta «¿Sí?». */
+    @Volatile private var inlineCommand = false
 
     val isWakeWordEnabled: Boolean get() = wakeWordEnabled
     val isInteractionActive: Boolean get() = synchronized(lock) { interactionJob?.isActive == true }
@@ -237,7 +239,10 @@ class AssistantOrchestrator(
                         val self = currentCoroutineContext()[Job]
                         synchronized(lock) {
                             if (wakeJob === self) wakeJob = null
-                            if (interactionJob?.isActive != true) launchInteractionLocked(Trigger.WAKE_WORD, null)
+                            if (interactionJob?.isActive != true) {
+                                inlineCommand = result.commandStarted
+                                launchInteractionLocked(Trigger.WAKE_WORD, null)
+                            }
                         }
                         return@launch
                     }
@@ -283,7 +288,10 @@ class AssistantOrchestrator(
         feedback.interactionStarted()
         _events.emit(AssistantEvent.Activated(trigger))
 
+        val inline = trigger == Trigger.WAKE_WORD && inlineCommand
+        inlineCommand = false
         when {
+            inline -> Unit
             trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE -> speak(responses.listening(), cfg, cacheable = true)
             trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE_AND_CHIME -> {
                 feedback.chime()

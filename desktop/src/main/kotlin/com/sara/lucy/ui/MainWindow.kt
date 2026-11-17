@@ -156,7 +156,7 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
     /** Texto largo en varias líneas, centrado. */
     private fun JLabel.setWrapped(text: String) {
         val clean = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        this.text = if (clean.isBlank()) "" else "<html><div style='text-align:center;width:380px'>$clean</div></html>"
+        this.text = if (clean.isBlank()) "" else "<html><body style='width:380px'><p align='center'>$clean</p></body></html>"
     }
 
     fun showWindow() = SwingUtilities.invokeLater {
