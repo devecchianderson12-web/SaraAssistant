@@ -466,6 +466,38 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
 
     private val btAdapter get() = runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter }.getOrNull()
     private fun btEnabled(): Boolean? = runCatching { btAdapter?.isEnabled }.getOrNull()
+
+    /** Prendido o prendiéndose (mientras se prende, el interruptor aparece apagado: no hay que tocarlo). */
+    private fun btOnOrTurningOn(): Boolean = runCatching {
+        btAdapter?.state in setOf(android.bluetooth.BluetoothAdapter.STATE_ON, android.bluetooth.BluetoothAdapter.STATE_TURNING_ON)
+    }.getOrDefault(false)
+
+    /** Nombres de los dispositivos de audio conectados ahora (null si falta el permiso). */
+    @Suppress("MissingPermission")
+    private suspend fun connectedAudioNames(): Set<String>? {
+        if (!btPermission()) return null
+        val adapter = btAdapter ?: return null
+        val names = mutableSetOf<String>()
+        for (profile in listOf(android.bluetooth.BluetoothProfile.A2DP, android.bluetooth.BluetoothProfile.HEADSET)) {
+            val proxy = withTimeoutOrNull(1_500) {
+                suspendCancellableCoroutine<android.bluetooth.BluetoothProfile?> { cont ->
+                    val ok = runCatching {
+                        adapter.getProfileProxy(context, object : android.bluetooth.BluetoothProfile.ServiceListener {
+                            override fun onServiceConnected(p: Int, proxy: android.bluetooth.BluetoothProfile) { if (cont.isActive) cont.resume(proxy) }
+                            override fun onServiceDisconnected(p: Int) = Unit
+                        }, profile)
+                    }.getOrDefault(false)
+                    if (!ok && cont.isActive) cont.resume(null)
+                }
+            } ?: continue
+            runCatching { proxy.connectedDevices.mapNotNullTo(names) { it.name } }
+            runCatching { adapter.closeProfileProxy(profile, proxy) }
+        }
+        return names
+    }
+
+    private suspend fun isConnectedTo(name: String): Boolean? =
+        connectedAudioNames()?.let { names -> AppMatcher.best(name, names.map { InstalledApp(it, it) }) != null }
     private fun btPermission() = Build.VERSION.SDK_INT < 31 || granted(context, Manifest.permission.BLUETOOTH_CONNECT)
 
     /** ¿Hay un dispositivo de audio Bluetooth conectado? (null si no se puede saber). */
@@ -495,33 +527,52 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
                 audioConnected() == true -> SkillResult.Done("El Bluetooth está prendido y hay un dispositivo conectado.")
                 else -> SkillResult.Done("El Bluetooth está prendido.")
             }
-            "prender" -> if (enabled == true) SkillResult.Done("El Bluetooth ya está prendido.") else autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", true) { btEnabled() == true }
+            "prender" -> when {
+                enabled == true -> SkillResult.Done("El Bluetooth ya está prendido.")
+                btOnOrTurningOn() -> if (waitUntil(8_000) { btEnabled() == true }) SkillResult.Done("Bluetooth prendido.") else SkillResult.Failed("No terminó de prenderse.")
+                else -> autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", true) { btEnabled() == true }
+            }
             "apagar" -> if (enabled == false) SkillResult.Done("El Bluetooth ya está apagado.") else autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", false) { btEnabled() == true }
             else -> connect(device?.takeIf { it.isNotBlank() } ?: return SkillResult.Failed("¿A qué dispositivo me conecto?"))
         }
     }
 
-    /** Conectarse a un dispositivo vinculado: prende el Bluetooth si hace falta y toca su nombre en Ajustes. */
+    /**
+     * Conectarse a un dispositivo vinculado:
+     * 1. Si ya está conectado, no toca nada.
+     * 2. Si el Bluetooth está apagado, toca el interruptor UNA vez y espera a que termine de prenderse.
+     * 3. Muchos auriculares se reconectan solos: se espera unos segundos antes de tocar.
+     * 4. Recién si no se conectó, toca su nombre (nunca el interruptor ni otras filas).
+     */
     private suspend fun connect(device: String): SkillResult {
         if (!com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) {
             return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para conectarme sola necesito Accesibilidad. Te dejé el botón.")
         }
-        val name = bondedName(device) ?: device
+        val clean = device.replace(Regex("(?i)\\b(bluetooth|blutu|los|las|el|la|mis|mi|de)\\b"), " ").replace(Regex("\\s+"), " ").trim().ifBlank { device }
+        val name = bondedName(clean) ?: clean
+        if (btEnabled() == true && isConnectedTo(name) == true) return SkillResult.Done("Ya estás conectado a $name.")
         val wasConnected = audioConnected()
         val opened = open(starter, Intent(Settings.ACTION_BLUETOOTH_SETTINGS), "Bluetooth", "", "Tocá la notificación para abrir el Bluetooth.")
         if (opened !is SkillResult.Partial || opened.message.isNotEmpty()) return opened
-        if (btEnabled() != true) {
+        fun connectedNow(): Boolean = audioConnected() == true && wasConnected != true
+        if (!btOnOrTurningOn()) {
             com.sara.assistant.apps.SaraAccessibilityService.setScreenSwitch(context, true)
-            if (!waitUntil(5_000) { btEnabled() == true }) return SkillResult.Failed("No pude prender el Bluetooth.")
-            delay(1_500) // la lista de dispositivos tarda en aparecer
+        }
+        if (!waitUntil(8_000) { btEnabled() == true }) {
+            com.sara.assistant.apps.SaraAccessibilityService.back(context)
+            return SkillResult.Failed("No pude prender el Bluetooth.")
+        }
+        // Reconexión automática (sin tocar nada).
+        if (waitUntil(6_000) { connectedNow() } || isConnectedTo(name) == true) {
+            com.sara.assistant.apps.SaraAccessibilityService.back(context)
+            return SkillResult.Done("Conectado a $name.")
         }
         val tapped = com.sara.assistant.apps.SaraAccessibilityService.tapOnScreen(context, name)
-            ?: return SkillResult.Failed("No encontré «$device» entre tus dispositivos vinculados.").also {
+            ?: return SkillResult.Failed("No encontré «$name» entre tus dispositivos vinculados.").also {
                 com.sara.assistant.apps.SaraAccessibilityService.back(context)
             }
-        // Verificación: se conecta un dispositivo de audio.
-        waitUntil(9_000) { audioConnected() == true && wasConnected != true }
-        val connected = audioConnected()
+        waitUntil(10_000) { connectedNow() }
+        val connected = isConnectedTo(name) ?: audioConnected()
         com.sara.assistant.apps.SaraAccessibilityService.back(context)
         return when {
             connected == true -> SkillResult.Done("Conectado a $tapped.")

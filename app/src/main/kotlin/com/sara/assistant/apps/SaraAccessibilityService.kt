@@ -151,6 +151,8 @@ class SaraAccessibilityService : AccessibilityService() {
                 n.isCheckable && n.isVisibleToUser && n.className?.toString()?.let { "Switch" in it || "Toggle" in it || "CheckBox" in it } == true
             } ?: return@repeat
             if (sw.isChecked == on) return@withContext true
+            // Mientras cambia de estado el interruptor queda deshabilitado: no tocarlo (lo revertiría).
+            if (!sw.isEnabled) return@repeat
             if (tap(sw)) {
                 delay(700)
                 return@withContext true
@@ -164,9 +166,13 @@ class SaraAccessibilityService : AccessibilityService() {
     private suspend fun tapLabel(name: String): String? = withContext(Dispatchers.Main) {
         repeat(4) { round ->
             delay(if (round == 0) 900 else 500)
-            val texts = activeNodes().filter { !it.text.isNullOrBlank() && it.isVisibleToUser }
+            // Sólo nombres de dispositivos: nunca el interruptor ni las filas fijas de la pantalla.
+            val texts = activeNodes().filter { n ->
+                !n.text.isNullOrBlank() && n.isVisibleToUser && !n.isCheckable &&
+                    n.text.toString().trim().lowercase() !in FIXED_LABELS
+            }
             val candidates = texts.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) }
-            val best = com.sara.core.apps.AppMatcher.best(name, candidates)
+            val best = com.sara.core.apps.AppMatcher.best(name, candidates, threshold = 0.7)
             if (best != null && tap(texts[best.id.toInt()])) return@withContext best.label
             activeNodes().firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
         }
@@ -362,6 +368,11 @@ class SaraAccessibilityService : AccessibilityService() {
             return instance
         }
 
+        private val FIXED_LABELS = setOf(
+            "bluetooth", "wi-fi", "wifi", "nombre del dispositivo", "configuración adicional", "configuracion adicional",
+            "dispositivos disponibles", "dispositivos vinculados", "vincular nuevo dispositivo", "device name", "paired devices",
+            "available devices", "pair new device", "usar bluetooth", "use bluetooth", "usar wi-fi", "use wi-fi",
+        )
         private val CHAT_NAME_IDS = listOf("conversations_row_contact_name", "contact_name", "conversation_contact_name")
         private val ARCHIVED_WORDS = listOf("Archivados", "Archivadas", "Archived")
         private val ARCHIVED = Regex("archivad[oa]s?(\\s*\\(\\d+\\))?|archived(\\s*\\(\\d+\\))?|\\d+\\s+archivad[oa]s?")
