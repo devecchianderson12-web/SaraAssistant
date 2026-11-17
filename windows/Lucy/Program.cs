@@ -52,18 +52,33 @@ public static class Program
             }
         }
         else failures.Add("modelo");
-        // ¿Qué formas de «Lucy» conoce el modelo? (las demás se ignoran en la gramática)
-        try
+        // Prueba de oído: Windows dice frases con «Lucy» y se ve qué entiende el modelo.
+        if (modelOk)
         {
-            var words = Directory.GetFiles(ModelStore.Folder, "words.txt", SearchOption.AllDirectories).FirstOrDefault();
-            if (words != null)
+            try
             {
-                var vocab = File.ReadLines(words).Select(l => l.Split(' ')[0]).ToHashSet();
-                log.AppendLine("Vocabulario: " + string.Join(", ", Interpreter.WakeAliases.Concat(new[] { "luz", "si", "lucía" }).Select(w => w + (vocab.Contains(w) ? " sí" : " no"))));
+                using var model = new Vosk.Model(ModelStore.Folder);
+                foreach (var phrase in new[] { "Lucy", "Lucy, pone musica", "hola Lucy", "pone musica de Soda Stereo" })
+                {
+                    var wav = Path.Combine(Path.GetTempPath(), "lucy-test.wav");
+                    using (var synth = new System.Speech.Synthesis.SpeechSynthesizer())
+                    {
+                        synth.SetOutputToWaveFile(wav, new System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, System.Speech.AudioFormat.AudioBitsPerSample.Sixteen, System.Speech.AudioFormat.AudioChannel.Mono));
+                        synth.Speak(phrase);
+                    }
+                    var pcm = File.ReadAllBytes(wav).Skip(44).ToArray();
+                    using var free = new Vosk.VoskRecognizer(model, 16000);
+                    free.AcceptWaveform(pcm, pcm.Length);
+                    var grammar = System.Text.Json.JsonSerializer.Serialize(Interpreter.WakeAliases.Concat(new[] { "luz si", "[unk]" }).ToArray());
+                    using var gr = new Vosk.VoskRecognizer(model, 16000, grammar);
+                    gr.AcceptWaveform(pcm, pcm.Length);
+                    var f = free.FinalResult().Replace("\n", " ");
+                    var g = gr.FinalResult().Replace("\n", " ");
+                    log.AppendLine($"Oído «{phrase}»: libre={f} | gramática={g} | activa={Interpreter.ContainsWakeWord(System.Text.Json.JsonDocument.Parse(f).RootElement.GetProperty("text").GetString() ?? "")}");
+                }
             }
-            else log.AppendLine("Vocabulario: sin words.txt (" + string.Join(", ", Directory.GetFiles(ModelStore.Folder, "*", SearchOption.AllDirectories).Select(Path.GetFileName)) + ")");
+            catch (Exception e) { log.AppendLine("Oído: " + e.Message); }
         }
-        catch (Exception e) { log.AppendLine("Vocabulario: " + e.Message); }
         try { log.AppendLine("Voz: " + new Speaker().VoiceName); } catch (Exception e) { log.AppendLine("Voz: " + e.Message); }
         try { log.AppendLine("Volumen: " + new Media().VolumePercent + " %"); } catch (Exception e) { log.AppendLine("Volumen: sin dispositivo (" + e.GetType().Name + ")"); }
         File.WriteAllText("selftest.txt", log + (failures.Count == 0 ? "RESULTADO: OK" : "RESULTADO: FALLÓ " + string.Join("; ", failures)));
