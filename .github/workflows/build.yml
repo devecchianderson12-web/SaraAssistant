@@ -148,9 +148,48 @@ jobs:
             esfera.png
           if-no-files-found: ignore
 
+  windows:
+    name: Lucy para Windows (.exe)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # El modelo de voz en español va dentro del .exe (funciona sin Internet desde el primer uso).
+      - name: Descargar modelo de voz (Vosk, español)
+        shell: pwsh
+        run: Invoke-WebRequest https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip -OutFile windows/Lucy/model.zip
+
+      - name: Compilar Lucy.exe (portable, un solo archivo)
+        run: dotnet publish windows/Lucy/Lucy.csproj -c Release -o out
+
+      - name: Autoprueba (reglas, modelo, Vosk, voz)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath out/Lucy.exe -ArgumentList "--selftest" -WorkingDirectory out -Wait -PassThru
+          Get-Content out/selftest.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Renombrar
+        shell: pwsh
+        run: Copy-Item out/Lucy.exe "Lucy-Windows-v1.0.${{ github.run_number }}.exe"
+
+      - name: Publicar .exe como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lucy-Windows-exe
+          path: Lucy-Windows-*.exe
+          if-no-files-found: error
+
   release:
     name: Actualizar release
-    needs: [build, arranque]
+    needs: [build, arranque, windows]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -161,6 +200,11 @@ jobs:
         with:
           name: SaraAssistant-debug-apk
 
+      - name: Descargar Lucy para Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: Lucy-Windows-exe
+
       - name: Crear release SaraAssistantV${{ github.run_number }}
         uses: softprops/action-gh-release@v2
         with:
@@ -168,7 +212,9 @@ jobs:
           name: SaraAssistantV${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: SaraAssistant-*.apk
+          files: |
+            SaraAssistant-*.apk
+            Lucy-Windows-*.exe
           body: |
             ${{ github.event.head_commit.message }}
 
