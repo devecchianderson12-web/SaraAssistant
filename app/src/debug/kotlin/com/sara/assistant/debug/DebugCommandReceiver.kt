@@ -12,6 +12,11 @@ import com.sara.assistant.container
  */
 class DebugCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // «--ez listen true»: activa la escucha como si la hubieran llamado (para ver la esfera).
+        if (intent.getBooleanExtra("listen", false)) {
+            resultData = if (context.container.orchestrator.activate(com.sara.core.model.Trigger.MANUAL)) "OK" else "OCUPADA"
+            return
+        }
         val text = intent.getStringExtra("text") ?: return
         val accepted = context.container.orchestrator.submitText(text)
         resultData = if (accepted) "OK" else "OCUPADA"
