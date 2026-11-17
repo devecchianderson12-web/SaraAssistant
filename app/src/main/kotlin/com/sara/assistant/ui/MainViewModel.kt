@@ -36,6 +36,8 @@ data class SystemStatus(
     val porcupineKeyword: Boolean = false,
     val porcupineModel: Boolean = false,
     val canOpenAppsFromBackground: Boolean = false,
+    /** App de música que Sara usa por defecto (la que más usa el usuario). */
+    val musicApp: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -219,6 +221,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             porcupineKeyword = c.porcupineFiles.keyword.isFile,
             porcupineModel = c.porcupineFiles.model.isFile,
             canOpenAppsFromBackground = android.provider.Settings.canDrawOverlays(getApplication()),
+            musicApp = runCatching { c.mediaControl.preferredMusicApp()?.label }.getOrNull(),
         )
     }
 }

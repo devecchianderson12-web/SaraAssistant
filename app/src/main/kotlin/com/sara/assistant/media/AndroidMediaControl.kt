@@ -17,6 +17,8 @@ import android.provider.MediaStore
 import android.service.notification.NotificationListenerService
 import android.view.KeyEvent
 import androidx.core.app.NotificationManagerCompat
+import com.sara.core.apps.InstalledApp
+import com.sara.core.apps.MusicUsage
 import com.sara.core.execution.MediaAction
 import com.sara.core.execution.MediaActionResult
 import com.sara.core.execution.MediaControl
@@ -30,7 +32,12 @@ import kotlinx.coroutines.withContext
  * es el mecanismo oficial que habilita [MediaSessionManager.getActiveSessions] para leer y
  * controlar las sesiones multimedia de otras apps. Sara no lee ni guarda notificaciones.
  */
-class SaraNotificationListener : NotificationListenerService()
+class SaraNotificationListener : NotificationListenerService() {
+    override fun onListenerConnected() {
+        // Recién concedido el acceso: empezar a aprender qué app de música se usa más.
+        com.sara.assistant.SaraApp.containerOrNull(applicationContext)?.musicUsage?.start()
+    }
+}
 
 /**
  * Control de reproducción mediante MediaSession/MediaController.
@@ -42,6 +49,7 @@ class AndroidMediaControl(
     private val context: Context,
     private val starter: ActivityStarter,
     private val apps: AndroidAppLauncher,
+    private val usage: MusicUsageTracker,
     private val logger: SaraLogger,
 ) : MediaControl {
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -58,12 +66,32 @@ class AndroidMediaControl(
     }
 
     /**
+     * App de música habitual: la que más reprodujo en los últimos días; si todavía no hay datos,
+     * la última que tuvo sesión multimedia o, si no, una app de música conocida instalada.
+     */
+    suspend fun preferredMusicApp(): InstalledApp? {
+        val installed = apps.installedApps().associateBy { it.id }
+        usage.favorite { it in installed }?.let { return installed[it] }
+        val recent = withContext(Dispatchers.Main) { activeControllers()?.map { it.packageName } }.orEmpty()
+        recent.firstNotNullOfOrNull { installed[it] }?.let { return it }
+        return MusicUsage.KNOWN_MUSIC_APPS.firstNotNullOfOrNull { installed[it] }
+    }
+
+    /**
      * «Buscá X», «poné X en Spotify»: primero por la sesión multimedia (funciona en segundo plano);
-     * si no, abriendo la búsqueda de la app pedida.
+     * si no, abriendo la búsqueda de la app. Sin app pedida: la que está sonando o, si no suena
+     * nada, la que el usuario usa más.
      */
     private suspend fun playSearch(query: String?, appName: String?): MediaActionResult {
-        val target = appName?.let { apps.find(it) }
-        if (appName != null && target == null) return MediaActionResult.Failed("No encontré la app $appName.")
+        val playingApp = if (appName == null) {
+            withContext(Dispatchers.Main) { activeControllers()?.firstOrNull { it.isPlaying() }?.packageName }
+        } else null
+        val target = when {
+            appName != null -> apps.find(appName) ?: return MediaActionResult.Failed("No encontré la app $appName.")
+            playingApp != null -> apps.installedApps().firstOrNull { it.id == playingApp }
+            else -> preferredMusicApp()
+        }
+        logger.d(TAG, "Buscar «$query» en ${target?.label ?: "cualquier app"}")
         val result = withContext(Dispatchers.Main) {
             val session = activeControllers()?.firstOrNull { target == null || it.packageName == target.id }
             if (session != null && query != null && session.supports(PlaybackState.ACTION_PLAY_FROM_SEARCH)) {
@@ -165,8 +193,26 @@ class AndroidMediaControl(
         }
     }
 
-    /** No hay sesiones: se intenta reanudar el último reproductor y, si Sara está visible, abrir una app de música. */
+    /**
+     * No hay ningún reproductor abierto: le pide a la app habitual que ponga música (o la abre).
+     * Como último recurso, la tecla «play» al último reproductor.
+     */
     private suspend fun startFromNothing(): MediaActionResult {
+        val preferred = preferredMusicApp()
+        if (preferred != null) {
+            val pm = context.packageManager
+            val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                .putExtra(SearchManager.QUERY, "").setPackage(preferred.id)
+                .takeIf { it.resolveActivity(pm) != null }
+                ?: pm.getLaunchIntentForPackage(preferred.id)
+            if (intent != null) {
+                return when (starter.start(intent, preferred.label)) {
+                    is StartOutcome.Started -> MediaActionResult.Done(preferred.label)
+                    StartOutcome.NeedsTap -> MediaActionResult.NeedsTap(preferred.label)
+                    is StartOutcome.Failed -> MediaActionResult.Failed("No pude abrir ${preferred.label}.")
+                }
+            }
+        }
         dispatchKey(KeyEvent.KEYCODE_MEDIA_PLAY)
         repeat(10) {
             delay(150)

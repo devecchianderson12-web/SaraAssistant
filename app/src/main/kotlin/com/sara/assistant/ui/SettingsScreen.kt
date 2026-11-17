@@ -212,6 +212,11 @@ fun SettingsScreen(
                 permissions?.notificationListener == true, "Abrir",
                 actions.openNotificationAccess,
             )
+            StatusLine(
+                "App de música",
+                system.musicApp?.let { "$it · la que más usás, se ajusta sola" } ?: "Todavía aprendiendo cuál usás más",
+                system.musicApp != null,
+            )
             StatusLine("Palabra de activación", "Se procesa 100 % en el teléfono", true)
             StatusLine(
                 "Audio online",

@@ -75,7 +75,8 @@ class AppContainer(private val app: Application) {
 
     val activityStarter = com.sara.assistant.apps.ActivityStarter(app, ::isAppInForeground)
     val appLauncher = com.sara.assistant.apps.AndroidAppLauncher(app, activityStarter, logger)
-    val mediaControl = AndroidMediaControl(app, activityStarter, appLauncher, logger)
+    val musicUsage = com.sara.assistant.media.MusicUsageTracker(app, logger)
+    val mediaControl = AndroidMediaControl(app, activityStarter, appLauncher, musicUsage, logger)
     val updates = com.sara.assistant.update.UpdateManager(app, logger)
 
     // Motores (instancias reutilizables; la selección depende de los ajustes vigentes).
@@ -131,6 +132,7 @@ class AppContainer(private val app: Application) {
 
     init {
         scope.launch { history.load() }
+        if (mediaControl.hasNotificationAccess()) musicUsage.start()
     }
 
     fun SaraSettings.toAssistantConfig() = AssistantConfig(
@@ -170,6 +172,11 @@ val Context.container: AppContainer get() = (applicationContext as SaraApp).cont
 class SaraApp : Application() {
     lateinit var container: AppContainer
         private set
+
+    companion object {
+        fun containerOrNull(context: Context): AppContainer? =
+            (context.applicationContext as? SaraApp)?.takeIf { it::container.isInitialized }?.container
+    }
 
     override fun onCreate() {
         super.onCreate()
