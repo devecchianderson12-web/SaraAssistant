@@ -474,6 +474,7 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun recall(items: List<String>) = "Recuerdo que " + items.joinToString("; ") + "."
     fun needsAi() = "Para preguntas cargá la clave de Google. Te dejé el botón."
     fun whatToSay() = "¿Qué le digo?"
+    fun tookTooLong() = "Tardé demasiado, probá de nuevo."
     fun aiFailed() = "No pude responder ahora."
     fun confirmMessage(name: String, message: String) = "¿Le mando «$message» a $name?"
     fun messageNotSent() = "Listo, no lo mando."

@@ -31,6 +31,7 @@ class GeminiAssistant(
     /** Modelo que respondió bien la última vez (si el alias deja de existir, se elige otro de la lista). */
     @Volatile private var model = DEFAULT_MODEL
     @Volatile private var useSearch = true
+    @Volatile private var useThinkingLevel = true
 
     override fun isAvailable(): Boolean = secrets.has(SecretStore.GEMINI_KEY)
 
@@ -67,8 +68,12 @@ class GeminiAssistant(
                 e.code == 429 -> "Llegué al límite gratis, probá en un rato."
                 else -> "No pude responder ahora."
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            reset()
+            "Google tardó demasiado, probá de nuevo."
         } catch (e: IOException) {
             reset()
+            logger.w(TAG, "Sin conexión con Google", e)
             "No tengo conexión."
         }
     }
@@ -111,7 +116,18 @@ class GeminiAssistant(
             .put("contents", contents)
         // Búsqueda de Google: respuestas con información actual.
         if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
-        return request("$BASE/models/$model:generateContent", key, body)
+        // Respuestas cortas y sin «pensar» de más: así contesta en un par de segundos.
+        val config = JSONObject().put("maxOutputTokens", 400)
+        if (useThinkingLevel) config.put("thinkingConfig", JSONObject().put("thinkingLevel", "minimal"))
+        body.put("generationConfig", config)
+        return try {
+            request("$BASE/models/$model:generateContent", key, body)
+        } catch (e: ApiError) {
+            // Modelos que no aceptan «thinkingLevel»: se reintenta sin esa opción y se recuerda.
+            if (e.code != 400 || !useThinkingLevel || !e.message.orEmpty().contains("thinking", ignoreCase = true)) throw e
+            useThinkingLevel = false
+            generate(key, model, contents, search)
+        }
     }
 
     /** Gemini Flash de la cuenta que aceptan generateContent: estables y más nuevos primero, después «lite». */
@@ -125,7 +141,8 @@ class GeminiAssistant(
                 "flash" in name && "generateContent" in methods && EXCLUDED.none { it in name }
             }
             .map { it.optString("name").removePrefix("models/") }
-            .sortedWith(compareBy<String> { "lite" in it }.thenByDescending { versionOf(it) })
+            // Los «lite» primero: son los más rápidos para respuestas de voz.
+            .sortedWith(compareBy<String> { "lite" !in it }.thenByDescending { versionOf(it) })
             .ifEmpty { FALLBACK_MODELS }
     }
 
@@ -137,8 +154,8 @@ class GeminiAssistant(
     private fun request(url: String, key: String, body: JSONObject?): JSONObject {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 45_000
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 20_000
             conn.setRequestProperty("x-goog-api-key", key)
             if (body != null) {
                 conn.requestMethod = "POST"
@@ -187,14 +204,14 @@ class GeminiAssistant(
     private companion object {
         const val TAG = "Gemini"
         const val BASE = "https://generativelanguage.googleapis.com/v1beta"
-        const val DEFAULT_MODEL = "gemini-flash-latest"
+        const val DEFAULT_MODEL = "gemini-flash-lite-latest"
         const val MAX_HISTORY = 20
         const val CONVERSATION_IDLE_MS = 5 * 60_000L
         val EXCLUDED = listOf("image", "tts", "audio", "live", "embedding", "thinking-exp", "8b", "computer")
         /** 429 (sin cuota para ese modelo o la búsqueda), 404 (modelo inexistente), 400 (herramienta no admitida). */
         val RETRYABLE = setOf(400, 404, 429)
         const val MAX_MODEL_TRIES = 4
-        val FALLBACK_MODELS = listOf("gemini-flash-latest", "gemini-flash-lite-latest")
+        val FALLBACK_MODELS = listOf("gemini-flash-lite-latest", "gemini-flash-latest")
         val SYSTEM_PROMPT = """
             Sos Sara, una asistente de voz en un teléfono Android. Hablás en español rioplatense, con voseo, cálida y con humor suave.
             Tus respuestas se leen en voz alta: respondé en una o dos oraciones cortas, sin listas, sin emojis, sin markdown, sin enlaces y sin citar fuentes. Si el usuario pide una explicación, podés extenderte un poco más.

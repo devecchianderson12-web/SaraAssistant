@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.min
 
 enum class Acknowledgement { VOICE, CHIME, VOICE_AND_CHIME, NONE }
@@ -356,7 +357,8 @@ class AssistantOrchestrator(
         if (intent !is CommandIntent.Unknown && intent !is CommandIntent.Cancel) {
             machine.moveTo(AssistantState.Executing(intent))
         }
-        var result = executor.execute(intent)
+        var result = withTimeoutOrNull(EXECUTION_TIMEOUT_MS) { executor.execute(intent) }
+            ?: ExecutionResult(false, responses.tookTooLong(), ErrorKind.EXECUTION_FAILED)
         // Preguntas de seguimiento: «¿Qué le digo?» y «¿Le mando a Mi Amor: …?».
         repeat(MAX_FOLLOW_UPS) {
             val followUp = result.followUp
@@ -367,7 +369,8 @@ class AssistantOrchestrator(
                     if (reply.isNullOrBlank()) ExecutionResult(false, responses.didNotHear(), ErrorKind.NO_SPEECH)
                     else {
                         machine.moveTo(AssistantState.Executing(intent))
-                        followUp.onAnswer(reply)
+                        withTimeoutOrNull(EXECUTION_TIMEOUT_MS) { followUp.onAnswer(reply) }
+                            ?: ExecutionResult(false, responses.tookTooLong(), ErrorKind.EXECUTION_FAILED)
                     }
                 }
                 confirmation != null -> {
@@ -375,7 +378,8 @@ class AssistantOrchestrator(
                     logger.d(TAG, "Confirmación: $accepted")
                     if (accepted == true) {
                         machine.moveTo(AssistantState.Executing(intent))
-                        confirmation.onConfirm()
+                        withTimeoutOrNull(EXECUTION_TIMEOUT_MS) { confirmation.onConfirm() }
+                            ?: ExecutionResult(false, responses.tookTooLong(), ErrorKind.EXECUTION_FAILED)
                     } else {
                         ExecutionResult(true, confirmation.declined)
                     }
@@ -451,6 +455,8 @@ class AssistantOrchestrator(
     private companion object {
         const val TAG = "Orchestrator"
         const val MAX_FOLLOW_UPS = 3
+        /** Ninguna orden puede dejar a Sara trabada: si tarda más, se corta y vuelve a escuchar. */
+        const val EXECUTION_TIMEOUT_MS = 40_000L
         val FATAL_WAKE_ERRORS = setOf(EngineErrorType.PERMISSION, EngineErrorType.NOT_AVAILABLE, EngineErrorType.CREDENTIALS)
     }
 }
