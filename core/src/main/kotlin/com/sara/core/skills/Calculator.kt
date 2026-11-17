@@ -20,6 +20,8 @@ object Calculator {
         t = t.replace(Regex("^.*?\\b(cuanto es|cuanto da|cuanto son|calcula(me)?|calcul[aá]|resolve(me)?|cuanto)\\b"), " ")
         // «por ciento» antes de convertir palabras (si no, «ciento» se leería como 100).
         t = t.replace(Regex("\\bpor\\s*ciento\\b"), " % ")
+        // Palabras de relleno: «cuánto es EL 35 % de 1000», «sara, …».
+        t = t.replace(Regex("(?<![a-z])(el|la|los|las|sara|lucy|luci|igual a|a ver)(?![a-z])"), " ")
         t = numberWords(t)
         // «15 % de 200» -> 15%200 (operador de porcentaje)
         t = t.replace(Regex("(\\d+(?:[.,]\\d+)?)\\s*%\\s*(?:de|del)\\s*"), "$1%")

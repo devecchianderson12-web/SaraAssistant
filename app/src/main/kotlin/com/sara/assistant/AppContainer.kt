@@ -246,6 +246,7 @@ class AppContainer(private val app: Application) {
         languageTag = language,
         endSilenceMillis = speechPauseMillis.toLong(),
         continuousConversation = continuousConversation,
+        quickResponse = quickResponse,
         wakeRequiresPrefix = heySara,
         onlineVoice = VoiceParams(onlineVoiceId, speechRate, voiceVolume, language),
         offlineVoice = VoiceParams(offlineVoiceId, speechRate, voiceVolume, language),

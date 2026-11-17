@@ -73,6 +73,8 @@ data class SaraSettings(
     val musicWhileListening: com.sara.assistant.audio.MusicWhileListening = com.sara.assistant.audio.MusicWhileListening.PAUSE_BLUETOOTH,
     /** Con Bluetooth conectado, entender las órdenes con Google aunque el modo sea Offline. */
     val onlineInCar: Boolean = false,
+    /** Respuesta rápida: ejecuta las órdenes completas sin esperar la pausa de fin de frase. */
+    val quickResponse: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -129,6 +131,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val voiceBoost = booleanPreferencesKey("voice_boost")
         val musicWhileListening = stringPreferencesKey("music_while_listening")
         val onlineInCar = booleanPreferencesKey("online_in_car")
+        val quickResponse = booleanPreferencesKey("quick_response")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -168,6 +171,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             voiceBoost = this[Keys.voiceBoost] ?: d.voiceBoost,
             musicWhileListening = this[Keys.musicWhileListening].toEnum(d.musicWhileListening),
             onlineInCar = this[Keys.onlineInCar] ?: d.onlineInCar,
+            quickResponse = this[Keys.quickResponse] ?: d.quickResponse,
         )
     }
 
@@ -203,5 +207,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.voiceBoost] = s.voiceBoost
         this[Keys.musicWhileListening] = s.musicWhileListening.name
         this[Keys.onlineInCar] = s.onlineInCar
+        this[Keys.quickResponse] = s.quickResponse
     }
 }

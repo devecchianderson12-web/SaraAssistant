@@ -34,6 +34,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import com.sara.core.assistant.Acknowledgement
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -97,6 +99,46 @@ class AssistantOrchestratorTest {
         )
         assertEquals(2, wake.starts) // volvió a escuchar "Sara"
         assertEquals("Poné música", h.history.single().heard)
+    }
+
+    @Test
+    fun `respuesta rapida ejecuta la orden completa sin esperar el fin de frase`() = runTest {
+        // Reconocedor que entiende «pasá la canción» y después se queda esperando la pausa larga.
+        val slow = object : com.sara.core.engine.SpeechRecognitionEngine {
+            override val id = "lento"
+            override val displayName = "lento"
+            override val isOnline = false
+            var cancelled = false
+            override suspend fun availability() = com.sara.core.engine.Availability.Available
+            override suspend fun recognize(request: com.sara.core.engine.RecognitionRequest, onPartial: (String) -> Unit): com.sara.core.engine.RecognitionResult {
+                onPartial("pasá la canción")
+                try {
+                    kotlinx.coroutines.delay(10_000)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    cancelled = true
+                    throw e
+                }
+                return com.sara.core.engine.RecognitionResult.Success("pasá la canción", null, id)
+            }
+        }
+        val voice = FakeVoice("tts", false)
+        val media = FakeMedia(MediaActionResult.Done("Música"))
+        val orchestrator = AssistantOrchestrator(
+            scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler)),
+            engines = FakeEngineProvider(offline = slow, offlineVoiceEngine = voice),
+            interpreter = RuleBasedCommandInterpreter(),
+            executor = DefaultCommandExecutor(media, FakeVolume(VolumeState(6, 0, 15)), ResponseCatalog(Random(0))),
+            connectivity = FakeConnectivity(true),
+            configProvider = { AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE, quickResponse = true, acknowledgement = Acknowledgement.NONE) },
+            responses = ResponseCatalog(Random(0)),
+            clock = { testScheduler.currentTime },
+        )
+        orchestrator.activate()
+        advanceTimeBy(1_500)
+        runCurrent()
+        // Ya pasó de canción antes de los 10 s que tardaba en dar la frase por terminada.
+        assertEquals(listOf(MediaAction.NEXT to null), media.calls)
+        assertTrue(slow.cancelled)
     }
 
     @Test

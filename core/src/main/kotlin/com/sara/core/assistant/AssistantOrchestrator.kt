@@ -32,6 +32,9 @@ import com.sara.core.state.AssistantStateMachine
 import com.sara.core.util.SaraLogger
 import com.sara.core.util.WakeWordTuning
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -71,6 +74,8 @@ data class AssistantConfig(
     /** Palabra de activación «Ey Sara» (true) o «Sara» sola (false). */
     val wakeRequiresPrefix: Boolean = true,
     val followUpSilenceMillis: Long = 5_000,
+    /** Respuesta rápida: ejecuta las órdenes completas sin esperar la pausa larga de fin de frase. */
+    val quickResponse: Boolean = false,
 )
 
 /** Señales no verbales y manejo de foco de audio, implementadas por la plataforma. */
@@ -358,13 +363,77 @@ class AssistantOrchestrator(
         }
     }
 
-    private suspend fun listen(cfg: AssistantConfig): RecognitionResult = recognitionRouter.recognize(
+    /**
+     * Escucha la orden. En «respuesta rápida», si lo que va entendiendo ya es una orden completa y
+     * dejaste de hablar un instante («pasá la canción», «subí el volumen», «cuánto es 35 % de 1000»),
+     * no espera la pausa larga de fin de frase: corta y la ejecuta enseguida.
+     */
+    private suspend fun listen(cfg: AssistantConfig): RecognitionResult {
+        if (!cfg.quickResponse) return listenFully(cfg) {}
+        val latest = java.util.concurrent.atomic.AtomicReference("" to 0L)
+        return coroutineScope {
+            val full = async { listenFully(cfg) { partial -> latest.set(partial to clock()) } }
+            val early = async {
+                // Lo que ya se analizó y cuánto silencio necesita (se calcula una vez por texto).
+                var checked = ""
+                var wait = Long.MAX_VALUE
+                while (isActive) {
+                    delay(QUICK_POLL_MS)
+                    val (partial, at) = latest.get()
+                    if (partial.isBlank()) continue
+                    val stable = clock() - at
+                    if (stable < QUICK_MIN_STABLE_MS) continue
+                    if (partial != checked) {
+                        checked = partial
+                        wait = quickWait(partial)
+                    }
+                    if (stable >= wait) {
+                        logger.d(TAG, "Respuesta rápida: «$partial»")
+                        return@async RecognitionResult.Success(partial, null, "rapida")
+                    }
+                }
+                null
+            }
+            val result = select<RecognitionResult?> {
+                full.onAwait { it }
+                early.onAwait { it }
+            } ?: full.await()
+            full.cancel()
+            early.cancel()
+            result
+        }
+    }
+
+    /** Cuánto silencio alcanza para dar por terminada esta orden (o «nunca» si no está completa). */
+    private suspend fun quickWait(partial: String): Long {
+        val intent = runCatching { interpreter.interpret(partial).intent }.getOrNull() ?: return Long.MAX_VALUE
+        return when (intent) {
+            CommandIntent.Pause, CommandIntent.Resume, CommandIntent.Next, CommandIntent.Previous,
+            CommandIntent.StopMusic, CommandIntent.CloseBackgroundApps, CommandIntent.Cancel -> 350L
+            is CommandIntent.AdjustVolume -> if (partial.trimEnd().last().isDigit()) 650L else 350L
+            // Una cuenta: si termina en número puede que siga («de 10…» → «de 1000»).
+            is CommandIntent.Skill -> when {
+                intent.skill == "calculadora" -> if (partial.trimEnd().last().isDigit()) 650L else 400L
+                intent.args.values.any { it.isBlank() } -> Long.MAX_VALUE
+                else -> 700L
+            }
+            is CommandIntent.OpenApp -> 600L
+            // «Poné música» puede seguir («…de Queen»); con tema, el tema puede ser largo.
+            is CommandIntent.PlayMusic -> if (intent.query == null) 600L else 800L
+            else -> Long.MAX_VALUE
+        }
+    }
+
+    private suspend fun listenFully(cfg: AssistantConfig, onPartial: (String) -> Unit): RecognitionResult = recognitionRouter.recognize(
         mode = cfg.recognitionMode,
         online = engines.onlineRecognizer(),
         offline = engines.offlineRecognizer(),
         request = RecognitionRequest(cfg.languageTag, cfg.maxSpeechMillis, cfg.noSpeechTimeoutMillis, cfg.endSilenceMillis),
         allowOfflineFallback = cfg.allowRecognitionFallback,
-        onPartial = { partial -> machine.moveTo(AssistantState.Listening(partial)) },
+        onPartial = { partial ->
+            machine.moveTo(AssistantState.Listening(partial))
+            onPartial(partial)
+        },
         onSwitch = { notice ->
             _events.emit(AssistantEvent.Notice(notice.message))
             if (notice.requiresRepeat) {
@@ -498,6 +567,9 @@ class AssistantOrchestrator(
 
     private companion object {
         const val TAG = "Orchestrator"
+        const val QUICK_POLL_MS = 100L
+        /** Silencio mínimo antes de mirar si la orden está completa. */
+        const val QUICK_MIN_STABLE_MS = 300L
         const val MAX_FOLLOW_UPS = 3
         const val MAX_CONVERSATION_TURNS = 6
         /** Ninguna orden puede dejar a Sara trabada: si tarda más, se corta y vuelve a escuchar. */

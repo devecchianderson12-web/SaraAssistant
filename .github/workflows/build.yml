@@ -109,20 +109,20 @@ jobs:
             sleep 5
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'agregá pan a la lista de compras'" || true
             sleep 5
-            SIZE=$(adb shell wm size | tail -1 | grep -o '[0-9]*x[0-9]*'); W=${SIZE%x*}; H=${SIZE#*x}
-            adb shell input tap $((W/2)) $((H*94/100)) || true
+            adb shell input tap 160 601 || true
             sleep 3
-            # Pestaña Ajustes (abajo a la derecha) y recorrido.
-            adb shell input tap $((W*85/100)) $((H*94/100)) || true
+            # Pestaña Ajustes (abajo a la derecha) y recorrido. Cada línea corre aparte: coordenadas fijas
+            # de esta pantalla de emulador (320x640).
+            adb shell input tap 272 601 || true
             sleep 3
             adb exec-out screencap -p > ajustes1.png || true
-            adb shell input swipe $((W/2)) $((H*75/100)) $((W/2)) $((H*20/100)) 400 || true
+            adb shell input swipe 160 480 160 130 400 || true
             sleep 2
             adb exec-out screencap -p > ajustes2.png || true
-            adb shell input swipe $((W/2)) $((H*75/100)) $((W/2)) $((H*20/100)) 400 || true
+            adb shell input swipe 160 480 160 130 400 || true
             sleep 3
             adb exec-out screencap -p > ajustes3.png || true
-            for n in 4 5 6; do adb shell input swipe $((W/2)) $((H*75/100)) $((W/2)) $((H*20/100)) 400 || true; sleep 2; adb exec-out screencap -p > ajustes$n.png || true; done
+            for n in 4 5 6; do adb shell input swipe 160 480 160 130 400; sleep 2; adb exec-out screencap -p > ajustes$n.png; done || true
             # Esfera sobre otra pantalla: se va al inicio y se llama a Sara.
             adb shell appops set com.sara.assistant SYSTEM_ALERT_WINDOW allow || true
             adb shell input keyevent KEYCODE_HOME

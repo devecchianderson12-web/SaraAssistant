@@ -42,6 +42,8 @@ class SkillsTest {
     fun `cuentas y conversiones`() {
         assertEquals("Da 100.", Calculator.answer("cuánto es 25 por 4"))
         assertEquals("Da 30.", Calculator.answer("15 por ciento de 200"))
+        assertEquals("Da 350.", Calculator.answer("cuánto es el 35 porciento de 1000"))
+        assertEquals("Da 350.", Calculator.answer("Sara, cuánto es el 35% de 1000"))
         assertEquals("Da 9.", Calculator.answer("raíz de 81"))
         assertEquals("Da 1024.", Calculator.answer("2 elevado a 10"))
         assertEquals("Da 1532.", Calculator.answer("cuánto es mil quinientos treinta y dos más cero"))

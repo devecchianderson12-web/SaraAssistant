@@ -218,6 +218,14 @@ fun SettingsScreen(
                 settings.acknowledgement,
             ) { v -> actions.update { it.copy(acknowledgement = v) } }
 
+            SubHeader("Velocidad")
+            SwitchRow(
+                "Respuesta rápida",
+                "Apenas entiende una orden completa («pasá la canción», «subí el volumen», «cuánto es 35 % de 1000») la hace, sin esperar a que termines la pausa",
+                settings.quickResponse,
+            ) { v -> actions.update { it.copy(quickResponse = v) } }
+            Hint("Para que arranque a escucharte antes: en «Al detectar «Sara»» elegí «Señal sonora» (no dice «¿Sí?»). Y si igual tarda en cortar, bajá «Pausa permitida al hablar» en Reconocimiento.")
+
             SubHeader("Comportamiento")
             SwitchRow(
                 "Conversación continua",
