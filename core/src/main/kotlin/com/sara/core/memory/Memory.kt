@@ -113,7 +113,7 @@ object SmallTalk {
         val t = " " + TextNormalizer.normalize(text) + " "
         fun has(vararg p: String) = p.any { t.contains(" $it ") }
         return when {
-            has("que hora es", "que hora son", "hora es", "me decis la hora") ->
+            has("que hora es", "que hora son", "hora es", "me decis la hora", "decime la hora", "dime la hora") ->
                 "Son las ${now.hour}:${now.minute.toString().padStart(2, '0')}."
             has("que dia es", "que dia es hoy", "que fecha es", "fecha de hoy", "que dia estamos") -> {
                 val day = now.dayOfWeek.getDisplayName(TextStyle.FULL, LOCALE)
