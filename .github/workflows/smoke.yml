@@ -41,31 +41,31 @@ jobs:
             adb logcat -c
             adb shell am start -W -n com.sara.assistant/.ui.MainActivity
             sleep 15
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué hora es" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué hora es'" || true
             sleep 8
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "prendé la linterna" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'prendé la linterna'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "agregá leche a la lista de compras" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'agregá leche a la lista de compras'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué tengo que comprar" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué tengo que comprar'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "cuánto es 15 por ciento de 200" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'cuánto es 15 por ciento de 200'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "cuánta batería me queda" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'cuánta batería me queda'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "poné música y bajá el volumen al 30" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'poné música y bajá el volumen al 30'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "recordame en 30 minutos sacar la ropa" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'recordame en 30 minutos sacar la ropa'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué recordatorios tengo" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué recordatorios tengo'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "todos los días a las 8 decime la hora" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'todos los días a las 8 decime la hora'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "qué rutinas tengo" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué rutinas tengo'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "cómo está el clima en Córdoba" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'cómo está el clima en Córdoba'" || true
             sleep 6
-            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "diagnóstico" || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'diagnóstico'" || true
             sleep 6
             # Recorrer las pestañas (Historial y Ajustes) para detectar cierres en la interfaz.
             adb shell am start -W -n com.sara.assistant/.ui.MainActivity
