@@ -1,5 +1,7 @@
 package com.sara.core.memory
 
+import com.sara.core.model.AssistantIdentity
+
 import com.sara.core.interpreter.TextNormalizer
 import com.sara.core.model.CommandIntent
 import java.time.LocalDateTime
@@ -45,7 +47,7 @@ object MemoryKeys {
  * música», «cuando te diga buenas noches, sacá la música», «acordate que …», «¿qué recordás?».
  */
 object MemoryParser {
-    private val LEAD = Regex("^\\s*(?:sara\\s*[,.]?\\s+)?")
+    private val LEAD = Regex("^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?")
     private val WHEN = Regex("\\b(?:cada vez|cada que|siempre|cuando|de ahora en m[aá]s|a partir de ahora|desde ahora)\\b")
     private val MUSIC = Regex("\\b(?:m[uú]sica|canci[oó]n|canciones|temas)\\b")
     private val APP_AFTER = Regex(
@@ -124,10 +126,9 @@ object SmallTalk {
             has(
                 "que podes hacer", "que sabes hacer", "que haces", "en que me ayudas", "que podes hacer por mi",
                 "que puedes hacer", "que sabes", "que haces tu", "en que me puedes ayudar", "en que me podes ayudar", "para que servis", "para que sirves",
-            ) ->
-                "Música, volumen, apps, WhatsApp y preguntas."
+            ) -> AssistantIdentity.capabilities
             has("que te gusta", "te gusta") -> "Me encanta la música."
-            has("quien sos", "quien eres", "como te llamas", "cual es tu nombre") -> "Soy Sara, tu asistente."
+            has("quien sos", "quien eres", "como te llamas", "cual es tu nombre") -> "Soy ${AssistantIdentity.name}, tu asistente."
             has("te quiero", "sos genial", "sos la mejor") -> "¡Gracias! Yo también."
             else -> null
         }

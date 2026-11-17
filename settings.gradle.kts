@@ -15,4 +15,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "SaraAssistant"
-include(":app", ":core")
+include(":core", ":desktop")
+// En la compilación de Windows (Lucy) no hace falta el SDK de Android.
+if (System.getenv("LUCY_ONLY") == null) include(":app")

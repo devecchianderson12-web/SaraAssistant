@@ -13,6 +13,7 @@ captures/
 # Artefactos generados
 *.apk
 *.aab
-windows/Lucy/bin/
-windows/Lucy/obj/
-windows/Lucy/model.zip
+windows/Launcher/bin/
+windows/Launcher/obj/
+windows/Launcher/app.zip
+windows/Launcher/lucy.ico

@@ -1,5 +1,7 @@
 package com.sara.core.skills
 
+import com.sara.core.model.AssistantIdentity
+
 import com.sara.core.interpreter.SpanishNumbers
 import com.sara.core.interpreter.TextNormalizer
 import com.sara.core.model.CommandIntent
@@ -204,7 +206,7 @@ object SkillParser {
     /** «agregá leche y pan a la lista de compras» -> «leche y pan». */
     private fun listItem(text: String): String {
         var t = text.trim().trimEnd('.', '!', '?')
-        t = t.replace(Regex("^\\s*(?:sara\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
+        t = t.replace(Regex("^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(agreg[aá]me|agreg[aá]|anot[aá]me|anot[aá]|sum[aá]me|sum[aá]|pon[eé]me|pon[eé]|tom[aá] nota(?: de)?|guard[aá]|apunt[aá]|sac[aá]|quit[aá]|borr[aá]|elimin[aá]|marc[aá]|tach[aá]|necesito|tengo que comprar|ya compr[eé]|ya hice)\\s*:?\\s*", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("\\s*(?:a|en|de|del|como hech[oa]s?|de la|en la|a la|a mis|en mis|de mis)?\\s*(?:la |mis |las |el )?(?:lista de compras|lista del super(?:mercado)?|lista de tareas|tareas|notas|nota|compras|pendientes)\\s*(?:como hech[oa]s?)?$", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(?:una nota|nota|la nota)\\s*:?\\s*", RegexOption.IGNORE_CASE), "")
@@ -230,7 +232,7 @@ object SkillParser {
     /** «recordame mañana a las 9 que llame al médico» -> «llamar al médico» (aprox.: «llame al médico»). */
     private fun reminderText(text: String): String {
         var t = stripTime(text)
-        t = t.replace(Regex("^\\s*(?:sara\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
+        t = t.replace(Regex("^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(record[aá]me|recordarme|record[aá] me|av[ií]same|acord[aá]me|pon[eé]me un recordatorio|pon[eé] un recordatorio|cre[aá] un recordatorio|agreg[aá] un recordatorio)\\s*", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(?:de|que|para|el|la)\\s+", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(?:de|que|para)\\s+", RegexOption.IGNORE_CASE), "")
@@ -239,7 +241,7 @@ object SkillParser {
 
     private fun eventTitle(text: String): String {
         var t = stripTime(text)
-        t = t.replace(Regex("^\\s*(?:sara\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
+        t = t.replace(Regex("^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(agend[aá]me|agend[aá]|agendar|anot[aá] en el calendario|cre[aá] un evento|crear un evento|cre[aá] una reuni[oó]n|agreg[aá] al calendario|agreg[aá] un evento)\\s*(?:de|que|para|:)?\\s*", RegexOption.IGNORE_CASE), "")
         return t.trim(' ', ',', '.').replaceFirstChar { it.uppercase() }
     }
@@ -247,7 +249,7 @@ object SkillParser {
     /** «todos los días a las 8 decime el clima» -> «decime el clima». */
     private fun routineOrder(text: String): String {
         var t = stripTime(text)
-        t = t.replace(Regex("^\\s*(?:sara\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
+        t = t.replace(Regex("^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(todos los d[ií]as|cada d[ií]a|todas las ma[ñn]anas|todas las noches|de lunes a viernes|los fines de semana)\\s*,?\\s*", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(?:quiero que|que)\\s+", RegexOption.IGNORE_CASE), "")
         return t.trim(' ', ',', '.')

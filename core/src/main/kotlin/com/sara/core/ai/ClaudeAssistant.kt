@@ -1,4 +1,4 @@
-package com.sara.assistant.ai
+package com.sara.core.ai
 
 import com.anthropic.client.AnthropicClient
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
@@ -19,7 +19,6 @@ import com.anthropic.models.beta.messages.BetaToolResultBlockParam
 import com.anthropic.models.beta.messages.BetaUserLocation
 import com.anthropic.models.beta.messages.BetaWebSearchTool20260209
 import com.anthropic.models.beta.messages.MessageCreateParams
-import com.sara.assistant.data.SecretStore
 import com.sara.core.execution.ExecutionResult
 import com.sara.core.execution.Planner
 import com.sara.core.memory.ConversationalAssistant
@@ -37,7 +36,8 @@ import java.util.TimeZone
  *   ejecuta (las sensibles con confirmación del usuario) y resume qué logró.
  */
 class ClaudeAssistant(
-    private val secrets: SecretStore,
+    /** Clave de Claude (null o vacía = no configurada). */
+    private val apiKey: () -> String?,
     private val support: PlannerSupport,
     private val logger: SaraLogger,
 ) : ConversationalAssistant, Planner {
@@ -49,7 +49,7 @@ class ClaudeAssistant(
     private val history = mutableListOf<BetaMessageParam>()
     private var lastTurnAt = 0L
 
-    override fun isAvailable(): Boolean = secrets.has(SecretStore.ANTHROPIC_KEY)
+    override fun isAvailable(): Boolean = !apiKey().isNullOrBlank()
 
     override suspend fun reply(text: String): String {
         val result = run(text, withSkills = false)
@@ -59,7 +59,7 @@ class ClaudeAssistant(
     override suspend fun handle(text: String): ExecutionResult = run(text, withSkills = true)
 
     private suspend fun run(text: String, withSkills: Boolean): ExecutionResult = withContext(Dispatchers.IO) {
-        val key = secrets.get(SecretStore.ANTHROPIC_KEY) ?: return@withContext support.failure("Para eso activá la IA en Ajustes.")
+        val key = apiKey()?.takeIf { it.isNotBlank() } ?: return@withContext support.failure("Para eso activá la IA en Ajustes.")
         val api = clientFor(key)
         support.beginTurn()
         synchronized(history) {

@@ -61,8 +61,50 @@ class AudioLevelMeter {
     }
 }
 
+/**
+ * Palabra de activación de cada versión: «Sara» (Android) o «Lucy» (Windows). Define cómo la escribe
+ * el modelo de voz, con qué palabras parecidas compite y las formas con «ey» delante.
+ */
+data class WakeWordProfile(
+    /** Cómo la escribe el modelo (debe existir en su vocabulario). */
+    val keyword: String,
+    val aliases: Set<String>,
+    val competitors: List<String>,
+    val prefixedPhrases: List<String>,
+    val fused: Set<String> = emptySet(),
+) {
+    companion object {
+        val SARA = WakeWordProfile(
+            keyword = "sara",
+            aliases = setOf("sara", "sarah", "zara", "zarah"),
+            competitors = listOf(
+                "sara", "para", "paraba", "parar", "separar", "separa", "cara", "clara", "sala", "casa", "era", "ahora",
+                "zapa", "sabe", "saca", "saga", "salta", "santa", "sana", "tara", "vara", "rara", "sarta", "farra",
+                "jarra", "barra", "guitarra", "[unk]",
+            ),
+            prefixedPhrases = listOf("y sara", "e sara", "hay sara", "oye sara", "ey sara", "hey sara"),
+            fused = setOf("eysara", "heysara", "esara", "isara", "oyesara"),
+        )
+
+        /** «Lucy»: el modelo en español la escribe «luci» (probado con audio en Windows). */
+        val LUCY = WakeWordProfile(
+            keyword = "luci",
+            aliases = setOf("luci", "lucy", "lusi", "lucie", "luchi"),
+            competitors = listOf(
+                "luci", "lucio", "lucía", "luz", "luces", "lucha", "lunes", "lucas", "luis", "luisa", "lupe", "susi", "rosi",
+                "lo", "hice", "si", "que", "de", "pone", "música", "este", "eso", "cuando", "bueno", "vamos", "todo",
+                "algo", "pasa", "casa", "no", "hola", "oye", "luego", "lugar", "[unk]",
+            ),
+            prefixedPhrases = listOf("y luci", "e luci", "hay luci", "oye luci", "ey luci", "hey luci"),
+        )
+    }
+}
+
 /** Ajuste de la palabra de activación: traduce sensibilidad (0..1) en confianza mínima exigida. */
 object WakeWordTuning {
+    /** Perfil activo (Sara en Android, Lucy en Windows). */
+    @Volatile var profile: WakeWordProfile = WakeWordProfile.SARA
+
     const val DEFAULT_SENSITIVITY = 0.5f
 
     fun minimumConfidence(sensitivity: Float): Float {
@@ -74,7 +116,7 @@ object WakeWordTuning {
      * Decide si un resultado de reconocimiento restringido a la gramática contiene la palabra de activación.
      * Para reducir falsas activaciones rechaza menciones dentro de frases largas ("le dije a Sara que...").
      */
-    fun accept(words: List<Pair<String, Float>>, sensitivity: Float, keyword: String = "sara"): Float? {
+    fun accept(words: List<Pair<String, Float>>, sensitivity: Float, keyword: String = profile.keyword): Float? {
         val index = words.indexOfFirst { it.first == keyword }
         if (index < 0) return null
         val confidence = words[index].second
@@ -84,7 +126,7 @@ object WakeWordTuning {
     }
 
     /** Variantes con las que un reconocedor libre transcribe «Sara». */
-    val KEYWORD_ALIASES = setOf("sara", "sarah", "zara", "zarah")
+    val KEYWORD_ALIASES: Set<String> get() = profile.aliases
 
     /**
      * Segunda etapa: la ventana de audio (≈2,4 s) se vuelve a transcribir con vocabulario libre y sólo
@@ -101,7 +143,7 @@ object WakeWordTuning {
     val WAKE_PREFIXES = setOf("ey", "hey", "ei", "hei", "e", "y", "he", "eh", "hay", "ay", "oye", "oi", "ahí", "ahi")
 
     /** Variantes donde el modelo junta las dos palabras. */
-    private val FUSED = setOf("eysara", "heysara", "esara", "isara", "oyesara")
+    private val FUSED: Set<String> get() = profile.fused
 
     /** «Ey Sara»: un prefijo de llamada inmediatamente antes de «Sara». */
     fun verifiedWithPrefix(transcript: String): Boolean {
@@ -112,17 +154,13 @@ object WakeWordTuning {
     }
 
     /** Frases para la gramática restringida de la primera etapa (las palabras deben existir en el modelo). */
-    val PREFIXED_PHRASES = listOf("y sara", "e sara", "hay sara", "oye sara", "ey sara", "hey sara")
+    val PREFIXED_PHRASES: List<String> get() = profile.prefixedPhrases
 
     /**
      * Con música de fondo la transcripción libre falla seguido; entonces se usa además una gramática
      * con palabras parecidas que compiten con «Sara»: sólo gana si realmente se pronunció.
      */
-    val COMPETITOR_GRAMMAR = listOf(
-        "sara", "para", "paraba", "parar", "separar", "separa", "cara", "clara", "sala", "casa", "era", "ahora",
-        "zapa", "sabe", "saca", "saga", "salta", "santa", "sana", "tara", "vara", "rara", "sarta", "farra",
-        "jarra", "barra", "guitarra", "[unk]",
-    )
+    val COMPETITOR_GRAMMAR: List<String> get() = profile.competitors
 
     /** Cantidad de resultados parciales seguidos con «sara» para pasar a verificación. */
     fun requiredPartialHits(sensitivity: Float): Int = when {
@@ -226,7 +264,7 @@ class WakeWordGate(private val sensitivity: Float) {
             hits = 0
             return false
         }
-        hits = if ("sara" in tokens) hits + 1 else 0
+        hits = if (WakeWordTuning.profile.keyword in tokens) hits + 1 else 0
         return hits >= requiredHits
     }
 

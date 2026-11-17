@@ -22,8 +22,8 @@ enum class WakeEngineType { VOSK, PORCUPINE }
 enum class OnlineRecognizerType { SYSTEM, AZURE }
 enum class OfflineRecognizerType { AUTO, VOSK, ANDROID_ON_DEVICE }
 enum class OnlineVoiceType { AZURE, SYSTEM_NETWORK }
-/** IA para preguntas: Google (Gemini con búsqueda de Google) o Claude. */
-enum class AiProvider { GOOGLE, CLAUDE }
+/** IA para preguntas (definida en el núcleo compartido con Lucy para Windows). */
+typealias AiProvider = com.sara.core.ai.AiProvider
 
 data class SaraSettings(
     // Activación

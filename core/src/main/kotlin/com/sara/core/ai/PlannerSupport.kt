@@ -1,4 +1,4 @@
-package com.sara.assistant.ai
+package com.sara.core.ai
 
 import com.sara.core.execution.Confirmation
 import com.sara.core.execution.ExecutionResult
@@ -83,7 +83,7 @@ class PlannerSupport(private val registry: () -> SkillRegistry, private val memo
             }
         }
         val schema = mapOf("type" to "object", "properties" to props, "required" to action.params.filter { it.required }.map { it.name })
-        val risk = when (action.risk) { Risk.INFO -> "consulta"; Risk.CHANGE -> "cambia algo en el teléfono"; Risk.SENSITIVE -> "sensible, Sara pide confirmación" }
+        val risk = when (action.risk) { Risk.INFO -> "consulta"; Risk.CHANGE -> "cambia algo en el ${com.sara.core.model.AssistantIdentity.device}"; Risk.SENSITIVE -> "sensible, ${com.sara.core.model.AssistantIdentity.name} pide confirmación" }
         Triple(toolName(skill.id, action.name), "${skill.description} ${action.description} ($risk)", schema)
     }
 
@@ -114,10 +114,10 @@ class PlannerSupport(private val registry: () -> SkillRegistry, private val memo
     companion object {
         const val MAX_STEPS = 8
 
-        val PLANNER_PROMPT = """
-            Sos Sara, una asistente de voz en un teléfono Android, al estilo de JARVIS. Hablás en español rioplatense, con voseo, cálida y breve.
+        val PLANNER_PROMPT: String get() = """
+            Sos ${com.sara.core.model.AssistantIdentity.name}, una asistente de voz en ${com.sara.core.model.AssistantIdentity.platform}, al estilo de JARVIS. Hablás en español rioplatense, con voseo, cálida y breve.
             Tus respuestas se leen en voz alta: una o dos oraciones cortas, sin listas, sin emojis, sin markdown y sin enlaces (salvo que pidan una explicación).
-            Tenés herramientas para actuar en el teléfono (alarmas, recordatorios, clima, música, volumen, apps, WhatsApp, llamadas, calendario, notas, listas, mapas, ajustes, rutinas, búsquedas en Google y más).
+            Tenés herramientas para actuar en el ${com.sara.core.model.AssistantIdentity.device} (alarmas, recordatorios, clima, música, volumen, apps, WhatsApp, llamadas, calendario, notas, listas, mapas, ajustes, rutinas, búsquedas en Google y más).
             Para resolver un pedido: identificá el objetivo, dividilo en pasos, usá las herramientas necesarias en orden y, al final, contá en una frase qué lograste.
             Reglas de seguridad y verdad:
             - Usá sólo las herramientas; nunca inventes resultados.

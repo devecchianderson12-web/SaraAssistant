@@ -1,6 +1,5 @@
-package com.sara.assistant.ai
+package com.sara.core.ai
 
-import com.sara.assistant.settings.AiProvider
 import com.sara.core.execution.ExecutionResult
 import com.sara.core.execution.Planner
 import com.sara.core.memory.ConversationalAssistant
@@ -11,6 +10,9 @@ import com.sara.core.memory.ConversationalAssistant
  * - Planificación y pedidos complejos: Claude primero (mejor razonamiento); si no hay clave o falla,
  *   Google. La preferencia de Ajustes decide cuál va primero cuando las dos sirven.
  */
+/** IA para preguntas: Google (Gemini con búsqueda de Google) o Claude. */
+enum class AiProvider { GOOGLE, CLAUDE }
+
 class AiRouter(
     private val provider: () -> AiProvider,
     val google: GeminiAssistant,

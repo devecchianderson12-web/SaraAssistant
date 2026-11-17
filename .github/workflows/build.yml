@@ -151,34 +151,84 @@ jobs:
   windows:
     name: Lucy para Windows (.exe)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    env:
+      LUCY_ONLY: "1"
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
 
-      - name: Configurar .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
         with:
-          dotnet-version: "8.0.x"
+          distribution: temurin
+          java-version: "21"
 
-      # El modelo de voz en español va dentro del .exe (funciona sin Internet desde el primer uso).
-      - name: Descargar modelo de voz (Vosk, español)
-        shell: pwsh
-        run: Invoke-WebRequest https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip -OutFile windows/Lucy/model.zip
+      - name: Configurar Gradle (con caché)
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Compilar Lucy.exe (portable, un solo archivo)
-        run: dotnet publish windows/Lucy/Lucy.csproj -c Release -o out
+      # El mismo cerebro que Android (módulo core) + la parte de Windows (módulo desktop).
+      - name: Pruebas y compilación de Lucy
+        run: ./gradlew --no-daemon :core:test :desktop:test :desktop:installDist -PlucyVersion=${{ github.run_number }}
 
-      - name: Autoprueba (reglas, modelo, Vosk, voz)
+      # El modelo de voz en español va adentro (funciona sin Internet desde el primer uso).
+      - name: Preparar la app (modelo de voz, ícono, sólo lo de Windows)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath out/Lucy.exe -ArgumentList "--selftest" -WorkingDirectory out -Wait -PassThru
-          Get-Content out/selftest.txt
-          if ($p.ExitCode -ne 0) { exit 1 }
+          $lib = "desktop/build/install/Lucy/lib"
+          # Las librerías nativas de Vosk para Linux y Mac no hacen falta.
+          $vosk = Get-ChildItem $lib -Filter "vosk-*.jar" | Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::Open($vosk.FullName, 'Update')
+          @($zip.Entries | Where-Object { $_.FullName -like 'linux-*' -or $_.FullName -like 'darwin*' }) | ForEach-Object { $_.Delete() }
+          $zip.Dispose()
+          Invoke-WebRequest https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip -OutFile model.zip
+          Expand-Archive model.zip -DestinationPath model-tmp
+          New-Item -ItemType Directory -Force content | Out-Null
+          Move-Item model-tmp/vosk-model-small-es-0.42 content/model
+          java -cp "$lib/*" com.sara.lucy.MainKt --write-icon windows/Launcher/lucy.ico
+          if (-not (Test-Path windows/Launcher/lucy.ico)) { throw "sin ícono" }
+
+      - name: Empaquetar (Java propio, sin instalar nada)
+        shell: pwsh
+        run: |
+          $jar = (Get-ChildItem desktop/build/install/Lucy/lib -Filter "desktop*.jar" | Select-Object -First 1).Name
+          jpackage --type app-image --name Lucy --app-version "1.0.${{ github.run_number }}" --vendor Lucy `
+            --input desktop/build/install/Lucy/lib --main-jar $jar --main-class com.sara.lucy.MainKt `
+            --icon windows/Launcher/lucy.ico --app-content content/model --dest image `
+            --java-options "-Xmx512m -XX:+UseSerialGC -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8" `
+            --add-modules "java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.scripting,java.sql,java.xml,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.localedata,jdk.charsets,jdk.zipfs,jdk.accessibility" `
+            --jlink-options "--strip-debug --no-man-pages --no-header-files --compress=zip-6"
+          Get-ChildItem image/Lucy | Format-Table Name, Length
+          Compress-Archive -Path image/Lucy/* -DestinationPath windows/Launcher/app.zip -CompressionLevel Optimal
+          "app.zip: {0:N0} MB" -f ((Get-Item windows/Launcher/app.zip).Length / 1MB)
+
+      - name: Compilar el .exe portable (con ícono)
+        run: dotnet build windows/Launcher/Launcher.csproj -c Release -o launcher -p:Version=1.0.${{ github.run_number }}
 
       - name: Renombrar
         shell: pwsh
-        run: Copy-Item out/Lucy.exe "Lucy-Windows-v1.0.${{ github.run_number }}.exe"
+        run: |
+          Copy-Item launcher/Lucy.exe "Lucy-Windows-v1.0.${{ github.run_number }}.exe"
+          "Lucy.exe: {0:N0} MB" -f ((Get-Item "Lucy-Windows-v1.0.${{ github.run_number }}.exe").Length / 1MB)
+
+      # No se publica un .exe que no arranque: se abre el .exe final (se descomprime como en tu PC)
+      # y se prueban el cerebro, Windows, la voz, las respuestas y la ventana con la esfera.
+      - name: Autoprueba del .exe final
+        shell: pwsh
+        run: |
+          $dir = "$PWD/autoprueba"
+          $p = Start-Process -FilePath "Lucy-Windows-v1.0.${{ github.run_number }}.exe" -ArgumentList "--selftest", "`"$dir`"" -Wait -PassThru
+          Get-Content "$dir/selftest.txt" -Encoding UTF8
+          if ($p.ExitCode -ne 0) { Get-Content "$env:APPDATA/Lucy/lucy.log" -Tail 60 -ErrorAction SilentlyContinue; exit 1 }
+
+      - name: Guardar autoprueba (captura y resultados)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucy-autoprueba
+          path: autoprueba/
+          if-no-files-found: ignore
 
       - name: Publicar .exe como artefacto
         uses: actions/upload-artifact@v4

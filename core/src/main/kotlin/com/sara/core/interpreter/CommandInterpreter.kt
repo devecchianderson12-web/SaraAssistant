@@ -28,7 +28,7 @@ class CompositeCommandInterpreter(
     private val plannerAvailable: () -> Boolean = { false },
 ) : CommandInterpreter {
     override suspend fun interpret(text: String): InterpretationResult {
-        val routine = memory?.get(MemoryKeys.routineKey(text.trim().removePrefix("Sara").removePrefix("sara").trim(' ', ',')))
+        val routine = memory?.get(MemoryKeys.routineKey(text.trim().replace(Regex("^(?i)(?:${com.sara.core.model.AssistantIdentity.NAMES})\\b"), "").trim(' ', ',')))
         // Una rutina puede tener varias órdenes («sacá la música y cerrá las apps»).
         if (routine != null) return (splitCompound(routine) ?: rules.interpret(routine)).copy(ruleId = "routine")
         splitCompound(text)?.let { return it }
@@ -80,6 +80,8 @@ internal fun splitCompoundWith(text: String): InterpretationResult? {
     return InterpretationResult(CommandIntent.Sequence(distinct), 0.85f, TextNormalizer.normalize(text), "sequence")
 }
 
+private val WAKE_NAMES = com.sara.core.model.AssistantIdentity.NAMES.split('|').toSet()
+
 private val QUESTION_START = setOf(
     "que", "como", "cual", "cuales", "cuando", "donde", "quien", "quienes", "cuanto", "cuanta", "cuantos", "cuantas", "por", "sabes", "sabias",
 )
@@ -87,7 +89,7 @@ private val QUESTION_WORDS = setOf("clima", "tiempo", "temperatura", "llueve", "
 
 /** Pregunta (no orden): «¿cómo está el clima?», «¿quién ganó?», «¿cuánto está el dólar?». */
 fun looksLikeQuestion(normalized: String): Boolean {
-    val tokens = normalized.split(' ').filter { it.isNotBlank() }.dropWhile { it == "y" || it == "sara" }
+    val tokens = normalized.split(' ').filter { it.isNotBlank() }.dropWhile { it == "y" || it in WAKE_NAMES }
     if (tokens.isEmpty()) return false
     return tokens.first() in QUESTION_START || tokens.any { it in QUESTION_WORDS }
 }

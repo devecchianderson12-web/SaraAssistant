@@ -1,5 +1,7 @@
 package com.sara.core.interpreter
 
+import com.sara.core.model.AssistantIdentity
+
 import com.sara.core.model.CommandIntent
 
 /**
@@ -11,7 +13,7 @@ object MessageParser {
     private const val WA = "(?:whatsapp|whats app|wasap|guasap|wsp|wpp|whatsap)"
     private const val VIA = "(?:por|en|de)\\s+$WA"
     private val LEAD = Regex(
-        "^\\s*(?:sara\\s*[,.]?\\s+)?(?:(?:por\\s+favor|porfa)\\s*,?\\s+)?" +
+        "^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?(?:(?:por\\s+favor|porfa)\\s*,?\\s+)?" +
             "(?:(?:me\\s+)?(?:pod[eé]s|puedes|podr[ií]as|quiero\\s+que|necesito\\s+que)\\s+)?",
     )
     private const val WHAT = "(?:(?:un|una|los|las|el|este|estos|unos)\\s+)?(?:mensajes?|mensajito|msj|$WA)?"

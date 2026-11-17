@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Lanzador portable de Lucy: un solo .exe (con ícono) que trae adentro la app (Java + modelo de
+       voz). La primera vez la descomprime en %LOCALAPPDATA%\Lucy\app\<versión> y después sólo la abre.
+       .NET Framework 4.8 viene con Windows 10/11: no hay que instalar nada ni ser administrador. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Lucy</AssemblyName>
+    <RootNamespace>LucyLauncher</RootNamespace>
+    <ApplicationIcon>lucy.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <Product>Lucy</Product>
+    <Description>Lucy, asistente de voz</Description>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <EmbeddedResource Include="app.zip" LogicalName="app.zip" />
+  </ItemGroup>
+</Project>

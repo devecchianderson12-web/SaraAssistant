@@ -1,6 +1,5 @@
-package com.sara.assistant.ai
+package com.sara.core.ai
 
-import com.sara.assistant.data.SecretStore
 import com.sara.core.memory.ConversationalAssistant
 import com.sara.core.memory.MemoryStore
 import com.sara.core.util.SaraLogger
@@ -22,7 +21,8 @@ import java.util.TimeZone
  * Las órdenes (música, volumen, WhatsApp) y la memoria las resuelve Sara sin IA.
  */
 class GeminiAssistant(
-    private val secrets: SecretStore,
+    /** Clave de Google AI Studio (null o vacía = no configurada). */
+    private val apiKey: () -> String?,
     private val memory: MemoryStore,
     private val logger: SaraLogger,
     private val support: PlannerSupport? = null,
@@ -34,7 +34,7 @@ class GeminiAssistant(
     @Volatile private var useSearch = true
     @Volatile private var useThinkingLevel = true
 
-    override fun isAvailable(): Boolean = secrets.has(SecretStore.GEMINI_KEY)
+    override fun isAvailable(): Boolean = !apiKey().isNullOrBlank()
 
     fun reset() {
         synchronized(history) { history.clear() }
@@ -49,7 +49,7 @@ class GeminiAssistant(
 
     override suspend fun handle(text: String): com.sara.core.execution.ExecutionResult = withContext(Dispatchers.IO) {
         val s = support ?: return@withContext com.sara.core.execution.ExecutionResult(false, "No tengo planificador.")
-        val key = secrets.get(SecretStore.GEMINI_KEY) ?: return@withContext s.failure("Para eso activá la IA en Ajustes.")
+        val key = apiKey()?.takeIf { it.isNotBlank() } ?: return@withContext s.failure("Para eso activá la IA en Ajustes.")
         s.beginTurn()
         synchronized(planHistory) {
             if (planPendingReset || System.currentTimeMillis() - lastPlanAt > CONVERSATION_IDLE_MS || planHistory.size > MAX_HISTORY * 2) planHistory.clear()
@@ -131,7 +131,7 @@ class GeminiAssistant(
     }
 
     override suspend fun reply(text: String): String = withContext(Dispatchers.IO) {
-        val key = secrets.get(SecretStore.GEMINI_KEY) ?: return@withContext "Para eso activá la IA en Ajustes."
+        val key = apiKey()?.takeIf { it.isNotBlank() } ?: return@withContext "Para eso activá la IA en Ajustes."
         val turn = userTurn(contextLine() + "\n" + text)
         val contents = synchronized(history) {
             if (System.currentTimeMillis() - lastTurnAt > CONVERSATION_IDLE_MS || history.size > MAX_HISTORY) history.clear()
@@ -296,7 +296,7 @@ class GeminiAssistant(
     private fun contextLine(): String {
         val now = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM yyyy, HH:mm", Locale.forLanguageTag("es-AR")))
         val memories = memory.all().entries.joinToString("; ") { "${it.key} = ${it.value}" }.ifBlank { "nada todavía" }
-        return "[Ahora: $now (${TimeZone.getDefault().id}). Lo que Sara recuerda del usuario: $memories]"
+        return "[Ahora: $now (${TimeZone.getDefault().id}). Lo que ${com.sara.core.model.AssistantIdentity.name} recuerda del usuario: $memories]"
     }
 
     private class ApiError(val code: Int, message: String) : IOException(message)
@@ -312,13 +312,13 @@ class GeminiAssistant(
         val RETRYABLE = setOf(400, 404, 429)
         const val MAX_MODEL_TRIES = 4
         val FALLBACK_MODELS = listOf("gemini-flash-lite-latest", "gemini-flash-latest")
-        val SYSTEM_PROMPT = """
-            Sos Sara, una asistente de voz en un teléfono Android. Hablás en español rioplatense, con voseo, cálida y con humor suave.
+        val SYSTEM_PROMPT: String get() = """
+            Sos ${com.sara.core.model.AssistantIdentity.name}, una asistente de voz en ${com.sara.core.model.AssistantIdentity.platform}. Hablás en español rioplatense, con voseo, cálida y con humor suave.
             Tus respuestas se leen en voz alta: respondé en una o dos oraciones cortas, sin listas, sin emojis, sin markdown, sin enlaces y sin citar fuentes. Si el usuario pide una explicación, podés extenderte un poco más.
             Para el clima, noticias, resultados, precios, horarios o cualquier dato que pueda cambiar, buscá en Google y respondé con el dato concreto y actualizado (por ejemplo, temperatura y si va a llover). Si no te dicen la ciudad, usá la zona horaria del contexto para deducirla.
-            Cada mensaje del usuario empieza con la fecha, la hora y lo que Sara recuerda de él entre corchetes: usalo como contexto, no lo repitas.
-            Vos no podés hacer acciones en el teléfono (mandar mensajes, abrir apps, poner música): eso lo hace Sara con órdenes directas. Nunca digas que hiciste algo así; si te lo piden, explicá en una frase cómo pedírselo, por ejemplo «decime: mandá un WhatsApp a Juan que diga hola».
-            Sobre vos: sos Sara, te gusta la música y ayudar; si te preguntan cómo estás, contestá con naturalidad.
+            Cada mensaje del usuario empieza con la fecha, la hora y lo que recordás de él entre corchetes: usalo como contexto, no lo repitas.
+            En esta respuesta no ejecutás acciones en el ${com.sara.core.model.AssistantIdentity.device} (mandar mensajes, abrir apps, poner música). Nunca digas que hiciste algo así; si te lo piden, explicá en una frase cómo pedírselo, por ejemplo «decime: mandá un WhatsApp a Juan que diga hola».
+            Sobre vos: sos ${com.sara.core.model.AssistantIdentity.name}, te gusta la música y ayudar; si te preguntan cómo estás, contestá con naturalidad.
         """.trimIndent()
     }
 }

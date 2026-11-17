@@ -134,7 +134,7 @@ class VoskWakeWordEngine(
         // La transcripción libre del modelo chico falla seguido con «Sara» dicha rápido o bajo:
         // si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
         if (sensitivity < 0.3f) return false
-        return "sara" in transcribe(model, audio, COMPETITORS).split(' ')
+        return WakeWordTuning.profile.keyword in transcribe(model, audio, COMPETITORS).split(' ')
     }
 
     private fun parseWords(json: String): List<Pair<String, Float>> {

@@ -10,7 +10,7 @@ object TextNormalizer {
     private val letterDigit = "([a-z])(\\d)".toRegex()
     private val nonAlphanumeric = "[^a-z0-9 ]".toRegex()
     private val spaces = "\\s+".toRegex()
-    private val wakePrefix = "^(?:(?:oye|oi|hey|ey|che|hola)\\s+)?(?:sara|sarah|zara|zarah)\\b\\s*".toRegex()
+    private val wakePrefix = "^(?:(?:oye|oi|hey|ey|che|hola)\\s+)?(?:${com.sara.core.model.AssistantIdentity.NAMES})\\b\\s*".toRegex()
     private val porciento = "\\bporciento\\b".toRegex()
     private val fillers = listOf("por favor", "porfavor", "porfa", "porfis", "che", "eh", "em", "mmm", "bueno", "ehh")
 
