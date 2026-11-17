@@ -58,7 +58,7 @@ public static class Program
             try
             {
                 using var model = new Vosk.Model(ModelStore.Folder);
-                foreach (var phrase in new[] { "Lucy", "Lucy, pone musica", "hola Lucy", "pone musica de Soda Stereo", "luces del cuarto", "lunes que viene" })
+                foreach (var phrase in new[] { "Lucy", "Lusi", "Lucy, pone musica", "hola Lucy", "pone musica de Soda Stereo", "luces del cuarto", "lunes que viene" })
                 {
                     var wav = Path.Combine(Path.GetTempPath(), "lucy-test.wav");
                     using (var synth = new System.Speech.Synthesis.SpeechSynthesizer())
@@ -71,6 +71,9 @@ public static class Program
                     gr.AcceptWaveform(pcm, pcm.Length);
                     var stage1 = Listener.TextOf(gr.FinalResult(), "text");
                     var verified = Listener.VerifyAudio(model, pcm);
+                    using var comp = new Vosk.VoskRecognizer(model, 16000, System.Text.Json.JsonSerializer.Serialize(Interpreter.Competitors));
+                    comp.AcceptWaveform(pcm, pcm.Length);
+                    log.AppendLine($"   competidores eligió: {Listener.TextOf(comp.FinalResult(), "text")}");
                     log.AppendLine($"Oído «{phrase}»: etapa 1={stage1} | verificación={verified}");
                 }
             }
