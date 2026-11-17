@@ -110,8 +110,22 @@ class WakeWordAndAudioTest {
         assertTrue(WakeWordTuning.verifiedByTranscript("Zara"))
         assertFalse(WakeWordTuning.verifiedByTranscript("subí el volumen"))
         assertFalse(WakeWordTuning.verifiedByTranscript("para la próxima"))
-        assertFalse(WakeWordTuning.verifiedByTranscript("hoy le dije a sara que venga"))
         assertFalse(WakeWordTuning.verifiedByTranscript(""))
+    }
+
+    @Test
+    fun `deteccion por parciales con estabilidad y enfriamiento`() {
+        val gate = com.sara.core.util.WakeWordGate(0.5f)
+        assertFalse(gate.onPartial(listOf("sara")))
+        assertTrue(gate.onPartial(listOf("sara")))
+        gate.rejected()
+        repeat(5) { assertFalse(gate.onPartial(listOf("sara"))) }
+        assertFalse(gate.onPartial(listOf("sara")))
+        assertTrue(gate.onPartial(listOf("sara")))
+        assertFalse(gate.onPartial(listOf("[unk]")))
+        assertTrue(gate.onFinal(listOf("sara" to 0.9f)))
+        assertEquals(1, WakeWordTuning.requiredPartialHits(0.9f))
+        assertEquals(3, WakeWordTuning.requiredPartialHits(0.1f))
     }
 
     @Test

@@ -101,6 +101,8 @@ data class VoiceParams(
     /** 0.0 - 1.0, relativo al volumen del sistema. */
     val volume: Float = 1.0f,
     val languageTag: String = "es-AR",
+    /** Frase corta y repetida («Te escucho»): el motor puede guardar el audio y reproducirlo al instante. */
+    val cacheable: Boolean = false,
 )
 
 sealed interface SpeakResult {
@@ -119,6 +121,9 @@ interface VoiceEngine {
 
     /** Suspende hasta terminar de hablar. Cancelar la corrutina corta el audio. */
     suspend fun speak(text: String, params: VoiceParams): SpeakResult
+
+    /** Prepara de antemano el audio de una frase cacheable para que suene sin demora. */
+    suspend fun prepare(text: String, params: VoiceParams) = Unit
 }
 
 /** Proveedor de los motores configurados actualmente (puede cambiar con los ajustes). */

@@ -64,7 +64,8 @@ class AppContainer(private val app: Application) {
     val settings = SettingsRepository(app, scope)
     val secrets = SecretStore(app)
     val connectivity = ConnectivityMonitor(app)
-    val microphone = MicrophoneSource(app, levels)
+    val microphone = MicrophoneSource(app, levels) { settings.settings.value.echoCancellation }
+    private val phraseCache = com.sara.assistant.voice.PhraseCache(app)
     val voskModels = VoskModelManager(app, logger)
     val porcupineFiles = PorcupineFiles(app)
     val history = FileCommandHistory(app) { settings.settings.value.saveHistory }
@@ -82,9 +83,9 @@ class AppContainer(private val app: Application) {
     private val onDeviceRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = true, levels)
     private val systemRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = false, levels)
     private val azureRecognizer = AzureSpeechRecognitionEngine(azure, microphone)
-    val offlineTts = AndroidTtsVoiceEngine(tts, focus, networkVoices = false)
-    val systemNetworkTts = AndroidTtsVoiceEngine(tts, focus, networkVoices = true)
-    val azureVoice = AzureNeuralVoiceEngine(azure, focus, levels)
+    val offlineTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = false)
+    val systemNetworkTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = true)
+    val azureVoice = AzureNeuralVoiceEngine(azure, focus, levels, phraseCache)
 
     val engines = object : EngineProvider {
         private val s: SaraSettings get() = settings.settings.value

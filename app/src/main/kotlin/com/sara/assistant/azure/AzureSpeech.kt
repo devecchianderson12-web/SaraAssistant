@@ -7,6 +7,9 @@ import com.sara.assistant.audio.AudioFocusHelper
 import com.sara.assistant.audio.CaptureOutcome
 import com.sara.assistant.audio.MicrophoneSource
 import com.sara.assistant.data.SecretStore
+import com.sara.assistant.voice.PcmClip
+import com.sara.assistant.voice.PcmPlayer
+import com.sara.assistant.voice.PhraseCache
 import com.sara.core.engine.Availability
 import com.sara.core.engine.EngineError
 import com.sara.core.engine.EngineErrorType
@@ -72,6 +75,7 @@ class AzureNeuralVoiceEngine(
     private val credentials: AzureCredentials,
     private val focus: AudioFocusHelper,
     private val levels: AudioLevelMeter,
+    private val cache: PhraseCache,
 ) : VoiceEngine {
     override val id = "azure-neural"
     override val displayName = "Azure neuronal (online)"
@@ -109,15 +113,33 @@ class AzureNeuralVoiceEngine(
         }
     }
 
-    override suspend fun speak(text: String, params: VoiceParams): SpeakResult = withContext(Dispatchers.IO) {
-        val key = credentials.key() ?: return@withContext SpeakResult.Failure(EngineError(EngineErrorType.CREDENTIALS, "Falta la clave de Azure."), id)
-        val region = credentials.region() ?: return@withContext SpeakResult.Failure(EngineError(EngineErrorType.CREDENTIALS, "Falta la región de Azure."), id)
+    override suspend fun prepare(text: String, params: VoiceParams) {
+        val cacheKey = cache.key(id, params.voiceId ?: DEFAULT_VOICE, params.rate, text)
+        if (cache.get(cacheKey) == null) synthesizeClip(text, params)?.let { cache.put(cacheKey, it) }
+    }
+
+    /** Descarga la frase completa (para la caché de frases cortas). */
+    private suspend fun synthesizeClip(text: String, params: VoiceParams): PcmClip? = withContext(Dispatchers.IO) {
+        val key = credentials.key() ?: return@withContext null
+        val region = credentials.region() ?: return@withContext null
+        val connection = openSynthesis(region, key, text, params)
+        try {
+            if (connection.responseCode != 200) return@withContext null
+            val pcm = connection.inputStream.use { it.readBytes() }
+            PcmClip(if (pcm.size % 2 == 1) pcm.copyOf(pcm.size - 1) else pcm, SAMPLE_RATE)
+        } catch (e: IOException) {
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun openSynthesis(region: String, key: String, text: String, params: VoiceParams): HttpURLConnection {
         val voice = params.voiceId ?: DEFAULT_VOICE
         val ratePercent = ((params.rate.coerceIn(0.5f, 2f) - 1f) * 100).toInt()
         val ssml = """<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${voice.take(5)}">""" +
             """<voice name="${voice.escapeXml()}"><prosody rate="${if (ratePercent >= 0) "+" else ""}$ratePercent%">${text.escapeXml()}</prosody></voice></speak>"""
-
-        val connection = (URL("https://$region.tts.speech.microsoft.com/cognitiveservices/v1").openConnection() as HttpURLConnection).apply {
+        return (URL("https://$region.tts.speech.microsoft.com/cognitiveservices/v1").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 6_000
@@ -126,11 +148,35 @@ class AzureNeuralVoiceEngine(
             setRequestProperty("Content-Type", "application/ssml+xml")
             setRequestProperty("X-Microsoft-OutputFormat", "raw-24khz-16bit-mono-pcm")
             setRequestProperty("User-Agent", "SaraAssistant")
+            outputStream.use { it.write(ssml.toByteArray(Charsets.UTF_8)) }
         }
+    }
+
+    override suspend fun speak(text: String, params: VoiceParams): SpeakResult = withContext(Dispatchers.IO) {
+        if (params.cacheable) {
+            val cacheKey = cache.key(id, params.voiceId ?: DEFAULT_VOICE, params.rate, text)
+            val clip = cache.get(cacheKey) ?: synthesizeClip(text, params)?.also { cache.put(cacheKey, it) }
+            if (clip != null) {
+                val token = focus.requestSpeech()
+                try {
+                    PcmPlayer.play(clip, params.volume)
+                    return@withContext SpeakResult.Completed(id)
+                } finally {
+                    focus.abandon(token)
+                }
+            }
+        }
+        val key = credentials.key() ?: return@withContext SpeakResult.Failure(EngineError(EngineErrorType.CREDENTIALS, "Falta la clave de Azure."), id)
+        val region = credentials.region() ?: return@withContext SpeakResult.Failure(EngineError(EngineErrorType.CREDENTIALS, "Falta la región de Azure."), id)
         var track: AudioTrack? = null
         val focusToken = focus.requestSpeech()
+        val connection = try {
+            openSynthesis(region, key, text, params)
+        } catch (e: IOException) {
+            focus.abandon(focusToken)
+            return@withContext SpeakResult.Failure(networkError(e), id)
+        }
         try {
-            connection.outputStream.use { it.write(ssml.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             if (code != 200) {
                 return@withContext SpeakResult.Failure(httpError(code, connection.errorStream?.bufferedReader()?.readText()), id)

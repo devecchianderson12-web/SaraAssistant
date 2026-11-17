@@ -13,6 +13,7 @@ import com.sara.core.engine.WakeWordConfig
 import com.sara.core.engine.WakeWordEngine
 import com.sara.core.engine.WakeWordResult
 import com.sara.core.util.SaraLogger
+import com.sara.core.util.WakeWordGate
 import com.sara.core.util.WakeWordTuning
 import org.json.JSONObject
 import org.vosk.Model
@@ -24,10 +25,10 @@ private const val MISSING_MODEL =
 
 /**
  * Palabra de activación con Vosk, en dos etapas y 100 % local:
- * 1. Reconocimiento continuo con gramática restringida a ["sara", "[unk]"] (liviano); la confianza
- *    por palabra se compara con la sensibilidad elegida.
- * 2. Ante un candidato, el fragmento se transcribe con vocabulario libre y sólo se acepta si
- *    «Sara» aparece al principio. Así se descartan frases parecidas («para», «subí el volumen»).
+ * 1. Reconocimiento continuo con gramática restringida a ["sara", "[unk]"]. Reacciona a los
+ *    resultados parciales (sin esperar silencio), así responde rápido y funciona con música.
+ * 2. Ante un candidato, los últimos 2,4 s se transcriben con vocabulario libre y sólo se acepta si
+ *    aparece «Sara»; con música también vale ganarle a palabras parecidas («para», «cara»…).
  */
 class VoskWakeWordEngine(
     private val models: VoskModelManager,
@@ -46,36 +47,60 @@ class VoskWakeWordEngine(
     override suspend fun awaitWakeWord(config: WakeWordConfig): WakeWordResult {
         val model = models.model()
             ?: return WakeWordResult.Failed(EngineError(EngineErrorType.NOT_AVAILABLE, MISSING_MODEL))
-        val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), GRAMMAR).apply { setWords(true) }
-        // Audio de la frase en curso (sólo en memoria, se descarta en cada fin de frase).
-        val utterance = ByteArrayOutputStream()
-        var detected: Float? = null
-        try {
-            val outcome = microphone.capture { buffer, length ->
-                if (utterance.size() < MAX_UTTERANCE_BYTES) utterance.write(buffer, 0, length)
-                if (recognizer.acceptWaveForm(buffer, length)) {
-                    val json = recognizer.result
-                    val candidate = WakeWordTuning.accept(parseWords(json), config.sensitivity)
-                    if (candidate != null) {
-                        val transcript = transcribe(model, utterance.toByteArray())
-                        if (WakeWordTuning.verifiedByTranscript(transcript)) {
-                            detected = candidate
+        while (true) {
+            // Si empieza o termina la música se reabre el micrófono con la fuente adecuada.
+            val echoCancellation = microphone.echoCancellationWanted()
+            val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), GRAMMAR).apply { setWords(true) }
+            val gate = WakeWordGate(config.sensitivity)
+            // Últimos ~2,4 s de audio, sólo en memoria.
+            val window = ArrayDeque<ByteArray>()
+            var detected = false
+            var restart = false
+            var chunks = 0
+            try {
+                val outcome = microphone.capture(echoCancellation) { buffer, length ->
+                    window.addLast(buffer.copyOf(length))
+                    while (window.size > WINDOW_CHUNKS) window.removeFirst()
+                    val candidate = if (recognizer.acceptWaveForm(buffer, length)) {
+                        gate.onFinal(parseWords(recognizer.result))
+                    } else {
+                        gate.onPartial(JSONObject(recognizer.partialResult).optString("partial").split(' '))
+                    }
+                    if (candidate) {
+                        if (verify(model, window, echoCancellation, config.sensitivity)) {
+                            detected = true
                         } else {
+                            gate.rejected()
                             logger.d(TAG, "Candidato rechazado en la verificación")
                         }
                     }
-                    utterance.reset()
+                    chunks++
+                    if (!detected && chunks % MUSIC_CHECK_CHUNKS == 0 && microphone.echoCancellationWanted() != echoCancellation) {
+                        restart = true
+                    }
+                    !detected && !restart
                 }
-                detected == null
+                if (detected) return WakeWordResult.Detected(null)
+                if (restart) continue
+                return when (outcome) {
+                    is CaptureOutcome.Failed -> WakeWordResult.Failed(outcome.error)
+                    is CaptureOutcome.Completed -> WakeWordResult.Failed(EngineError(EngineErrorType.AUDIO_INPUT, "El micrófono se cerró."))
+                }
+            } finally {
+                recognizer.close()
             }
-            detected?.let { return WakeWordResult.Detected(it) }
-            return when (outcome) {
-                is CaptureOutcome.Failed -> WakeWordResult.Failed(outcome.error)
-                is CaptureOutcome.Completed -> WakeWordResult.Failed(EngineError(EngineErrorType.AUDIO_INPUT, "El micrófono se cerró."))
-            }
-        } finally {
-            recognizer.close()
         }
+    }
+
+    /**
+     * Segunda etapa sobre la ventana de audio: transcripción libre (estricta). Con música, como la
+     * transcripción libre se confunde, también vale ganarle a palabras parecidas («para», «cara»…).
+     */
+    private fun verify(model: Model, window: ArrayDeque<ByteArray>, musicPlaying: Boolean, sensitivity: Float): Boolean {
+        val audio = ByteArrayOutputStream(window.sumOf { it.size }).apply { window.forEach { write(it) } }.toByteArray()
+        if (WakeWordTuning.verifiedByTranscript(transcribe(model, audio, null))) return true
+        if (!musicPlaying || sensitivity < 0.3f) return false
+        return "sara" in transcribe(model, audio, COMPETITORS).split(' ')
     }
 
     private fun parseWords(json: String): List<Pair<String, Float>> {
@@ -91,8 +116,9 @@ class VoskWakeWordEngine(
     }
 
     /** Segunda etapa: transcripción libre del fragmento candidato (sólo se ejecuta ante un posible «Sara»). */
-    private fun transcribe(model: Model, audio: ByteArray): String {
-        val free = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat())
+    private fun transcribe(model: Model, audio: ByteArray, grammar: String?): String {
+        val free = if (grammar == null) Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat())
+        else Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), grammar)
         return try {
             free.acceptWaveForm(audio, audio.size)
             JSONObject(free.finalResult).optString("text")
@@ -104,7 +130,9 @@ class VoskWakeWordEngine(
     private companion object {
         const val TAG = "VoskWake"
         const val GRAMMAR = "[\"sara\", \"[unk]\"]"
-        const val MAX_UTTERANCE_BYTES = MicrophoneSource.SAMPLE_RATE * 2 * 8 // 8 s
+        const val WINDOW_CHUNKS = 24 // 2,4 s
+        const val MUSIC_CHECK_CHUNKS = 20 // cada 2 s
+        val COMPETITORS: String = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
     }
 }
 
@@ -131,6 +159,7 @@ class VoskSpeechRecognitionEngine(
         var text: String? = null
         var heardSpeech = false
         var lastPartial = ""
+        var lastChange = start
         try {
             val outcome = microphone.capture { buffer, length ->
                 val elapsed = System.currentTimeMillis() - start
@@ -145,11 +174,17 @@ class VoskSpeechRecognitionEngine(
                     if (partial.isNotEmpty() && partial != lastPartial) {
                         heardSpeech = true
                         lastPartial = partial
+                        lastChange = System.currentTimeMillis()
                         onPartial(partial)
                     }
                 }
                 when {
                     !heardSpeech && elapsed > request.noSpeechTimeoutMillis -> false
+                    // Con música de fondo nunca hay silencio: si la transcripción dejó de cambiar, la orden terminó.
+                    heardSpeech && System.currentTimeMillis() - lastChange > STABLE_PARTIAL_MS -> {
+                        text = JSONObject(recognizer.finalResult).optString("text").trim()
+                        false
+                    }
                     elapsed > request.maxSpeechMillis -> {
                         text = JSONObject(recognizer.finalResult).optString("text").trim()
                         false
@@ -169,5 +204,9 @@ class VoskSpeechRecognitionEngine(
         } finally {
             recognizer.close()
         }
+    }
+
+    private companion object {
+        const val STABLE_PARTIAL_MS = 1_100L
     }
 }

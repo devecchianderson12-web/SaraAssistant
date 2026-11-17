@@ -5,7 +5,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.NoiseSuppressor
 import android.media.MediaRecorder
 import com.sara.core.engine.EngineError
 import com.sara.core.engine.EngineErrorType
@@ -27,7 +31,21 @@ sealed interface CaptureOutcome {
  * Captura PCM 16 bits mono a 16 kHz. El micrófono se abre sólo durante [capture] y se libera
  * siempre al terminar o cancelar; nunca se guarda audio.
  */
-class MicrophoneSource(private val context: Context, private val levels: AudioLevelMeter) {
+class MicrophoneSource(
+    private val context: Context,
+    private val levels: AudioLevelMeter,
+    /** Ajuste del usuario: usar cancelación de eco cuando hay música sonando. */
+    private val echoCancellationEnabled: () -> Boolean = { true },
+) {
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+
+    /**
+     * Con música sonando por el parlante el micrófono la capta y tapa la voz. En ese caso se graba con
+     * la fuente VOICE_COMMUNICATION, que en la mayoría de los teléfonos aplica la cancelación de eco
+     * del hardware (resta lo que sale por el parlante), más los efectos AEC/NS si existen.
+     */
+    fun echoCancellationWanted(): Boolean = echoCancellationEnabled() && audioManager.isMusicActive
+
     private val _active = MutableStateFlow(false)
 
     /** `true` mientras Sara tiene el micrófono abierto (indicador de privacidad). */
@@ -43,14 +61,17 @@ class MicrophoneSource(private val context: Context, private val levels: AudioLe
 
     /** Entrega bloques de ~100 ms a [onChunk] hasta que devuelva `false` o se cancele la corrutina. */
     @SuppressLint("MissingPermission")
-    suspend fun capture(onChunk: (ByteArray, Int) -> Boolean): CaptureOutcome = withContext(Dispatchers.IO) {
+    suspend fun capture(
+        echoCancellation: Boolean = echoCancellationWanted(),
+        onChunk: (ByteArray, Int) -> Boolean,
+    ): CaptureOutcome = withContext(Dispatchers.IO) {
         if (!hasPermission()) {
             return@withContext CaptureOutcome.Failed(EngineError(EngineErrorType.PERMISSION, "Sara no tiene permiso para usar el micrófono."))
         }
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = try {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                if (echoCancellation) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -65,6 +86,7 @@ class MicrophoneSource(private val context: Context, private val levels: AudioLe
             record.release()
             return@withContext CaptureOutcome.Failed(EngineError(EngineErrorType.AUDIO_INPUT, "No se pudo abrir el micrófono."))
         }
+        val effects = if (echoCancellation) attachEchoEffects(record.audioSessionId) else emptyList()
         var allSilent = true
         var silentChunks = 0
         try {
@@ -94,9 +116,19 @@ class MicrophoneSource(private val context: Context, private val levels: AudioLe
             CaptureOutcome.Failed(EngineError(EngineErrorType.AUDIO_INPUT, "El micrófono dejó de responder.", e))
         } finally {
             runCatching { record.stop() }
+            effects.forEach { runCatching { it.release() } }
             record.release()
             _active.value = false
             levels.reset()
+        }
+    }
+
+    private fun attachEchoEffects(sessionId: Int): List<AudioEffect> = buildList {
+        if (AcousticEchoCanceler.isAvailable()) {
+            runCatching { AcousticEchoCanceler.create(sessionId)?.apply { enabled = true } }.getOrNull()?.let(::add)
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(sessionId)?.apply { enabled = true } }.getOrNull()?.let(::add)
         }
     }
 

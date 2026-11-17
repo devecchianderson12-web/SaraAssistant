@@ -208,7 +208,9 @@ class DefaultCommandExecutor(
 class ResponseCatalog(private val random: Random = Random.Default) {
     private fun pick(vararg options: String) = options[random.nextInt(options.size)]
 
-    fun listening() = pick("Te escucho.", "Decime.", "Te escucho, decime.")
+    /** Frases de confirmación: son fijas para poder tenerlas pregrabadas y responder al instante. */
+    val listeningPhrases = listOf("Te escucho.", "Decime.", "Te escucho, decime.")
+    fun listening() = listeningPhrases[random.nextInt(listeningPhrases.size)]
     fun cancelled() = pick("Listo.", "Dale, cancelado.")
     fun notUnderstood() = "No te entendí bien. Podés pedirme, por ejemplo, que ponga música o que suba el volumen."
     fun didNotHear() = "No te escuché bien. Probá de nuevo."

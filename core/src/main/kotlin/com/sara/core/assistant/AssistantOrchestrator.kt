@@ -181,7 +181,24 @@ class AssistantOrchestrator(
 
     // -----------------------------------------------------------------------------------------
 
+    /** Pregraba «Te escucho» con los motores que se pueden usar, para responder sin esperar a la red. */
+    private suspend fun prepareAcknowledgements(cfg: AssistantConfig) {
+        if (cfg.acknowledgement != Acknowledgement.VOICE && cfg.acknowledgement != Acknowledgement.VOICE_AND_CHIME) return
+        val targets = buildList {
+            if (cfg.voiceMode != EngineMode.OFFLINE) engines.onlineVoice()?.let { add(it to cfg.onlineVoice) }
+            if (cfg.voiceMode != EngineMode.ONLINE) engines.offlineVoice()?.let { add(it to cfg.offlineVoice) }
+        }
+        for ((engine, params) in targets) {
+            if (engine.availability() !is Availability.Available) continue
+            for (phrase in responses.listeningPhrases) {
+                runCatching { engine.prepare(phrase, params.copy(cacheable = true)) }
+                    .onFailure { logger.w(TAG, "No se pudo pregrabar «$phrase»", it) }
+            }
+        }
+    }
+
     private fun startWakeLoopLocked() {
+        scope.launch { runCatching { prepareAcknowledgements(configProvider()) } }
         wakeJob = scope.launch {
             var failures = 0
             while (isActive) {
@@ -255,10 +272,10 @@ class AssistantOrchestrator(
         _events.emit(AssistantEvent.Activated(trigger))
 
         when {
-            trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE -> speak(responses.listening(), cfg)
+            trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE -> speak(responses.listening(), cfg, cacheable = true)
             trigger == Trigger.WAKE_WORD && cfg.acknowledgement == Acknowledgement.VOICE_AND_CHIME -> {
                 feedback.chime()
-                speak(responses.listening(), cfg)
+                speak(responses.listening(), cfg, cacheable = true)
             }
             cfg.acknowledgement != Acknowledgement.NONE -> feedback.chime()
         }
@@ -327,9 +344,12 @@ class AssistantOrchestrator(
         }
     }
 
-    private suspend fun speak(text: String, cfg: AssistantConfig, showErrors: Boolean = true) {
+    private suspend fun speak(text: String, cfg: AssistantConfig, showErrors: Boolean = true, cacheable: Boolean = false) {
         machine.moveTo(AssistantState.Speaking(text))
-        val result = voiceRouter.speak(cfg.voiceMode, engines.onlineVoice(), engines.offlineVoice(), text, cfg.onlineVoice, cfg.offlineVoice)
+        val result = voiceRouter.speak(
+            cfg.voiceMode, engines.onlineVoice(), engines.offlineVoice(), text,
+            cfg.onlineVoice.copy(cacheable = cacheable), cfg.offlineVoice.copy(cacheable = cacheable),
+        )
         if (result is SpeakResult.Failure && showErrors) {
             reportError(AssistantError(ErrorKind.VOICE_FAILED, "No pude hablar: ${result.error.message}"))
         }

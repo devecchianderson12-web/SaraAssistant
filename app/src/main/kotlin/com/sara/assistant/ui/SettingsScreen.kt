@@ -118,6 +118,9 @@ fun SettingsScreen(
                 listOf(Acknowledgement.VOICE to "Dice «Te escucho»", Acknowledgement.CHIME to "Señal sonora", Acknowledgement.VOICE_AND_CHIME to "Ambas", Acknowledgement.NONE to "Nada"),
                 settings.acknowledgement,
             ) { v -> actions.update { it.copy(acknowledgement = v) } }
+            SwitchRow("Escuchar con música de fondo", "Cancela el eco del parlante mientras suena música (si el teléfono lo admite)", settings.echoCancellation) { v ->
+                actions.update { it.copy(echoCancellation = v) }
+            }
             SwitchRow("Reactivar al encender el teléfono", "En Android 11+ requiere tocar una notificación, salvo que Sara sea el asistente predeterminado", settings.autostart) { v ->
                 actions.update { it.copy(autostart = v) }
             }

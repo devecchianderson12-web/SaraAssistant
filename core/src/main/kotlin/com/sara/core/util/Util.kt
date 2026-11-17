@@ -87,10 +87,67 @@ object WakeWordTuning {
     val KEYWORD_ALIASES = setOf("sara", "sarah", "zara", "zarah")
 
     /**
-     * Segunda etapa: el fragmento candidato se vuelve a transcribir con vocabulario libre y sólo se
-     * acepta si «Sara» aparece entre las primeras palabras. Elimina falsos positivos de la gramática
-     * restringida (por ejemplo «subí el volumen» o «para la próxima»).
+     * Segunda etapa: la ventana de audio (≈2,4 s) se vuelve a transcribir con vocabulario libre y sólo
+     * se acepta si aparece «Sara». Elimina falsos positivos de la gramática restringida
+     * (por ejemplo «subí el volumen» o «para la próxima»).
      */
     fun verifiedByTranscript(transcript: String): Boolean =
-        transcript.lowercase().split(' ').filter { it.isNotBlank() }.take(3).any { it in KEYWORD_ALIASES }
+        transcript.lowercase().split(' ').any { it in KEYWORD_ALIASES }
+
+    /**
+     * Con música de fondo la transcripción libre falla seguido; entonces se usa además una gramática
+     * con palabras parecidas que compiten con «Sara»: sólo gana si realmente se pronunció.
+     */
+    val COMPETITOR_GRAMMAR = listOf(
+        "sara", "para", "paraba", "parar", "separar", "separa", "cara", "clara", "sala", "casa", "era", "ahora",
+        "zapa", "sabe", "saca", "saga", "salta", "santa", "sana", "tara", "vara", "rara", "sarta", "farra",
+        "jarra", "barra", "guitarra", "[unk]",
+    )
+
+    /** Cantidad de resultados parciales seguidos con «sara» para pasar a verificación. */
+    fun requiredPartialHits(sensitivity: Float): Int = when {
+        sensitivity >= 0.7f -> 1
+        sensitivity >= 0.3f -> 2
+        else -> 3
+    }
+}
+
+/**
+ * Primera etapa del detector, sin esperar a que termine la frase: reacciona a los resultados
+ * parciales (unos 100-300 ms después de decir «Sara»), lo que además funciona con música de fondo,
+ * donde nunca hay silencio para cerrar una frase.
+ */
+class WakeWordGate(private val sensitivity: Float) {
+    private val requiredHits = WakeWordTuning.requiredPartialHits(sensitivity)
+    private var hits = 0
+    private var cooldown = 0
+
+    fun onFinal(words: List<Pair<String, Float>>): Boolean {
+        hits = 0
+        if (cooldown > 0) {
+            cooldown--
+            return false
+        }
+        return WakeWordTuning.accept(words, sensitivity) != null
+    }
+
+    fun onPartial(tokens: List<String>): Boolean {
+        if (cooldown > 0) {
+            cooldown--
+            hits = 0
+            return false
+        }
+        hits = if ("sara" in tokens) hits + 1 else 0
+        return hits >= requiredHits
+    }
+
+    /** El candidato no pasó la verificación: se ignoran unos bloques para no reverificar lo mismo. */
+    fun rejected() {
+        hits = 0
+        cooldown = COOLDOWN_CHUNKS
+    }
+
+    private companion object {
+        const val COOLDOWN_CHUNKS = 5
+    }
 }

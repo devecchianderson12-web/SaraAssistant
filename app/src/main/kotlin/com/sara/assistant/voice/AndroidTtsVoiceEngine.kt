@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -86,8 +87,10 @@ class SharedTextToSpeech(private val context: Context) {
  * La calidad depende de las voces que el usuario tenga instaladas: no se promete calidad neuronal.
  */
 class AndroidTtsVoiceEngine(
+    private val context: Context,
     private val shared: SharedTextToSpeech,
     private val focus: AudioFocusHelper,
+    private val cache: PhraseCache,
     private val networkVoices: Boolean,
 ) : VoiceEngine {
     override val id = if (networkVoices) "android-tts-network" else "android-tts-local"
@@ -125,11 +128,30 @@ class AndroidTtsVoiceEngine(
             }
     }
 
+    override suspend fun prepare(text: String, params: VoiceParams) {
+        val tts = shared.get() ?: return
+        val voice = chooseVoice(tts, params) ?: return
+        val key = cache.key(id, voice.name, params.rate, text)
+        if (cache.get(key) == null) synthesizeClip(tts, voice, text, params)?.let { cache.put(key, it) }
+    }
+
     override suspend fun speak(text: String, params: VoiceParams): SpeakResult {
         val tts = shared.get()
             ?: return SpeakResult.Failure(EngineError(EngineErrorType.NOT_AVAILABLE, "No hay motor de texto a voz."), id)
         val voice = chooseVoice(tts, params)
             ?: return SpeakResult.Failure(EngineError(EngineErrorType.NOT_AVAILABLE, "No hay voces en español disponibles."), id)
+        if (params.cacheable) {
+            val clip = cache.get(cache.key(id, voice.name, params.rate, text))
+            if (clip != null) {
+                val request = focus.requestSpeech()
+                try {
+                    PcmPlayer.play(clip, params.volume)
+                    return SpeakResult.Completed(id)
+                } finally {
+                    focus.abandon(request)
+                }
+            }
+        }
         val utteranceId = UUID.randomUUID().toString()
         val done = shared.register(utteranceId)
         val request = focus.requestSpeech()
@@ -147,6 +169,22 @@ class AndroidTtsVoiceEngine(
         } finally {
             if (!done.isCompleted) tts.stop()
             focus.abandon(request)
+        }
+    }
+
+    /** Sintetiza a un WAV temporal y lo convierte en PCM (para la caché de frases). */
+    private suspend fun synthesizeClip(tts: TextToSpeech, voice: Voice, text: String, params: VoiceParams): PcmClip? {
+        val file = File(context.cacheDir, "tts-${UUID.randomUUID()}.wav")
+        val utteranceId = UUID.randomUUID().toString()
+        val done = shared.register(utteranceId)
+        return try {
+            tts.voice = voice
+            tts.setSpeechRate(params.rate.coerceIn(0.5f, 2f))
+            if (tts.synthesizeToFile(text, Bundle(), file, utteranceId) != TextToSpeech.SUCCESS) return null
+            val ok = withTimeoutOrNull(15_000) { done.await() } ?: false
+            if (ok) PcmPlayer.fromWav(file) else null
+        } finally {
+            file.delete()
         }
     }
 
