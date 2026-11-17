@@ -61,7 +61,7 @@ data class SaraSettings(
     /** Activación con «Ey Sara» (true, menos falsas activaciones) o con «Sara» sola. */
     val heySara: Boolean = true,
     /** Ahorro de batería: escuchar «Ey Sara» sólo con la pantalla encendida. */
-    val listenOnlyWithScreenOn: Boolean = true,
+    val listenOnlyWithScreenOn: Boolean = false,
     /** Mostrar la esfera a pantalla completa al llamarla fuera de la app (también bloqueado). */
     val sphereOverlay: Boolean = true,
 )
@@ -114,7 +114,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val aiProvider = stringPreferencesKey("ai_provider")
         val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
         val heySara = booleanPreferencesKey("hey_sara")
-        val listenOnlyWithScreenOn = booleanPreferencesKey("listen_only_screen_on")
+        val listenOnlyWithScreenOn = booleanPreferencesKey("listen_only_screen_on_v2")
         val sphereOverlay = booleanPreferencesKey("sphere_overlay")
     }
 

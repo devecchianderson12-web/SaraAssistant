@@ -137,7 +137,7 @@ fun SettingsScreen(
             ) { v -> actions.update { it.copy(sphereOverlay = v) } }
             SwitchRow(
                 "Ahorrar batería",
-                "Escuchar «Ey Sara» sólo con la pantalla encendida. Con la pantalla apagada el micrófono queda cerrado.",
+                "Apagado (recomendado): Sara te escucha también con la pantalla apagada. Encendido: sólo con la pantalla encendida, gasta menos.",
                 settings.listenOnlyWithScreenOn,
             ) { v -> actions.update { it.copy(listenOnlyWithScreenOn = v) } }
             Text(
