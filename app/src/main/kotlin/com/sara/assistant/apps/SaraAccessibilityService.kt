@@ -11,6 +11,7 @@ import com.sara.core.execution.CloseAppsResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 sealed interface ChatSendResult {
     data object Sent : ChatSendResult
@@ -82,7 +83,8 @@ class SaraAccessibilityService : AccessibilityService() {
     }
 
     private fun pkgNodes(pkg: String): List<AccessibilityNodeInfo> =
-        windows.mapNotNull { it.root }.filter { it.packageName == pkg }.flatMap { it.descendants() }
+        (windows.mapNotNull { it.root } + listOfNotNull(rootInActiveWindow))
+            .filter { it.packageName == pkg }.distinctBy { it.windowId }.flatMap { it.descendants() }
 
     private fun AccessibilityNodeInfo.click(): Boolean =
         clickableSelfOrParent()?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
@@ -100,53 +102,15 @@ class SaraAccessibilityService : AccessibilityService() {
      * chat en WhatsApp, lo abre, escribe el mensaje y toca «Enviar». WhatsApp ya debe estar abierto.
      */
     private suspend fun sendBySearch(pkg: String, chat: String, message: String): ChatSendResult = withContext(Dispatchers.Main) {
-        // 1. Abrir la búsqueda (si WhatsApp quedó dentro de un chat, se vuelve atrás).
-        var typed = false
-        var clickedSearch = false
-        for (attempt in 0 until 16) {
-            delay(if (attempt == 0) 1_000 else 400)
-            val nodes = pkgNodes(pkg)
-            if (nodes.isEmpty()) continue
-            // Dentro de un chat (hay caja para escribir): volver a la lista.
-            if (nodes.any { it.viewIdResourceName == "$pkg:id/entry" }) {
-                performGlobalAction(GLOBAL_ACTION_BACK)
-                continue
-            }
-            // Después de tocar la búsqueda, el único campo de texto es el de buscar.
-            val field = if (clickedSearch) nodes.firstOrNull { it.isEditable } else null
-            if (field != null && field.type(chat)) {
-                typed = true
-                break
-            }
-            // Barra «Preguntar a Meta AI o buscar» o la lupa.
-            val button = nodes.firstOrNull { it.viewIdResourceName in SEARCH_IDS.map { id -> "$pkg:id/$id" } }
-                ?: nodes.firstOrNull { it.isSearchLike() }
-            if (button != null) {
-                // Si la barra ya es un campo de texto, alcanza con enfocarla.
-                clickedSearch = button.click() || button.performAction(AccessibilityNodeInfo.ACTION_FOCUS) || clickedSearch
-            }
+        // 1. Llegar a la lista de chats (si WhatsApp quedó dentro de un chat, se vuelve atrás).
+        if (!reachChatList(pkg)) {
+            log("WhatsApp no mostró la lista de chats. En pantalla: ${screenSummary(pkg)}")
+            return@withContext ChatSendResult.Failed("WhatsApp no respondió")
         }
-        if (!typed) {
-            log("No encontré la búsqueda de WhatsApp. En pantalla: ${pkgNodes(pkg).flatMap { it.labels() + listOfNotNull(it.viewIdResourceName) }.distinct().take(40)}")
-            return@withContext ChatSendResult.Failed("No encontré la búsqueda de WhatsApp")
-        }
-
-        // 2. Elegir el chat que mejor coincide con el nombre.
-        var opened = false
-        for (attempt in 0 until 8) {
-            delay(500)
-            val texts = pkgNodes(pkg).filter { !it.isEditable && !it.text.isNullOrBlank() }
-            // Primero las filas de chats; si WhatsApp cambió los nombres internos, cualquier texto visible.
-            val rows = texts.filter { n ->
-                n.viewIdResourceName?.let { id -> "contact_name" in id || "conversations_row" in id || "contact_row" in id } == true
-            }.ifEmpty { texts.filterNot { it.isSearchLike() } }
-            val candidates = rows.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) }
-            val best = com.sara.core.apps.AppMatcher.best(chat, candidates) ?: continue
-            opened = rows[best.id.toInt()].click()
-            if (opened) break
-        }
+        // 2. Abrir el chat: primero en la lista visible, después en «Archivados» y por último buscándolo.
+        val opened = openFromList(pkg, chat) || openFromArchived(pkg, chat) || openFromSearch(pkg, chat)
         if (!opened) {
-            log("No apareció «$chat». Resultados: ${pkgNodes(pkg).mapNotNull { it.text?.toString() }.distinct().take(30)}")
+            log("No encontré «$chat». En pantalla: ${screenSummary(pkg)}")
             performGlobalAction(GLOBAL_ACTION_BACK)
             return@withContext ChatSendResult.ChatNotFound
         }
@@ -170,6 +134,104 @@ class SaraAccessibilityService : AccessibilityService() {
             }
         }
         ChatSendResult.Failed("No pude escribir en el chat").also { log(it.message) }
+    }
+
+    private fun screenSummary(pkg: String) =
+        pkgNodes(pkg).flatMap { it.labels() + listOfNotNull(it.viewIdResourceName?.substringAfter(":id/")) }.distinct().take(50)
+
+    private suspend fun reachChatList(pkg: String): Boolean {
+        repeat(10) { attempt ->
+            delay(if (attempt == 0) 1_000 else 450)
+            val nodes = pkgNodes(pkg)
+            if (nodes.isEmpty()) return@repeat
+            // Dentro de un chat o de la búsqueda: atrás.
+            if (nodes.any { it.viewIdResourceName == "$pkg:id/entry" || (it.isEditable && it.isFocused) }) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                return@repeat
+            }
+            return true
+        }
+        return pkgNodes(pkg).isNotEmpty()
+    }
+
+    /** Busca [chat] entre los nombres visibles y lo abre; baja la lista unas veces si no aparece. */
+    private suspend fun openFromList(pkg: String, chat: String, scrolls: Int = 2): Boolean {
+        repeat(scrolls + 1) { round ->
+            val rows = chatNames(pkg)
+            val best = com.sara.core.apps.AppMatcher.best(chat, rows.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) })
+            if (best != null && tap(rows[best.id.toInt()])) return true
+            if (round < scrolls) {
+                val list = pkgNodes(pkg).firstOrNull { it.isScrollable } ?: return false
+                list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                delay(500)
+            }
+        }
+        return false
+    }
+
+    private fun chatNames(pkg: String): List<AccessibilityNodeInfo> {
+        val texts = pkgNodes(pkg).filter { !it.isEditable && !it.text.isNullOrBlank() }
+        return texts.filter { n ->
+            n.viewIdResourceName?.let { id -> "contact_name" in id || "conversations_row" in id || "contact_row" in id } == true
+        }.ifEmpty { texts.filterNot { it.isSearchLike() || ARCHIVED.matches(it.text.toString().trim().lowercase()) } }
+    }
+
+    private suspend fun openFromArchived(pkg: String, chat: String): Boolean {
+        // «Archivados» está arriba de la lista; si no se ve, se sube.
+        var archived = pkgNodes(pkg).firstOrNull { n -> n.labels().any { ARCHIVED.matches(it) } }
+        if (archived == null) {
+            pkgNodes(pkg).firstOrNull { it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+            delay(400)
+            archived = pkgNodes(pkg).firstOrNull { n -> n.labels().any { ARCHIVED.matches(it) } }
+        }
+        if (archived == null || !tap(archived)) return false
+        delay(800)
+        if (openFromList(pkg, chat, scrolls = 4)) return true
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        delay(500)
+        return false
+    }
+
+    private suspend fun openFromSearch(pkg: String, chat: String): Boolean {
+        var clicked = false
+        repeat(8) {
+            val nodes = pkgNodes(pkg)
+            val field = if (clicked) nodes.firstOrNull { it.isEditable } else null
+            if (field != null && field.type(chat)) {
+                repeat(6) {
+                    delay(600)
+                    if (openFromList(pkg, chat, scrolls = 0)) return true
+                }
+                return false
+            }
+            val button = nodes.firstOrNull { it.viewIdResourceName in SEARCH_IDS.map { id -> "$pkg:id/$id" } }
+                ?: nodes.firstOrNull { it.isSearchLike() }
+            if (button != null) clicked = tap(button) || button.performAction(AccessibilityNodeInfo.ACTION_FOCUS) || clicked
+            delay(500)
+        }
+        return false
+    }
+
+    /** Toca el elemento: con la acción de accesibilidad o, si no es tocable, con un gesto en su centro. */
+    private suspend fun tap(node: AccessibilityNodeInfo): Boolean {
+        if (node.click()) return true
+        val bounds = android.graphics.Rect().also(node::getBoundsInScreen)
+        if (bounds.isEmpty) return false
+        val path = android.graphics.Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60))
+            .build()
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val sent = dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                    if (cont.isActive) cont.resume(true)
+                }
+                override fun onCancelled(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                    if (cont.isActive) cont.resume(false)
+                }
+            }, null)
+            if (!sent && cont.isActive) cont.resume(false)
+        }
     }
 
     private fun AccessibilityNodeInfo.isSearchLike(): Boolean =
@@ -254,6 +316,7 @@ class SaraAccessibilityService : AccessibilityService() {
         }
 
         private val SEARCH_LABEL = Regex("busc|search|pregunt[aá]r? a meta")
+        private val ARCHIVED = Regex("archivad[oa]s?(\\s*\\(\\d+\\))?|archived(\\s*\\(\\d+\\))?|\\d+\\s+archivad[oa]s?")
         private val SEARCH_IDS = listOf("menuitem_search", "my_search_bar", "search_bar", "search_bar_inner", "search_input", "search_src_text")
 
         suspend fun sendToChat(context: Context, pkg: String, chat: String, message: String): ChatSendResult {

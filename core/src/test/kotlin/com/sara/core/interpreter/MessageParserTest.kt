@@ -45,6 +45,18 @@ class MessageParserTest {
     }
 
     @Test
+    fun `grupo dicho de varias formas`() {
+        assertEquals(
+            CommandIntent.SendMessage("notas", "Hola", group = true),
+            intentOf("Envía un mensaje a WhatsApp en el grupo de notas que diga hola"),
+        )
+        assertEquals(
+            CommandIntent.SendMessage("notas", "Hola", group = true),
+            intentOf("mandá un mensaje al grupo notas que está en archivados que diga hola"),
+        )
+    }
+
+    @Test
     fun `contacto al final`() {
         assertEquals(
             CommandIntent.SendMessage("juan pérez", "Hola"),

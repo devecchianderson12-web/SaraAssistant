@@ -78,12 +78,19 @@ object MessageParser {
     }
 
     private val GROUP = Regex("^(?:el\\s+|un\\s+|mi\\s+)?(?:grupo|chat)\\b\\s*(?:que\\s+(?:dice|se\\s+llama|tiene\\s+de\\s+nombre)|llamado|de\\s+nombre|de)?\\s*", RegexOption.IGNORE_CASE)
-    private val TAIL = Regex("\\s*(?:,|\\s(?:en|de)\\s+(?:mi\\s+)?$WA\\b|\\s(?:en|de)\\s+el\\s+(?:cual|que)\\b|\\sdonde\\b|\\sque\\s+(?:es|tiene)\\b).*$", RegexOption.IGNORE_CASE)
+    private val TAIL = Regex(
+        "\\s*(?:,|\\s(?:en|de)\\s+(?:mi\\s+)?$WA\\b|\\s(?:en|de)\\s+el\\s+(?:cual|que)\\b|\\sdonde\\b|\\sque\\s+(?:es|tiene|est[aá])\\b|" +
+            "\\s(?:en|de)\\s+(?:los\\s+|la\\s+parte\\s+de\\s+)?archivad[oa]s?\\b).*$",
+        RegexOption.IGNORE_CASE,
+    )
+    private val LEADING_APP = Regex("^(?:mi\\s+)?$WA\\s*,?\\s*(?:(?:en|a|al|para|del?)\\s+)?(?:(?:el|la)\\s+)?", RegexOption.IGNORE_CASE)
     private val QUOTED = Regex("[\"«“]([^\"»”]+)[\"»”]")
 
     /** «grupo que dice "notas" en mi WhatsApp en el cual solo estoy yo» -> ("notas", grupo). */
     private fun cleanContact(raw: String): Pair<String, Boolean> {
         var text = raw.trim().replace(Regex("\\s*(?:por|en|de)\\s+$WA\\s*$", RegexOption.IGNORE_CASE), "")
+        // «WhatsApp en el grupo de notas» / «mi WhatsApp, al grupo …»: la app adelante no es parte del nombre.
+        text = text.replace(LEADING_APP, "")
         val group = GROUP.containsMatchIn(text)
         QUOTED.find(text)?.let { return it.groupValues[1].trim() to group }
         text = text.replace(GROUP, "").replace(TAIL, "")
