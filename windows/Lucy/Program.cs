@@ -233,7 +233,7 @@ public sealed class LucyApp
         menu.Items.Add(service);
 
         var sensitivity = new Forms.ToolStripMenuItem("Sensibilidad");
-        foreach (var (value, label) in new[] { (0.3, "Baja"), (0.5, "Media"), (0.8, "Alta"), (0.9, "Máxima") })
+        foreach (var (value, label) in new[] { (0.3, "Baja (menos activaciones por error)"), (0.5, "Media"), (0.8, "Alta"), (0.9, "Máxima") })
         {
             var item = new Forms.ToolStripMenuItem(label) { Checked = Math.Abs(settings.Sensitivity - value) < 0.01 };
             item.Click += (_, _) =>

@@ -190,8 +190,8 @@ public sealed class Listener : IDisposable
     /// <summary>Segunda etapa sobre los últimos 2,4 s.</summary>
     private bool Verify()
     {
-        // Muy sensible: alcanza con la primera etapa.
-        if (Sensitivity() >= 0.85) return true;
+        // Sensibilidad media o más: alcanza con la primera etapa («luci» estable). Baja: además verifica.
+        if (Sensitivity() >= 0.45) return true;
         return VerifyAudio(model, window.SelectMany(b => b).ToArray());
     }
 
