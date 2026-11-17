@@ -97,7 +97,9 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
-            adb install -r SaraAssistant-*.apk
+            adb wait-for-device
+            for i in $(seq 1 30); do adb shell pm path android >/dev/null 2>&1 && break; sleep 2; done
+            for i in 1 2 3; do adb install -r SaraAssistant-*.apk && break; sleep 5; done
             adb logcat -c
             adb shell am start -W -n com.sara.assistant/.ui.MainActivity
             sleep 12

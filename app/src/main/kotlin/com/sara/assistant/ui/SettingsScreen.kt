@@ -129,6 +129,16 @@ fun SettingsScreen(
                 settings.heySara,
                 subtitle = "«Ey Sara» se activa sólo con el llamado completo: menos activaciones por error.",
             ) { v -> actions.update { it.copy(heySara = v) } }
+            SwitchRow(
+                "Ahorrar batería",
+                "Escuchar «Ey Sara» sólo con la pantalla encendida. Con la pantalla apagada el micrófono queda cerrado.",
+                settings.listenOnlyWithScreenOn,
+            ) { v -> actions.update { it.copy(listenOnlyWithScreenOn = v) } }
+            Text(
+                "Sin gastar batería, como el asistente de Google: apagá «Detectar» y elegí a Sara como asistente predeterminado " +
+                    "(Ajustes › Sistema). Se abre manteniendo apretado el botón de encendido o deslizando desde una esquina, según el teléfono.",
+                style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted,
+            )
             SwitchRow("Activación manual", "Tocar el círculo central para hablar", settings.manualActivationEnabled) { v ->
                 actions.update { it.copy(manualActivationEnabled = v) }
             }

@@ -30,7 +30,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 object SaraNotifications {
-    const val CHANNEL_LISTENING = "sara_listening"
+    /** Canal mínimo: la notificación obligatoria del servicio queda plegada y sin ícono arriba. */
+    const val CHANNEL_LISTENING = "sara_listening_min"
     const val CHANNEL_ALERTS = "sara_alerts"
     const val ID_LISTENING = 1
     const val ID_RESUME = 2
@@ -39,7 +40,7 @@ object SaraNotifications {
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_LISTENING, "Escucha de Sara", NotificationManager.IMPORTANCE_LOW).apply {
+            NotificationChannel(CHANNEL_LISTENING, "Escucha de Sara", NotificationManager.IMPORTANCE_MIN).apply {
                 description = "Indica que Sara está esperando su nombre."
                 setShowBadge(false)
             },
@@ -93,6 +94,24 @@ object SaraNotifications {
  */
 class SaraListeningService : LifecycleService() {
 
+    /**
+     * Ahorro de batería: con «sólo con la pantalla encendida», al apagar la pantalla se cierra el
+     * micrófono y al encenderla se vuelve a escuchar.
+     */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val c = container
+            if (!c.settings.settings.value.listenOnlyWithScreenOn || !c.settings.settings.value.wakeWordEnabled) return
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> if (!c.orchestrator.isInteractionActive) c.orchestrator.setWakeWordEnabled(false)
+                Intent.ACTION_SCREEN_ON -> c.orchestrator.setWakeWordEnabled(true)
+            }
+        }
+    }
+    private var screenReceiverRegistered = false
+
+    private fun screenOn() = getSystemService(android.os.PowerManager::class.java)?.isInteractive != false
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         val c = container
@@ -115,7 +134,15 @@ class SaraListeningService : LifecycleService() {
                 }
                 if (!enterForeground()) return START_NOT_STICKY
                 getSystemService(NotificationManager::class.java).cancel(SaraNotifications.ID_RESUME)
-                c.orchestrator.setWakeWordEnabled(true)
+                if (!screenReceiverRegistered) {
+                    registerReceiver(screenReceiver, android.content.IntentFilter().apply {
+                        addAction(Intent.ACTION_SCREEN_OFF)
+                        addAction(Intent.ACTION_SCREEN_ON)
+                    })
+                    screenReceiverRegistered = true
+                }
+                // Con la pantalla apagada (y el ahorro activado) no se abre el micrófono hasta encenderla.
+                c.orchestrator.setWakeWordEnabled(!(c.settings.settings.value.listenOnlyWithScreenOn && !screenOn()))
             }
         }
         // Si el sistema o el fabricante mata el proceso, Android vuelve a crear el servicio.
@@ -194,7 +221,7 @@ class SaraListeningService : LifecycleService() {
     }
 
     private fun statusText(state: AssistantState) = when (state) {
-        AssistantState.Inactive -> "Detección en pausa"
+        AssistantState.Inactive -> "En pausa · vuelve a escuchar al encender la pantalla"
         AssistantState.WaitingForWakeWord -> "Esperando tu llamado · el audio se procesa en el teléfono"
         is AssistantState.Listening -> "Escuchando tu orden…"
         is AssistantState.Processing -> "Procesando…"
@@ -210,6 +237,7 @@ class SaraListeningService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
         _running.value = false
         container.orchestrator.setWakeWordEnabled(false)
         super.onDestroy()
