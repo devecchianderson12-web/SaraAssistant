@@ -29,6 +29,7 @@ class MusicUsageTracker(
     private val playingSince = mutableMapOf<String, Long>()
     private val callbacks = mutableMapOf<MediaController, MediaController.Callback>()
     private var started = false
+    private var lastStopped: Pair<String, Long>? = null
 
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
         onSessionsChanged(list.orEmpty())
@@ -52,6 +53,15 @@ class MusicUsageTracker(
         flushPlaying()
         return usage.favorite(System.currentTimeMillis(), isInstalled)
     }
+
+    /**
+     * App que está sonando o que dejó de sonar hace poco. Sirve cuando la app se pausó sola al
+     * hablarle a Sara: «sacá la música» tiene que actuar sobre ella igual.
+     */
+    @Synchronized
+    fun recentlyPlaying(windowMillis: Long = RECENT_MS): String? =
+        playingSince.keys.firstOrNull()
+            ?: lastStopped?.takeIf { SystemClock.elapsedRealtime() - it.second < windowMillis }?.first
 
     private fun onSessionsChanged(list: List<MediaController>) {
         callbacks.forEach { (controller, cb) -> controller.unregisterCallback(cb) }
@@ -81,6 +91,7 @@ class MusicUsageTracker(
     @Synchronized
     private fun stopped(pkg: String) {
         val since = playingSince.remove(pkg) ?: return
+        lastStopped = pkg to SystemClock.elapsedRealtime()
         record(pkg, SystemClock.elapsedRealtime() - since)
         save()
     }
@@ -105,5 +116,6 @@ class MusicUsageTracker(
     private companion object {
         const val TAG = "MusicUsage"
         const val KEY = "usage"
+        const val RECENT_MS = 45_000L
     }
 }

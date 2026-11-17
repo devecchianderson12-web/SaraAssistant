@@ -118,8 +118,19 @@ sealed interface AppLaunchResult {
     data class Failed(val message: String) : AppLaunchResult
 }
 
+sealed interface CloseAppsResult {
+    data object Closed : CloseAppsResult
+    /** Falta activar el servicio de accesibilidad de Sara. */
+    data object NeedsAccessibility : CloseAppsResult
+    data object DeviceLocked : CloseAppsResult
+    data class Failed(val message: String) : CloseAppsResult
+}
+
 interface AppLauncher {
     suspend fun open(name: String): AppLaunchResult
+
+    /** Cierra las apps recientes (Android sólo lo permite con accesibilidad). */
+    suspend fun closeBackgroundApps(): CloseAppsResult = CloseAppsResult.Failed("no disponible")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -156,6 +167,7 @@ class DefaultCommandExecutor(
         CommandIntent.Previous -> media(MediaAction.PREVIOUS)
         CommandIntent.StopMusic -> media(MediaAction.STOP)
         is CommandIntent.AdjustVolume -> adjustVolume(intent.change)
+        CommandIntent.CloseBackgroundApps -> closeBackgroundApps()
         CommandIntent.Cancel -> ExecutionResult(true, responses.cancelled())
         is CommandIntent.Unknown -> ExecutionResult(false, responses.notUnderstood(), ErrorKind.RECOGNITION_FAILED)
     }
@@ -167,6 +179,19 @@ class DefaultCommandExecutor(
             is AppLaunchResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.label))
             is AppLaunchResult.NotFound -> ExecutionResult(false, responses.appNotFound(result.query), ErrorKind.EXECUTION_FAILED)
             is AppLaunchResult.Failed -> ExecutionResult(false, responses.failed(result.message), ErrorKind.EXECUTION_FAILED)
+        }
+    }
+
+    private suspend fun closeBackgroundApps(): ExecutionResult {
+        // Primero se corta la música: así queda en silencio aunque no se puedan cerrar las apps.
+        val music = runCatching { media.perform(MediaAction.STOP) }.getOrNull()
+        val musicStopped = music is MediaActionResult.Done || music is MediaActionResult.PausedInstead
+        val launcher = apps ?: return ExecutionResult(false, responses.cannotCloseApps(), ErrorKind.EXECUTION_FAILED)
+        return when (val r = runCatching { launcher.closeBackgroundApps() }.getOrElse { CloseAppsResult.Failed(it.message ?: "error") }) {
+            CloseAppsResult.Closed -> ExecutionResult(true, responses.appsClosed())
+            CloseAppsResult.NeedsAccessibility -> ExecutionResult(musicStopped, responses.needsAccessibility(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
+            CloseAppsResult.DeviceLocked -> ExecutionResult(musicStopped, responses.unlockToCloseApps(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
+            is CloseAppsResult.Failed -> ExecutionResult(musicStopped, responses.cannotCloseApps(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
         }
     }
 
@@ -289,6 +314,12 @@ class ResponseCatalog(private val random: Random = Random.Default) {
         "Te dejé una notificación para abrir $label. Para que la abra directo, activá «Mostrar sobre otras apps» para Sara."
     fun appNotFound(query: String) = "No encontré ninguna app que se llame $query."
     fun cannotOpenApps() = "Todavía no puedo abrir apps en este dispositivo."
+    fun appsClosed() = "Listo, cerré todo."
+    private fun musicPrefix(stopped: Boolean) = if (stopped) "Saqué la música. " else ""
+    fun needsAccessibility(musicStopped: Boolean = false) =
+        musicPrefix(musicStopped) + "Para cerrar apps activá a Sara en Accesibilidad."
+    fun unlockToCloseApps(musicStopped: Boolean = false) = musicPrefix(musicStopped) + "Desbloqueá el teléfono para cerrar apps."
+    fun cannotCloseApps(musicStopped: Boolean = false) = musicPrefix(musicStopped) + "No pude cerrar las apps."
 
     fun volumeUp(percent: Int) = "Listo, subí el volumen al $percent por ciento."
     fun volumeDown(percent: Int) = "Listo, bajé el volumen al $percent por ciento."

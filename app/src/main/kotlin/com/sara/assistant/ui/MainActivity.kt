@@ -263,6 +263,7 @@ class MainActivity : ComponentActivity() {
                                 openOverlaySettings = {
                                     openSafely(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)))
                                 },
+                                openAccessibilitySettings = { openSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
                             ),
                             updateState = updateState,
                         )

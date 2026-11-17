@@ -71,6 +71,7 @@ class SettingsActions(
     val refresh: () -> Unit,
     val checkUpdates: () -> Unit,
     val openOverlaySettings: () -> Unit,
+    val openAccessibilitySettings: () -> Unit = {},
 )
 
 private val modeOptions = listOf(EngineMode.AUTOMATIC to "Automático", EngineMode.ONLINE to "Online", EngineMode.OFFLINE to "Offline")
@@ -246,6 +247,12 @@ fun SettingsScreen(
                 if (system.canOpenAppsFromBackground) "Permitido: «Sara, abrí YouTube» abre la app directo"
                 else "Sin permiso: Sara deja una notificación para tocar. Activá «Mostrar sobre otras apps»",
                 system.canOpenAppsFromBackground, "Permitir", actions.openOverlaySettings,
+            )
+            StatusLine(
+                "Cerrar apps en segundo plano",
+                if (system.canCloseApps) "Activado: «Sara, cerrá las apps» limpia Recientes"
+                else "Activá a Sara en Accesibilidad → Apps instaladas",
+                system.canCloseApps, "Activar", actions.openAccessibilitySettings,
             )
             StatusLine(
                 "Batería",

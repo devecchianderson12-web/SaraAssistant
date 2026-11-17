@@ -19,12 +19,14 @@ import kotlin.math.sin
 /**
  * Foco de audio "transitorio con atenuación": la música baja mientras Sara escucha o habla y
  * recupera su volumen al terminar (no se pausa, para no reanudar reproducciones que el usuario pausó).
+ * El pedido de foco se marca como «sonido» y no como «voz»: con «voz» Android no atenúa solo y le
+ * avisa a la app de música, que muchas veces se pausa (y Sara creía que no sonaba nada).
  */
 class AudioFocusHelper(context: Context) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
     fun requestSpeech(): AudioFocusRequest {

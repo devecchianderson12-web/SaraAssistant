@@ -28,6 +28,9 @@ sealed interface CommandIntent {
     data object Next : CommandIntent
     data object Previous : CommandIntent
     data object StopMusic : CommandIntent
+
+    /** «Cerrá las apps en segundo plano»: saca la música y limpia las apps recientes. */
+    data object CloseBackgroundApps : CommandIntent
     data class AdjustVolume(val change: VolumeChange) : CommandIntent
     data object Cancel : CommandIntent
     data class Unknown(val text: String) : CommandIntent
@@ -49,6 +52,7 @@ fun CommandIntent.label(): String = when (this) {
         VolumeChange.Mute -> "Silenciar"
         VolumeChange.Unmute -> "Quitar silencio"
     }
+    CommandIntent.CloseBackgroundApps -> "Cerrar apps en segundo plano"
     CommandIntent.Cancel -> "Cancelar"
     is CommandIntent.Unknown -> "No reconocida"
 }

@@ -37,6 +37,7 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         if (tokens.isEmpty()) return InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "empty")
         val ctx = Context(normalized, tokens)
         return detectCancel(ctx)
+            ?: detectCloseApps(ctx)
             ?: detectOpenApp(ctx)
             ?: detectVolume(ctx)
             ?: detectMedia(ctx)
@@ -74,6 +75,13 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         if (ctx.tokens.size > 3 || SpanishNumbers.findAll(ctx.tokens).isNotEmpty()) return null
         val cancel = ctx.any(CANCEL) || ctx.text in setOf("dejalo", "deja", "no importa", "nada mas", "listo gracias", "gracias")
         return if (cancel) ctx.result(CommandIntent.Cancel, 0.9f, "cancel") else null
+    }
+
+    /** «Cerrá las apps en segundo plano», «limpiá las recientes», «cerrá todo». */
+    private fun detectCloseApps(ctx: Context): InterpretationResult? {
+        if (!ctx.any(CLOSE_VERB)) return null
+        val target = ctx.any(APPS_NOUN) || ctx.phrase("segundo plano", "recientes", "todo", "todas")
+        return if (target) ctx.result(CommandIntent.CloseBackgroundApps, 0.9f, "close-apps") else null
     }
 
     private fun detectOpenApp(ctx: Context): InterpretationResult? {
@@ -232,6 +240,8 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
                 "el album|el disco|la playlist|la lista|musica|algo|una cancion|un tema|canciones|temas|un poco de|de|la|el)\\b",
         )
         val GENERIC_MUSIC = setOf("", "musica", "algo", "algo lindo", "cualquier cosa", "lo que sea", "algo para escuchar", "otra", "otra cosa")
+        val CLOSE_VERB = Regex("cerr[a-z]*|cierr[a-z]*|limpi[a-z]*|mat[a-z]*|elimin[a-z]*|borr[a-z]*|quit[a-z]*|sac[a-z]*")
+        val APPS_NOUN = Regex("apps?|aplicaciones|aplicacion|aplicaciones|ventanas|recientes|pestanas|programas")
         val OPEN_APP = Regex("^(?:abri|abre|abrime|abrir|abrila|abrilo|ejecuta|ejecutame|lanza|entra a|entra en|anda a|abri la app|abri la aplicacion)\\s+(.+)$")
         val OPEN_APP_FILLER = Regex("^(?:la app de|la aplicacion de|la app|la aplicacion|app|aplicacion|el|la|los|las|a|de)\\b")
     }

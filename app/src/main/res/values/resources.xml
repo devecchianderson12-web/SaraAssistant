@@ -9,4 +9,5 @@
         <item name="android:statusBarColor">@color/sara_background</item>
         <item name="android:navigationBarColor">@color/sara_background</item>
     </style>
+    <string name="accessibility_description">Permite pedirle a Sara «cerrá las apps»: abre Recientes y toca «Cerrar todo». Sara no lee ni guarda lo que hay en pantalla.</string>
 </resources>

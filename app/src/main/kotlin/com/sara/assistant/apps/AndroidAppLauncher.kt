@@ -13,6 +13,7 @@ import com.sara.core.apps.AppMatcher
 import com.sara.core.apps.InstalledApp
 import com.sara.core.execution.AppLaunchResult
 import com.sara.core.execution.AppLauncher
+import com.sara.core.execution.CloseAppsResult
 import com.sara.core.util.SaraLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -114,6 +115,8 @@ class AndroidAppLauncher(
             is StartOutcome.Failed -> AppLaunchResult.Failed(outcome.message)
         }
     }
+
+    override suspend fun closeBackgroundApps(): CloseAppsResult = SaraAccessibilityService.closeRecentApps(context)
 
     private companion object {
         const val TAG = "Apps"

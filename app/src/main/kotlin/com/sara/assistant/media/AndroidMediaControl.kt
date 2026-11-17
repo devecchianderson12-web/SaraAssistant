@@ -129,7 +129,9 @@ class AndroidMediaControl(
         if (controllers == null) {
             return@withContext performWithoutAccess(action)
         }
+        // Si la app se pausó sola cuando Sara empezó a escuchar, sigue contando como «la que suena».
         val playing = controllers.firstOrNull { it.isPlaying() }
+            ?: usage.recentlyPlaying()?.let { pkg -> controllers.firstOrNull { it.packageName == pkg } }
         val target = playing ?: controllers.firstOrNull()
 
         when (action) {

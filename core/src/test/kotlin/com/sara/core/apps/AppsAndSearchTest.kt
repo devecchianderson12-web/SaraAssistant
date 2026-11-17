@@ -61,4 +61,15 @@ class SearchAndOpenInterpreterTest {
         assertEquals(CommandIntent.StopMusic, intentOf("sacá la música por completo"))
         assertEquals(CommandIntent.StopMusic, intentOf("cerrá la música"))
     }
+
+    @Test
+    fun `cerrar apps en segundo plano`() {
+        assertEquals(CommandIntent.CloseBackgroundApps, intentOf("cerrá las aplicaciones que están en segundo plano"))
+        assertEquals(CommandIntent.CloseBackgroundApps, intentOf("Sara, cerrame las apps"))
+        assertEquals(CommandIntent.CloseBackgroundApps, intentOf("limpiá las recientes"))
+        assertEquals(CommandIntent.CloseBackgroundApps, intentOf("sacá la música, pará y cerrame las aplicaciones en segundo plano"))
+        assertEquals(CommandIntent.StopMusic, intentOf("sacá la música"))
+        assertEquals(CommandIntent.StopMusic, intentOf("pará la música"))
+        assertEquals(CommandIntent.OpenApp("youtube"), intentOf("abrí YouTube"))
+    }
 }
