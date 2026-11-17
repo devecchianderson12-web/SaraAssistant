@@ -4,6 +4,8 @@ name: Prueba de arranque en emulador
 # detectar cierres al iniciar antes de publicar).
 on:
   workflow_dispatch:
+  push:
+    branches: [debug-crash]
 
 permissions:
   contents: read
