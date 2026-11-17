@@ -164,7 +164,7 @@ public static class Interpreter
     public static readonly string[] Competitors =
     {
         "luci", "lucio", "lucía", "luz", "luces", "lucha", "lunes", "lucas", "luis", "luisa", "lupe", "susi", "rosi",
-        "dulce", "usted", "juicio", "lo", "hice", "dice", "si", "que", "de", "pone", "música", "musica", "este", "eso",
+        "lo", "hice", "si", "que", "de", "pone", "música", "musica", "este", "eso",
         "cuando", "bueno", "vamos", "todo", "algo", "pasa", "casa", "sí", "no", "hola", "oye", "luego", "lugar", "[unk]",
     };
 
