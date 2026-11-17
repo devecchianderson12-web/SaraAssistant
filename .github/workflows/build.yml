@@ -115,6 +115,14 @@ jobs:
             sleep 2
             adb shell input swipe 540 1800 540 300 300 || true
             sleep 3
+            # Esfera sobre otra pantalla: se va al inicio y se llama a Sara.
+            adb shell appops set com.sara.assistant SYSTEM_ALERT_WINDOW allow || true
+            adb shell input keyevent KEYCODE_HOME
+            sleep 2
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué hora es'" || true
+            sleep 0.6
+            adb exec-out screencap -p > esfera.png || true
+            sleep 6
             adb logcat -d > logcat.txt
             if grep -q "FATAL EXCEPTION" logcat.txt; then grep -A30 "FATAL EXCEPTION" logcat.txt | head -60; exit 1; fi
             adb shell pidof com.sara.assistant
@@ -123,7 +131,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: logcat-arranque
-          path: logcat.txt
+          path: |
+            logcat.txt
+            esfera.png
           if-no-files-found: ignore
 
   release:

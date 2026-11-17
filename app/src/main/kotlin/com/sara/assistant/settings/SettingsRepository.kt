@@ -62,6 +62,8 @@ data class SaraSettings(
     val heySara: Boolean = true,
     /** Ahorro de batería: escuchar «Ey Sara» sólo con la pantalla encendida. */
     val listenOnlyWithScreenOn: Boolean = true,
+    /** Mostrar la esfera a pantalla completa al llamarla fuera de la app (también bloqueado). */
+    val sphereOverlay: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -113,6 +115,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
         val heySara = booleanPreferencesKey("hey_sara")
         val listenOnlyWithScreenOn = booleanPreferencesKey("listen_only_screen_on")
+        val sphereOverlay = booleanPreferencesKey("sphere_overlay")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -147,6 +150,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             continuousConversation = this[Keys.continuousConversation] ?: d.continuousConversation,
             heySara = this[Keys.heySara] ?: d.heySara,
             listenOnlyWithScreenOn = this[Keys.listenOnlyWithScreenOn] ?: d.listenOnlyWithScreenOn,
+            sphereOverlay = this[Keys.sphereOverlay] ?: d.sphereOverlay,
         )
     }
 
@@ -177,5 +181,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.continuousConversation] = s.continuousConversation
         this[Keys.heySara] = s.heySara
         this[Keys.listenOnlyWithScreenOn] = s.listenOnlyWithScreenOn
+        this[Keys.sphereOverlay] = s.sphereOverlay
     }
 }

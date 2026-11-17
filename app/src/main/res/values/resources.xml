@@ -4,6 +4,15 @@
 
     <color name="sara_background">#FF0A0B10</color>
 
+    <!-- Capa de la esfera: transparente, sin animaciones de ventana, a pantalla completa. -->
+    <style name="Theme.Sara.Sphere" parent="android:Theme.Translucent.NoTitleBar.Fullscreen">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
     <style name="Theme.Sara" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/sara_background</item>
         <item name="android:statusBarColor">@color/sara_background</item>

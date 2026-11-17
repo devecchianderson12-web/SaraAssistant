@@ -130,6 +130,12 @@ fun SettingsScreen(
                 subtitle = "«Ey Sara» se activa sólo con el llamado completo: menos activaciones por error.",
             ) { v -> actions.update { it.copy(heySara = v) } }
             SwitchRow(
+                "Esfera al llamarla",
+                if (system.canOpenAppsFromBackground) "Aparece en el centro sobre cualquier pantalla, también bloqueada"
+                else "Necesita «Mostrar sobre otras apps» (Ajustes › Permisos › Abrir apps)",
+                settings.sphereOverlay,
+            ) { v -> actions.update { it.copy(sphereOverlay = v) } }
+            SwitchRow(
                 "Ahorrar batería",
                 "Escuchar «Ey Sara» sólo con la pantalla encendida. Con la pantalla apagada el micrófono queda cerrado.",
                 settings.listenOnlyWithScreenOn,

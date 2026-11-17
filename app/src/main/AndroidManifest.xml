@@ -118,6 +118,18 @@
             </intent-filter>
         </activity>
 
+        <!-- Esfera a pantalla completa al llamar a Sara (también sobre la pantalla bloqueada). -->
+        <activity
+            android:name=".ui.SphereActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.sara.assistant.sphere"
+            android:theme="@style/Theme.Sara.Sphere"
+            android:turnScreenOn="true" />
+
         <service
             android:name=".services.SaraListeningService"
             android:exported="false"

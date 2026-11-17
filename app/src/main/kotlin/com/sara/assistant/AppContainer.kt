@@ -207,6 +207,12 @@ class AppContainer(private val app: Application) {
                 if (event is com.sara.core.model.AssistantEvent.PermissionNeeded && !isAppInForeground()) {
                     com.sara.assistant.permissions.PermissionCenter.notify(app, event.kind)
                 }
+                // La esfera aparece sobre lo que sea (inicio, otra app, bloqueo) al llamarla.
+                if (event is com.sara.core.model.AssistantEvent.Activated && settings.settings.value.sphereOverlay &&
+                    event.trigger != com.sara.core.model.Trigger.ASSIST_GESTURE
+                ) {
+                    kotlinx.coroutines.withContext(Dispatchers.Main) { com.sara.assistant.ui.SphereActivity.show(app, isAppInForeground()) }
+                }
             }
         }
     }
