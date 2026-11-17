@@ -114,7 +114,10 @@ fun HomeScreen(
             }
 
             // Cada permiso que falta, con su botón directo. El que pidió la última orden va primero.
-            val pending = system.missing.sortedByDescending { it == conversation.permission }
+            // En Inicio sólo lo esencial y lo que pidió la última orden; el resto está en Ajustes › Permisos.
+            val pending = system.missing
+                .filter { it in com.sara.assistant.permissions.PermissionCenter.ESSENTIAL || it == conversation.permission }
+                .sortedByDescending { it == conversation.permission }
             pending.forEach { kind ->
                 val info = com.sara.assistant.permissions.PermissionCenter.info(kind)
                 SetupCard(

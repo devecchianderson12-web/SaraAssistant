@@ -119,7 +119,7 @@ class MemoryTest {
         memory.put(MemoryKeys.routineKey("buenas noches"), "sacá la música")
         val interpreter = CompositeCommandInterpreter(RuleBasedCommandInterpreter(), memory = memory, aiAvailable = { true })
         assertEquals(CommandIntent.StopMusic, interpreter.interpret("Buenas noches").intent)
-        assertEquals(CommandIntent.Chat("¿qué tiempo hace?"), interpreter.interpret("¿qué tiempo hace?").intent)
+        assertEquals(CommandIntent.Chat("¿quién ganó el partido?"), interpreter.interpret("¿quién ganó el partido?").intent)
 
         val withAi = DefaultCommandExecutor(FakeMedia(), NoVolume, assistant = FakeAi(true))
         assertEquals("Hace 20 grados.", withAi.execute(CommandIntent.Chat("¿qué tiempo hace?")).response)
@@ -139,7 +139,9 @@ class MemoryTest {
         )
         // Pregunta sin IA configurada: no es «no te entendí», es «falta la clave».
         val noAi = CompositeCommandInterpreter(RuleBasedCommandInterpreter(), aiAvailable = { false })
-        assertEquals(CommandIntent.Chat("cómo está el clima"), noAi.interpret("cómo está el clima").intent)
+        // El clima ahora lo resuelve la habilidad local (rápida); otras preguntas van a la IA.
+        assertEquals(CommandIntent.Skill("clima", "consultar", mapOf("dia" to "hoy")), noAi.interpret("cómo está el clima").intent)
+        assertEquals(CommandIntent.Chat("quién ganó el partido"), noAi.interpret("quién ganó el partido").intent)
         assertTrue(noAi.interpret("blablá").intent is CommandIntent.Unknown)
         val result = DefaultCommandExecutor(FakeMedia(), NoVolume, assistant = FakeAi(false)).execute(CommandIntent.Chat("cómo está el clima"))
         assertEquals(com.sara.core.model.PermissionKind.AI_KEY, result.needsPermission)
