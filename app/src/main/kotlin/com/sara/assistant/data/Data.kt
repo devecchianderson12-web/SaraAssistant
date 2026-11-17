@@ -83,6 +83,7 @@ class SecretStore(context: Context) {
     companion object {
         const val AZURE_KEY = "azure_speech_key"
         const val PORCUPINE_ACCESS_KEY = "porcupine_access_key"
+        const val ANTHROPIC_KEY = "anthropic_api_key"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val ALIAS = "sara_secrets_v1"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
@@ -181,5 +182,37 @@ class FileCommandHistory(context: Context, private val enabled: () -> Boolean) :
 
     companion object {
         const val MAX_ENTRIES = 100
+    }
+}
+
+/** Lo que Sara recuerda (preferencias y rutinas), guardado en el teléfono. */
+class PrefsMemoryStore(context: Context) : com.sara.core.memory.MemoryStore {
+    private val prefs = context.getSharedPreferences("sara_memory", Context.MODE_PRIVATE)
+    private val _entries = MutableStateFlow(read())
+    /** Para mostrar los recuerdos en Ajustes. */
+    val entries: StateFlow<Map<String, String>> = _entries.asStateFlow()
+
+    private fun read(): Map<String, String> =
+        prefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap().toSortedMap()
+
+    override fun all(): Map<String, String> = _entries.value
+
+    @Synchronized
+    override fun put(key: String, value: String) {
+        prefs.edit().putString(key, value).apply()
+        _entries.value = read() + (key to value)
+    }
+
+    @Synchronized
+    override fun remove(key: String): Boolean {
+        if (!prefs.contains(key)) return false
+        prefs.edit().remove(key).apply()
+        _entries.value = read() - key
+        return true
+    }
+
+    fun clear() {
+        prefs.edit().clear().apply()
+        _entries.value = emptyMap()
     }
 }

@@ -63,7 +63,7 @@ class MessageParserTest {
 
     private class FakeMessenger(private val prepare: MessagePrepareResult) : Messenger {
         var sent: Pair<MessageContact, String>? = null
-        override suspend fun prepare(contact: String) = prepare
+        override suspend fun prepare(contact: String, group: Boolean) = prepare
         override suspend fun send(contact: MessageContact, message: String): MessageSendResult {
             sent = contact to message
             return MessageSendResult.Sent

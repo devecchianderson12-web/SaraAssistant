@@ -78,6 +78,26 @@ class AppContainer(private val app: Application) {
     val musicUsage = com.sara.assistant.media.MusicUsageTracker(app, logger)
     val mediaControl = AndroidMediaControl(app, activityStarter, appLauncher, musicUsage, logger)
     private val messenger = com.sara.assistant.apps.WhatsAppMessenger(app, activityStarter, logger)
+
+    /** Preferencias y rutinas que el usuario le enseña a Sara. */
+    val memory = com.sara.assistant.data.PrefsMemoryStore(app)
+    private val rules = RuleBasedCommandInterpreter()
+    val claude = com.sara.assistant.ai.ClaudeAssistant(app, secrets, memory, logger, ::runSpokenOrder)
+    private val executor = DefaultCommandExecutor(
+        mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
+        messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
+        memory = memory, assistant = claude,
+    )
+
+    /** Órdenes que pide la IA («ejecutar»): mismas reglas y ejecutor que la voz, sin volver a la IA. */
+    private suspend fun runSpokenOrder(text: String): String {
+        val intent = rules.interpretNow(text).intent
+        if (intent is com.sara.core.model.CommandIntent.Unknown || intent is com.sara.core.model.CommandIntent.Chat) {
+            return "Sara no tiene una orden para eso."
+        }
+        val result = executor.execute(intent)
+        return if (result.confirmation != null) "Los mensajes se mandan pidiéndoselos a Sara directamente." else result.response
+    }
     val updates = com.sara.assistant.update.UpdateManager(app, logger)
 
     // Motores (instancias reutilizables; la selección depende de los ajustes vigentes).
@@ -122,11 +142,8 @@ class AppContainer(private val app: Application) {
     val orchestrator = AssistantOrchestrator(
         scope = scope,
         engines = engines,
-        interpreter = CompositeCommandInterpreter(RuleBasedCommandInterpreter(), conversational = null),
-        executor = DefaultCommandExecutor(
-            mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
-            messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
-        ),
+        interpreter = CompositeCommandInterpreter(rules, memory = memory, aiAvailable = claude::isAvailable),
+        executor = executor,
         connectivity = connectivity,
         configProvider = { settings.current().toAssistantConfig() },
         feedback = AndroidActivationFeedback(ChimePlayer(), focus, logger),

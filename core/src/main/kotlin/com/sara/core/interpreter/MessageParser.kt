@@ -15,7 +15,7 @@ object MessageParser {
     /** Verbo + (un mensaje) + (por WhatsApp) + a CONTACTO + (por WhatsApp) + que diga MENSAJE. */
     private val SEND = Regex(
         "^(?:mand|env[ií]|escrib)[a-záéíóú]*\\s+(?:un\\s+|una\\s+)?(?:mensaje|mensajito|msj|$WA)?\\s*,?\\s*(?:$VIA\\s+)?" +
-            "(?:a|al|para)\\s+(.+?)\\s*,?\\s*(?:$VIA\\s*,?\\s*)?" +
+            "(?:a|al|para)\\s+(.+)\\s*,?\\s*(?:$VIA\\s*,?\\s*)?" +
             "(?:que\\s+(?:diga|dice|le\\s+diga)|diciendo(?:le)?|diciéndole|con\\s+el\\s+(?:texto|mensaje)|:)\\s*[:,]?\\s*(.+)$",
     )
 
@@ -31,12 +31,26 @@ object MessageParser {
         val lead = LEAD.find(lower)?.value?.length ?: 0
         val body = lower.substring(lead)
         val match = SEND.find(body) ?: TELL.find(body) ?: return null
-        val contact = match.groups[1]!!.value.replace(Regex("\\s*$VIA\\s*$"), "").trim(' ', ',', '.')
+        val target = cleanContact(original.substring(lead + match.groups[1]!!.range.first, lead + match.groups[1]!!.range.last + 1))
+        val contact = target.first
         val range = match.groups[2]!!.range
         val message = original.substring(lead + range.first, lead + range.last + 1)
             .trim().trim('"', '“', '”', '«', '»', '\'', ' ')
         if (contact.isEmpty() || message.isEmpty()) return null
-        return CommandIntent.SendMessage(contact, message.replaceFirstChar { it.uppercase() })
+        return CommandIntent.SendMessage(contact, message.replaceFirstChar { it.uppercase() }, group = target.second)
+    }
+
+    private val GROUP = Regex("^(?:el\\s+|un\\s+|mi\\s+)?(?:grupo|chat)\\b\\s*(?:que\\s+(?:dice|se\\s+llama|tiene\\s+de\\s+nombre)|llamado|de\\s+nombre|de)?\\s*", RegexOption.IGNORE_CASE)
+    private val TAIL = Regex("\\s*(?:,|\\s(?:en|de)\\s+(?:mi\\s+)?$WA\\b|\\s(?:en|de)\\s+el\\s+(?:cual|que)\\b|\\sdonde\\b|\\sque\\s+(?:es|tiene)\\b).*$", RegexOption.IGNORE_CASE)
+    private val QUOTED = Regex("[\"«“]([^\"»”]+)[\"»”]")
+
+    /** «grupo que dice "notas" en mi WhatsApp en el cual solo estoy yo» -> ("notas", grupo). */
+    private fun cleanContact(raw: String): Pair<String, Boolean> {
+        var text = raw.trim().replace(Regex("\\s*(?:por|en|de)\\s+$WA\\s*$", RegexOption.IGNORE_CASE), "")
+        val group = GROUP.containsMatchIn(text)
+        QUOTED.find(text)?.let { return it.groupValues[1].trim() to group }
+        text = text.replace(GROUP, "").replace(TAIL, "")
+        return text.trim(' ', ',', '.').lowercase() to group
     }
 }
 

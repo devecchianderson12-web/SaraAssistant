@@ -196,6 +196,7 @@ class MainActivity : ComponentActivity() {
         val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
         val message by viewModel.message.collectAsStateWithLifecycle()
         val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+        val memories by viewModel.memories.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         val snackbar = remember { SnackbarHostState() }
 
@@ -265,13 +266,16 @@ class MainActivity : ComponentActivity() {
                         Tab.HISTORY -> HistoryScreen(history, settings.saveHistory, viewModel::clearHistory)
                         Tab.SETTINGS -> SettingsScreen(
                             settings = settings, system = system, modelState = modelState, serviceRunning = running,
-                            micActive = micActive, voices = voices, diagnostics = diagnostics,
+                            micActive = micActive, voices = voices, diagnostics = diagnostics, memories = memories,
                             actions = SettingsActions(
                                 update = { viewModel.update(it) },
                                 onWakeToggle = wakeToggle,
                                 testVoice = { viewModel.testVoice() },
                                 loadVoices = { viewModel.loadVoices(it) },
                                 saveAzure = { k, r -> viewModel.saveAzure(k, r) },
+                                saveAiKey = viewModel::saveAiKey,
+                                clearAiKey = viewModel::clearAiKey,
+                                forget = viewModel::forget,
                                 clearAzure = viewModel::clearAzure,
                                 savePorcupineKey = viewModel::savePorcupineKey,
                                 importPorcupineKeyword = { keywordPicker.launch(arrayOf("*/*")) },

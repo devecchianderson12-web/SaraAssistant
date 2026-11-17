@@ -33,7 +33,16 @@ sealed interface CommandIntent {
     data object CloseBackgroundApps : CommandIntent
 
     /** «Mandale un WhatsApp a Mi Amor que diga …». [message] conserva mayúsculas y acentos. */
-    data class SendMessage(val contact: String, val message: String) : CommandIntent
+    data class SendMessage(val contact: String, val message: String, val group: Boolean = false) : CommandIntent
+
+    /** «Cada vez que te pida música abrí BitChord»: guarda una preferencia o rutina. */
+    data class Remember(val key: String, val value: String) : CommandIntent
+    /** «Olvidate de …». [key] puede ser la clave exacta o lo que dijo el usuario. */
+    data class Forget(val key: String) : CommandIntent
+    data object RecallMemory : CommandIntent
+
+    /** Preguntas y charla («¿cómo estás?», «¿qué tiempo hace?»): local o con IA. */
+    data class Chat(val text: String) : CommandIntent
     data class AdjustVolume(val change: VolumeChange) : CommandIntent
     data object Cancel : CommandIntent
     data class Unknown(val text: String) : CommandIntent
@@ -57,6 +66,10 @@ fun CommandIntent.label(): String = when (this) {
     }
     CommandIntent.CloseBackgroundApps -> "Cerrar apps en segundo plano"
     is CommandIntent.SendMessage -> "WhatsApp a $contact: $message"
+    is CommandIntent.Remember -> "Recordar: $key = $value"
+    is CommandIntent.Forget -> "Olvidar: $key"
+    CommandIntent.RecallMemory -> "Qué recuerdo"
+    is CommandIntent.Chat -> "Pregunta: $text"
     CommandIntent.Cancel -> "Cancelar"
     is CommandIntent.Unknown -> "No reconocida"
 }

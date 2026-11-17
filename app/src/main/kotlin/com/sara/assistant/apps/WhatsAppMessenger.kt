@@ -31,20 +31,30 @@ class WhatsAppMessenger(
         runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess
     }
 
-    override suspend fun prepare(contact: String): MessagePrepareResult = withContext(Dispatchers.IO) {
+    override suspend fun prepare(contact: String, group: Boolean): MessagePrepareResult = withContext(Dispatchers.IO) {
         if (whatsAppPackage() == null) return@withContext MessagePrepareResult.NoApp
+        // Grupos y chats fuera de contactos («Notas»): se buscan dentro de WhatsApp.
+        val bySearch = MessagePrepareResult.Found(MessageContact(contact.replaceFirstChar { it.uppercase() }, SEARCH))
+        if (group) {
+            return@withContext if (SaraAccessibilityService.isEnabled(context)) bySearch
+            else MessagePrepareResult.NeedsPermission(PermissionKind.ACCESSIBILITY)
+        }
         if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-            return@withContext MessagePrepareResult.NeedsPermission(PermissionKind.CONTACTS)
+            return@withContext if (SaraAccessibilityService.isEnabled(context)) bySearch
+            else MessagePrepareResult.NeedsPermission(PermissionKind.CONTACTS)
         }
         val contacts = loadContacts()
         val best = AppMatcher.best(contact, contacts.map { InstalledApp(it.name, it.address) })
-            ?: return@withContext MessagePrepareResult.ContactNotFound
+        if (best == null) {
+            return@withContext if (SaraAccessibilityService.isEnabled(context)) bySearch else MessagePrepareResult.ContactNotFound
+        }
         logger.d(TAG, "«$contact» -> ${best.label}")
         MessagePrepareResult.Found(MessageContact(best.label, best.id))
     }
 
     override suspend fun send(contact: MessageContact, message: String): MessageSendResult {
         val pkg = whatsAppPackage() ?: return MessageSendResult.Failed("WhatsApp no está instalado")
+        if (contact.address == SEARCH) return sendBySearch(pkg, contact.name, message)
         val uri = Uri.parse("https://api.whatsapp.com/send?phone=${contact.address}&text=${Uri.encode(message)}")
         val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(pkg)
         return when (val outcome = withContext(Dispatchers.Main) { starter.start(intent, "WhatsApp") }) {
@@ -55,6 +65,22 @@ class WhatsAppMessenger(
                 !SaraAccessibilityService.isEnabled(context) -> MessageSendResult.ReadyToSend
                 SaraAccessibilityService.clickSend(context, pkg) -> MessageSendResult.Sent
                 else -> MessageSendResult.ReadyToSend
+            }
+        }
+    }
+
+    private suspend fun sendBySearch(pkg: String, chat: String, message: String): MessageSendResult {
+        val launch = context.packageManager.getLaunchIntentForPackage(pkg) ?: return MessageSendResult.Failed("No se pudo abrir WhatsApp")
+        return when (val outcome = withContext(Dispatchers.Main) { starter.start(launch, "WhatsApp") }) {
+            StartOutcome.NeedsTap -> MessageSendResult.NeedsTap
+            is StartOutcome.Failed -> MessageSendResult.Failed(outcome.message)
+            is StartOutcome.Started -> when {
+                outcome.deviceLocked -> MessageSendResult.DeviceLocked
+                else -> when (val r = SaraAccessibilityService.sendToChat(context, pkg, chat, message)) {
+                    ChatSendResult.Sent -> MessageSendResult.Sent
+                    ChatSendResult.ChatNotFound -> MessageSendResult.ChatNotFound
+                    is ChatSendResult.Failed -> MessageSendResult.Failed(r.message)
+                }
             }
         }
     }
@@ -98,6 +124,8 @@ class WhatsAppMessenger(
 
     private companion object {
         const val TAG = "WhatsApp"
+        /** Dirección especial: el chat se busca por nombre dentro de WhatsApp. */
+        const val SEARCH = "buscar"
         val PACKAGES = listOf("com.whatsapp", "com.whatsapp.w4b")
         const val WA_MIMETYPE = "vnd.android.cursor.item/vnd.com.whatsapp.profile"
         const val WA_BUSINESS_MIMETYPE = "vnd.android.cursor.item/vnd.com.whatsapp.w4b.profile"

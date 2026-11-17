@@ -12,6 +12,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
+sealed interface ChatSendResult {
+    data object Sent : ChatSendResult
+    data object ChatNotFound : ChatSendResult
+    data class Failed(val message: String) : ChatSendResult
+}
+
 /**
  * Android no deja que una app cierre a otras. La única forma es la misma que haría el usuario:
  * abrir «Recientes» y tocar «Cerrar todo». Este servicio de accesibilidad sólo hace eso cuando se
@@ -21,6 +27,12 @@ class SaraAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        log("Accesibilidad conectada")
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -68,6 +80,86 @@ class SaraAccessibilityService : AccessibilityService() {
         log("No encontré el botón «Enviar» de WhatsApp")
         false
     }
+
+    private fun pkgNodes(pkg: String): List<AccessibilityNodeInfo> =
+        windows.mapNotNull { it.root }.filter { it.packageName == pkg }.flatMap { it.descendants() }
+
+    private fun AccessibilityNodeInfo.click(): Boolean =
+        clickableSelfOrParent()?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+
+    private fun AccessibilityNodeInfo.type(text: String): Boolean {
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        return performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    /**
+     * Chats que no están en contactos (grupos, «Notas»…): igual que lo haría el usuario, busca el
+     * chat en WhatsApp, lo abre, escribe el mensaje y toca «Enviar». WhatsApp ya debe estar abierto.
+     */
+    private suspend fun sendBySearch(pkg: String, chat: String, message: String): ChatSendResult = withContext(Dispatchers.Main) {
+        // 1. Abrir la búsqueda (si WhatsApp quedó dentro de un chat, se vuelve atrás).
+        var field: AccessibilityNodeInfo? = null
+        for (attempt in 0 until 16) {
+            delay(if (attempt == 0) 1_000 else 350)
+            val nodes = pkgNodes(pkg)
+            if (nodes.isEmpty()) continue
+            field = nodes.firstOrNull { it.isEditable && it.viewIdResourceName != "$pkg:id/entry" && it.isSearchLike() }
+            if (field != null) break
+            val button = nodes.firstOrNull { it.viewIdResourceName in setOf("$pkg:id/menuitem_search", "$pkg:id/my_search_bar", "$pkg:id/search_bar") }
+                ?: nodes.firstOrNull { n -> !n.isEditable && n.labels().any { SEARCH_LABEL.containsMatchIn(it) } }
+            when {
+                button != null -> button.click()
+                attempt % 3 == 2 -> performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+        }
+        val search = field ?: return@withContext ChatSendResult.Failed("No encontré la búsqueda de WhatsApp").also { log(it.message) }
+        search.type(chat)
+
+        // 2. Elegir el chat que mejor coincide con el nombre.
+        var opened = false
+        for (attempt in 0 until 8) {
+            delay(500)
+            val rows = pkgNodes(pkg).filter { n ->
+                !n.isEditable && n.text != null &&
+                    (n.viewIdResourceName?.contains("contact_name") == true || n.viewIdResourceName?.contains("conversations_row") == true)
+            }
+            val candidates = rows.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) }
+            val best = com.sara.core.apps.AppMatcher.best(chat, candidates) ?: continue
+            opened = rows[best.id.toInt()].click()
+            if (opened) break
+        }
+        if (!opened) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return@withContext ChatSendResult.ChatNotFound
+        }
+
+        // 3. Escribir y enviar.
+        for (attempt in 0 until 12) {
+            delay(400)
+            val nodes = pkgNodes(pkg)
+            val entry = nodes.firstOrNull { it.viewIdResourceName == "$pkg:id/entry" }
+                ?: nodes.firstOrNull { it.isEditable && !it.isSearchLike() }
+                ?: continue
+            if (!entry.type(message)) continue
+            delay(300)
+            val send = pkgNodes(pkg).let { all ->
+                all.firstOrNull { it.viewIdResourceName == "$pkg:id/send" }
+                    ?: all.firstOrNull { n -> n.labels().any { it == "enviar" || it == "send" } }
+            } ?: continue
+            if (send.click()) {
+                log("Mensaje enviado a «$chat» por búsqueda")
+                return@withContext ChatSendResult.Sent
+            }
+        }
+        ChatSendResult.Failed("No pude escribir en el chat").also { log(it.message) }
+    }
+
+    private fun AccessibilityNodeInfo.isSearchLike(): Boolean =
+        viewIdResourceName?.contains("search", ignoreCase = true) == true ||
+            labels().any { SEARCH_LABEL.containsMatchIn(it) }
 
     private fun roots(): List<AccessibilityNodeInfo> =
         windows.mapNotNull { it.root }.ifEmpty { listOfNotNull(rootInActiveWindow) }
@@ -121,20 +213,45 @@ class SaraAccessibilityService : AccessibilityService() {
         @Volatile
         private var instance: SaraAccessibilityService? = null
 
+        /** Activada en Ajustes › Accesibilidad (según el sistema o la lista de servicios en uso). */
         fun isEnabled(context: Context): Boolean {
+            if (instance != null) return true
+            val running = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+                ?.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                ?.any { it.resolveInfo?.serviceInfo?.packageName == context.packageName } == true
+            if (running) return true
             val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-            return enabled.split(':').any { it.startsWith(context.packageName + "/") }
+            return enabled.split(':').any { it.trim().startsWith(context.packageName + "/") }
+        }
+
+        /** Activada y conectada con Sara (algunos teléfonos la dejan «activa» pero detenida). */
+        fun isWorking(context: Context): Boolean = instance != null && isEnabled(context)
+
+        /** Tras reiniciar Sara o actualizarla, el sistema tarda un momento en reconectar el servicio. */
+        private suspend fun awaitInstance(context: Context): SaraAccessibilityService? {
+            if (!isEnabled(context)) return null
+            repeat(15) {
+                instance?.let { return it }
+                delay(200)
+            }
+            return instance
+        }
+
+        private val SEARCH_LABEL = Regex("busc|search|pregunt[aá] a meta")
+
+        suspend fun sendToChat(context: Context, pkg: String, chat: String, message: String): ChatSendResult {
+            val service = awaitInstance(context) ?: return ChatSendResult.Failed("Accesibilidad detenida")
+            return service.sendBySearch(pkg, chat, message)
         }
 
         suspend fun clickSend(context: Context, pkg: String): Boolean {
-            val service = instance ?: return false
-            if (!isEnabled(context)) return false
+            val service = awaitInstance(context) ?: return false
             return service.tapSend(pkg)
         }
 
         suspend fun closeRecentApps(context: Context): CloseAppsResult {
-            val service = instance
-            if (service == null || !isEnabled(context)) return CloseAppsResult.NeedsAccessibility
+            if (!isEnabled(context)) return CloseAppsResult.NeedsAccessibility
+            val service = awaitInstance(context) ?: return CloseAppsResult.NotResponding
             return service.clearRecents()
         }
     }

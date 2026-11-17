@@ -40,7 +40,7 @@ object PermissionCenter {
         PermissionKind.OVERLAY -> Info("Abrir apps", "Para abrir apps y WhatsApp aunque estés en otra app o con la pantalla apagada.")
         PermissionKind.ACCESSIBILITY -> Info(
             "Accesibilidad",
-            "Para cerrar apps en segundo plano y tocar «Enviar» en WhatsApp. Si aparece gris: Info de la app › ⋮ › Permitir ajustes restringidos.",
+            "Para cerrar apps y mandar WhatsApp sola. Si ya está activa y no anda: apagala y prendela. Si aparece gris: Info de la app › ⋮ › Permitir ajustes restringidos. En Xiaomi activá también «Inicio automático».",
         )
         PermissionKind.CONTACTS -> Info("Contactos", "Para mandar WhatsApp a tus contactos por nombre.")
         PermissionKind.BATTERY -> Info("Batería sin restricciones", "Para que Sara siga escuchando con la pantalla bloqueada.")
@@ -60,7 +60,7 @@ object PermissionCenter {
         PermissionKind.MICROPHONE, PermissionKind.CONTACTS -> granted(context, runtimePermission(kind)!!)
         PermissionKind.NOTIFICATION_ACCESS -> NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         PermissionKind.OVERLAY -> Settings.canDrawOverlays(context)
-        PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isEnabled(context)
+        PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isWorking(context)
         PermissionKind.BATTERY -> context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         PermissionKind.DEFAULT_ASSISTANT -> runCatching {
             context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true

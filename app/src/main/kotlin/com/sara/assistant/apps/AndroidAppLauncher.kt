@@ -104,6 +104,8 @@ class AndroidAppLauncher(
 
     suspend fun find(name: String): InstalledApp? = AppMatcher.best(name, installedApps())
 
+    override suspend fun findLabel(name: String): String? = find(name)?.label
+
     override suspend fun open(name: String): AppLaunchResult {
         val app = find(name) ?: return AppLaunchResult.NotFound(name)
         val intent = context.packageManager.getLaunchIntentForPackage(app.id)

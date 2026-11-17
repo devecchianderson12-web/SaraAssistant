@@ -57,7 +57,11 @@ android {
         buildConfig = true
     }
     packaging {
-        resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/LICENSE*")
+        resources.excludes += setOf(
+            "/META-INF/{AL2.0,LGPL2.1}", "/META-INF/LICENSE*", "/META-INF/NOTICE*", "/META-INF/DEPENDENCIES",
+            "/META-INF/INDEX.LIST", "/META-INF/versions/9/OSGI-INF/MANIFEST.MF", "/META-INF/FastDoubleParser-*",
+        )
+        resources.pickFirsts += setOf("/META-INF/*.kotlin_module", "/META-INF/versions/9/module-info.class")
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -93,6 +97,9 @@ dependencies {
     implementation(libs.vosk.android)
     implementation(libs.jna) { artifact { type = "aar" } }
     implementation(libs.porcupine.android)
+    // IA conversacional (Claude) con el SDK oficial de Anthropic.
+    implementation(libs.anthropic.java)
+    implementation(libs.kotlin.reflect)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

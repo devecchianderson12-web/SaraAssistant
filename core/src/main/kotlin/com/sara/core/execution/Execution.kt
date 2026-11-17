@@ -3,6 +3,11 @@ package com.sara.core.execution
 import com.sara.core.model.CommandIntent
 import com.sara.core.model.ErrorKind
 import com.sara.core.model.PermissionKind
+import com.sara.core.memory.ConversationalAssistant
+import com.sara.core.memory.MemoryKeys
+import com.sara.core.memory.MemoryStore
+import com.sara.core.memory.SmallTalk
+import com.sara.core.interpreter.TextNormalizer
 import com.sara.core.model.VolumeChange
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -123,12 +128,17 @@ sealed interface CloseAppsResult {
     data object Closed : CloseAppsResult
     /** Falta activar el servicio de accesibilidad de Sara. */
     data object NeedsAccessibility : CloseAppsResult
+    /** Activada en Ajustes pero el sistema no la está ejecutando (pasa en algunos teléfonos). */
+    data object NotResponding : CloseAppsResult
     data object DeviceLocked : CloseAppsResult
     data class Failed(val message: String) : CloseAppsResult
 }
 
 interface AppLauncher {
     suspend fun open(name: String): AppLaunchResult
+
+    /** Nombre real de la app instalada que coincide con [name], o null si no existe. */
+    suspend fun findLabel(name: String): String? = name
 
     /** Cierra las apps recientes (Android sólo lo permite con accesibilidad). */
     suspend fun closeBackgroundApps(): CloseAppsResult = CloseAppsResult.Failed("no disponible")
@@ -171,12 +181,15 @@ sealed interface MessageSendResult {
     data object ReadyToSend : MessageSendResult
     data object NeedsTap : MessageSendResult
     data object DeviceLocked : MessageSendResult
+    /** Se buscó el chat dentro de WhatsApp y no apareció. */
+    data object ChatNotFound : MessageSendResult
     data class Failed(val message: String) : MessageSendResult
 }
 
 /** Mensajería (WhatsApp). */
 interface Messenger {
-    suspend fun prepare(contact: String): MessagePrepareResult
+    /** [group]: es un grupo o chat que no está en contactos; se busca dentro de WhatsApp. */
+    suspend fun prepare(contact: String, group: Boolean = false): MessagePrepareResult
     suspend fun send(contact: MessageContact, message: String): MessageSendResult
 }
 
@@ -194,10 +207,13 @@ class DefaultCommandExecutor(
     private val messenger: Messenger? = null,
     /** Preguntar «¿Lo mando?» antes de enviar mensajes. */
     private val confirmMessages: () -> Boolean = { true },
+    private val memory: MemoryStore? = null,
+    private val assistant: ConversationalAssistant? = null,
 ) : CommandExecutor {
 
     override suspend fun execute(intent: CommandIntent): ExecutionResult = when (intent) {
-        is CommandIntent.PlayMusic -> media(MediaAction.PLAY, intent.query, intent.app)
+        // Sin app pedida, la que el usuario eligió («cada vez que pida música abrí BitChord»).
+        is CommandIntent.PlayMusic -> media(MediaAction.PLAY, intent.query, intent.app ?: memory?.get(MemoryKeys.MUSIC_APP))
         is CommandIntent.OpenApp -> openApp(intent.name)
         CommandIntent.Pause -> media(MediaAction.PAUSE)
         CommandIntent.Resume -> media(MediaAction.RESUME)
@@ -207,6 +223,10 @@ class DefaultCommandExecutor(
         is CommandIntent.AdjustVolume -> adjustVolume(intent.change)
         CommandIntent.CloseBackgroundApps -> closeBackgroundApps()
         is CommandIntent.SendMessage -> sendMessage(intent)
+        is CommandIntent.Remember -> remember(intent)
+        is CommandIntent.Forget -> forget(intent.key)
+        CommandIntent.RecallMemory -> recall()
+        is CommandIntent.Chat -> chat(intent.text)
         CommandIntent.Cancel -> ExecutionResult(true, responses.cancelled())
         is CommandIntent.Unknown -> ExecutionResult(false, responses.notUnderstood(), ErrorKind.RECOGNITION_FAILED)
     }
@@ -221,9 +241,49 @@ class DefaultCommandExecutor(
         }
     }
 
+    private suspend fun remember(intent: CommandIntent.Remember): ExecutionResult {
+        val store = memory ?: return ExecutionResult(false, responses.cannotRemember(), ErrorKind.EXECUTION_FAILED)
+        var value = intent.value
+        if (intent.key == MemoryKeys.MUSIC_APP) {
+            value = apps?.findLabel(value)
+                ?: return ExecutionResult(false, responses.appNotFound(value), ErrorKind.EXECUTION_FAILED)
+        }
+        store.put(intent.key, value)
+        return ExecutionResult(true, if (intent.key == MemoryKeys.MUSIC_APP) responses.musicAppSaved(value) else responses.remembered())
+    }
+
+    private fun forget(spoken: String): ExecutionResult {
+        val store = memory ?: return ExecutionResult(false, responses.cannotRemember(), ErrorKind.EXECUTION_FAILED)
+        val all = store.all()
+        val wanted = TextNormalizer.normalize(spoken)
+        val key = all.keys.firstOrNull { it == spoken }
+            ?: all.keys.firstOrNull { TextNormalizer.normalize(it).contains(wanted) }
+            ?: all.entries.firstOrNull { TextNormalizer.normalize(it.value).contains(wanted) }?.key
+            ?: return ExecutionResult(
+                spoken == MemoryKeys.MUSIC_APP,
+                if (spoken == MemoryKeys.MUSIC_APP) responses.musicAppDefault() else responses.nothingToForget(),
+            )
+        store.remove(key)
+        return ExecutionResult(true, if (key == MemoryKeys.MUSIC_APP) responses.musicAppDefault() else responses.forgotten())
+    }
+
+    private fun recall(): ExecutionResult {
+        val all = memory?.all().orEmpty()
+        if (all.isEmpty()) return ExecutionResult(true, responses.nothingRemembered())
+        return ExecutionResult(true, responses.recall(all.map { (k, v) -> MemoryKeys.describe(k, v) }))
+    }
+
+    private suspend fun chat(text: String): ExecutionResult {
+        SmallTalk.answer(text)?.let { return ExecutionResult(true, it) }
+        val ai = assistant?.takeIf { it.isAvailable() }
+            ?: return ExecutionResult(false, responses.needsAi(), ErrorKind.EXECUTION_FAILED)
+        return runCatching { ExecutionResult(true, ai.reply(text)) }
+            .getOrElse { ExecutionResult(false, it.message ?: responses.aiFailed(), ErrorKind.EXECUTION_FAILED) }
+    }
+
     private suspend fun sendMessage(intent: CommandIntent.SendMessage): ExecutionResult {
         val m = messenger ?: return ExecutionResult(false, responses.cannotSendMessages(), ErrorKind.EXECUTION_FAILED)
-        return when (val prepared = runCatching { m.prepare(intent.contact) }.getOrElse { return ExecutionResult(false, responses.failed(it.message ?: "error"), ErrorKind.EXECUTION_FAILED) }) {
+        return when (val prepared = runCatching { m.prepare(intent.contact, intent.group) }.getOrElse { return ExecutionResult(false, responses.failed(it.message ?: "error"), ErrorKind.EXECUTION_FAILED) }) {
             is MessagePrepareResult.Found -> {
                 val contact = prepared.contact
                 val send: suspend () -> ExecutionResult = { deliver(m, contact, intent.message) }
@@ -251,6 +311,7 @@ class DefaultCommandExecutor(
             )
             MessageSendResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen("WhatsApp"), needsPermission = PermissionKind.OVERLAY)
             MessageSendResult.DeviceLocked -> ExecutionResult(false, responses.unlockToSend(), ErrorKind.EXECUTION_FAILED)
+            MessageSendResult.ChatNotFound -> ExecutionResult(false, responses.chatNotFound(contact.name), ErrorKind.EXECUTION_FAILED)
             is MessageSendResult.Failed -> ExecutionResult(false, responses.messageFailed(), ErrorKind.EXECUTION_FAILED)
         }
 
@@ -262,6 +323,7 @@ class DefaultCommandExecutor(
         return when (val r = runCatching { launcher.closeBackgroundApps() }.getOrElse { CloseAppsResult.Failed(it.message ?: "error") }) {
             CloseAppsResult.Closed -> ExecutionResult(true, responses.appsClosed())
             CloseAppsResult.NeedsAccessibility -> ExecutionResult(musicStopped, responses.needsAccessibility(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped }, needsPermission = PermissionKind.ACCESSIBILITY)
+            CloseAppsResult.NotResponding -> ExecutionResult(musicStopped, responses.accessibilityStuck(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped }, needsPermission = PermissionKind.ACCESSIBILITY)
             CloseAppsResult.DeviceLocked -> ExecutionResult(musicStopped, responses.unlockToCloseApps(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
             is CloseAppsResult.Failed -> ExecutionResult(musicStopped, responses.cannotCloseApps(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
         }
@@ -390,12 +452,23 @@ class ResponseCatalog(private val random: Random = Random.Default) {
         else -> "Me falta un permiso. Te dejé el botón."
     }
     fun cannotSendMessages() = "Todavía no puedo mandar mensajes."
+    fun cannotRemember() = "No puedo guardar recuerdos."
+    fun musicAppSaved(app: String) = "Listo, la música en $app."
+    fun musicAppDefault() = "Listo, vuelvo a la de siempre."
+    fun remembered() = "Listo, lo recuerdo."
+    fun forgotten() = "Listo, lo olvidé."
+    fun nothingToForget() = "No tenía eso guardado."
+    fun nothingRemembered() = "Todavía no recuerdo nada."
+    fun recall(items: List<String>) = "Recuerdo que " + items.joinToString("; ") + "."
+    fun needsAi() = "Para eso activá la IA en Ajustes."
+    fun aiFailed() = "No pude responder ahora."
     fun confirmMessage(name: String, message: String) = "¿Le mando a $name: $message?"
     fun messageNotSent() = "Listo, no lo mando."
     fun messageSent(name: String) = "Listo, se lo mandé a $name."
     fun messageReady(name: String) = "Te dejé el mensaje listo. Tocá enviar."
     fun messageFailed() = "No pude mandar el mensaje."
     fun contactNotFound(query: String) = "No encontré a $query en tus contactos."
+    fun chatNotFound(name: String) = "No encontré el chat $name en WhatsApp."
     fun noWhatsApp() = "No encontré WhatsApp."
     fun unlockToSend() = "Desbloqueá el teléfono para mandarlo."
     fun appNotFound(query: String) = "No encontré ninguna app que se llame $query."
@@ -404,6 +477,8 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     private fun musicPrefix(stopped: Boolean) = if (stopped) "Saqué la música. " else ""
     fun needsAccessibility(musicStopped: Boolean = false) =
         musicPrefix(musicStopped) + "Activame en Accesibilidad. Te dejé el botón."
+    fun accessibilityStuck(musicStopped: Boolean = false) =
+        musicPrefix(musicStopped) + "Mi accesibilidad está trabada. Apagala y prendela."
     fun unlockToCloseApps(musicStopped: Boolean = false) = musicPrefix(musicStopped) + "Desbloqueá el teléfono para cerrar apps."
     fun cannotCloseApps(musicStopped: Boolean = false) = musicPrefix(musicStopped) + "No pude cerrar las apps."
 

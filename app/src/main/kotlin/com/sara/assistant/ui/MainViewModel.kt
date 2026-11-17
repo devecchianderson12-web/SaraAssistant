@@ -47,6 +47,7 @@ data class SystemStatus(
     val canCloseApps: Boolean = false,
     /** Permisos que faltan, cada uno con su botón en Inicio. */
     val missing: List<com.sara.core.model.PermissionKind> = emptyList(),
+    val aiConfigured: Boolean = false,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -169,6 +170,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun installUpdate(release: com.sara.assistant.update.ReleaseInfo) = viewModelScope.launch { c.updates.downloadAndInstall(release) }
 
     fun clearHistory() = viewModelScope.launch { c.history.clear() }
+
+    val memories = c.memory.entries
+    fun forget(key: String) { c.memory.remove(key) }
+
+    fun saveAiKey(key: String?) {
+        if (!key.isNullOrBlank()) c.secrets.put(SecretStore.ANTHROPIC_KEY, key.trim())
+        c.claude.reset()
+        refreshSystem()
+    }
+
+    fun clearAiKey() {
+        c.secrets.put(SecretStore.ANTHROPIC_KEY, null)
+        c.claude.reset()
+        refreshSystem()
+    }
     fun clearDiagnostics() = c.logger.clear()
 
     fun testVoice() = viewModelScope.launch {
@@ -236,6 +252,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             canOpenAppsFromBackground = android.provider.Settings.canDrawOverlays(getApplication()),
             canCloseApps = com.sara.assistant.apps.SaraAccessibilityService.isEnabled(getApplication()),
             missing = com.sara.assistant.permissions.PermissionCenter.missing(getApplication()),
+            aiConfigured = c.claude.isAvailable(),
             musicApp = runCatching { c.mediaControl.preferredMusicApp()?.label }.getOrNull(),
         )
     }

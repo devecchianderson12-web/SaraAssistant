@@ -1,5 +1,9 @@
 package com.sara.core.interpreter
 
+import com.sara.core.memory.MemoryKeys
+import com.sara.core.memory.MemoryParser
+import com.sara.core.memory.MemoryStore
+import com.sara.core.memory.SmallTalk
 import com.sara.core.model.CommandIntent
 import com.sara.core.model.InterpretationResult
 import com.sara.core.model.VolumeChange
@@ -16,9 +20,18 @@ interface CommandInterpreter {
 class CompositeCommandInterpreter(
     private val rules: CommandInterpreter,
     private val conversational: CommandInterpreter? = null,
+    /** Rutinas guardadas («cuando te diga buenas noches, …»). */
+    private val memory: MemoryStore? = null,
+    /** Si hay IA, lo que las reglas no entienden se le pregunta a ella. */
+    private val aiAvailable: () -> Boolean = { false },
 ) : CommandInterpreter {
     override suspend fun interpret(text: String): InterpretationResult {
+        val routine = memory?.get(MemoryKeys.routineKey(text.trim().removePrefix("Sara").removePrefix("sara").trim(' ', ',')))
+        if (routine != null) return rules.interpret(routine).copy(ruleId = "routine")
         val local = rules.interpret(text)
+        if (local.intent is CommandIntent.Unknown && aiAvailable()) {
+            return InterpretationResult(CommandIntent.Chat(text), 0.7f, local.normalizedText, "ai-chat")
+        }
         val ai = conversational
         if (local.intent !is CommandIntent.Unknown || ai == null) return local
         val remote = runCatching { ai.interpret(text) }.getOrNull() ?: return local
@@ -36,8 +49,10 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         val tokens = TextNormalizer.tokens(normalized)
         if (tokens.isEmpty()) return InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "empty")
         val ctx = Context(normalized, tokens)
+        MemoryParser.parse(text)?.let { return InterpretationResult(it, 0.9f, normalized, "memory") }
         MessageParser.parse(text)?.let { return InterpretationResult(it, 0.9f, normalized, "send-message") }
         return detectCancel(ctx)
+            ?: SmallTalk.answer(text)?.let { ctx.result(CommandIntent.Chat(text), 0.8f, "smalltalk") }
             ?: detectCloseApps(ctx)
             ?: detectOpenApp(ctx)
             ?: detectVolume(ctx)

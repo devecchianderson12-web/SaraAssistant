@@ -72,6 +72,9 @@ class SettingsActions(
     val checkUpdates: () -> Unit,
     val openOverlaySettings: () -> Unit,
     val openAccessibilitySettings: () -> Unit = {},
+    val saveAiKey: (String?) -> Unit = {},
+    val clearAiKey: () -> Unit = {},
+    val forget: (String) -> Unit = {},
 )
 
 private val modeOptions = listOf(EngineMode.AUTOMATIC to "Automático", EngineMode.ONLINE to "Online", EngineMode.OFFLINE to "Offline")
@@ -88,7 +91,9 @@ fun SettingsScreen(
     diagnostics: List<String>,
     actions: SettingsActions,
     updateState: UpdateState = UpdateState.Idle,
+    memories: Map<String, String> = emptyMap(),
 ) {
+    var aiDialog by remember { mutableStateOf(false) }
     var voicePicker by remember { mutableStateOf<Boolean?>(null) }
     var azureDialog by remember { mutableStateOf(false) }
     var porcupineDialog by remember { mutableStateOf(false) }
@@ -201,6 +206,29 @@ fun SettingsScreen(
             OptionChips("Idioma", languages, settings.language) { v -> actions.update { it.copy(language = v) } }
         }
 
+        // ---------------------------------------------------------------- Inteligencia y memoria
+        SectionCard("Inteligencia y memoria") {
+            StatusLine(
+                "IA (Claude)",
+                if (system.aiConfigured) "Activa: responde preguntas, el clima y charla" else "Sin clave: sólo órdenes y charla básica",
+                system.aiConfigured, "Configurar",
+            ) { aiDialog = true }
+            Text(
+                "Enseñale cosas: «cada vez que te pida música abrí BitChord», «cuando te diga buenas noches, hacé sacá la música».",
+                style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted,
+            )
+            if (memories.isEmpty()) {
+                Text("Todavía no recuerda nada.", style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
+            }
+            memories.forEach { (key, value) ->
+                StatusLine(
+                    key.removePrefix(com.sara.core.memory.MemoryKeys.NOTE_PREFIX),
+                    com.sara.core.memory.MemoryKeys.describe(key, value).replaceFirstChar { it.uppercase() },
+                    true, "Olvidar",
+                ) { actions.forget(key) }
+            }
+        }
+
         // ---------------------------------------------------------------- Mensajes
         SectionCard("Mensajes") {
             SwitchRow(
@@ -309,6 +337,16 @@ fun SettingsScreen(
             },
         )
     }
+    if (aiDialog) {
+        AiKeyDialog(system.aiConfigured, onDismiss = { aiDialog = false }, onSave = { key ->
+            aiDialog = false
+            actions.saveAiKey(key)
+        }, onClear = {
+            aiDialog = false
+            actions.clearAiKey()
+        })
+    }
+
     if (azureDialog) {
         AzureDialog(settings.azureRegion, system.azureConfigured, onDismiss = { azureDialog = false }, onSave = { key, region ->
             azureDialog = false
@@ -390,6 +428,30 @@ private fun VoicePickerDialog(title: String, voices: List<VoiceOption>?, onDismi
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
+    )
+}
+
+@Composable
+private fun AiKeyDialog(hasKey: Boolean, onDismiss: () -> Unit, onSave: (String?) -> Unit, onClear: () -> Unit) {
+    var key by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SaraColors.SurfaceHigh,
+        title = { Text("IA (Claude)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Creá una clave en platform.claude.com › API Keys y pegala acá. Se guarda cifrada en el teléfono. Cada pregunta tiene un costo pequeño en tu cuenta de Anthropic.", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    key, { key = it }, singleLine = true,
+                    label = { Text(if (hasKey) "Clave (guardada, dejá vacío para conservarla)" else "Clave (sk-ant-…)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                if (hasKey) TextButton(onClick = onClear) { Text("Eliminar clave guardada", color = SaraColors.Red) }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(key.ifBlank { null }) }) { Text("Guardar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
 
