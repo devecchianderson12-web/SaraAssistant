@@ -50,6 +50,9 @@ data class SaraSettings(
     // Privacidad / proveedores
     val saveHistory: Boolean = true,
     val azureRegion: String = "",
+    // Mensajes
+    /** Leer el mensaje y esperar un «sí» antes de mandarlo. */
+    val confirmMessages: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -96,6 +99,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val language = stringPreferencesKey("language")
         val saveHistory = booleanPreferencesKey("save_history")
         val azureRegion = stringPreferencesKey("azure_region")
+        val confirmMessages = booleanPreferencesKey("confirm_messages")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -125,6 +129,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             language = this[Keys.language] ?: d.language,
             saveHistory = this[Keys.saveHistory] ?: d.saveHistory,
             azureRegion = this[Keys.azureRegion] ?: d.azureRegion,
+            confirmMessages = this[Keys.confirmMessages] ?: d.confirmMessages,
         )
     }
 
@@ -150,5 +155,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.language] = s.language
         this[Keys.saveHistory] = s.saveHistory
         this[Keys.azureRegion] = s.azureRegion
+        this[Keys.confirmMessages] = s.confirmMessages
     }
 }

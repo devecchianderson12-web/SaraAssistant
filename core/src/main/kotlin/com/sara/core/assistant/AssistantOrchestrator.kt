@@ -16,6 +16,8 @@ import com.sara.core.engine.Availability
 import com.sara.core.engine.ConnectivityStatus
 import com.sara.core.engine.UnavailableReason
 import com.sara.core.execution.CommandExecutor
+import com.sara.core.execution.ExecutionResult
+import com.sara.core.interpreter.ConfirmationParser
 import com.sara.core.execution.ResponseCatalog
 import com.sara.core.interpreter.CommandInterpreter
 import com.sara.core.model.AssistantError
@@ -355,10 +357,36 @@ class AssistantOrchestrator(
             machine.moveTo(AssistantState.Executing(intent))
         }
         val execution = executor.execute(intent)
+        val confirmation = execution.confirmation
+        if (confirmation == null) {
+            finish(text, intent, execution, cfg)
+            return
+        }
+        // «¿Le mando a Mi Amor: …?» -> escucha sí / no.
+        _events.emit(AssistantEvent.Responded(confirmation.question, true, intent))
+        speak(confirmation.question, cfg)
+        machine.moveTo(AssistantState.Listening())
+        val answer = listen(cfg)
+        val accepted = (answer as? RecognitionResult.Success)?.text?.trim()?.let { reply ->
+            _events.emit(AssistantEvent.Heard(reply, answer.engineId))
+            ConfirmationParser.parse(reply)
+        }
+        logger.d(TAG, "Confirmación: $accepted")
+        val result = if (accepted == true) {
+            machine.moveTo(AssistantState.Executing(intent))
+            confirmation.onConfirm()
+        } else {
+            ExecutionResult(true, confirmation.declined)
+        }
+        finish(text, intent, result, cfg)
+    }
+
+    private suspend fun finish(text: String, intent: CommandIntent, execution: ExecutionResult, cfg: AssistantConfig) {
         runCatching {
             history?.record(HistoryEntry(clock(), text, intent.label(), execution.response, execution.success))
         }.onFailure { logger.w(TAG, "No se pudo guardar el historial", it) }
         _events.emit(AssistantEvent.Responded(execution.response, execution.success, intent))
+        execution.needsPermission?.let { _events.emit(AssistantEvent.PermissionNeeded(it)) }
         if (execution.response.isNotBlank()) speak(execution.response, cfg)
     }
 

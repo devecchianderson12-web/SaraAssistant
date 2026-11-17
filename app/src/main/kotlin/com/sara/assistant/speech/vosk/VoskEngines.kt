@@ -57,13 +57,19 @@ class VoskWakeWordEngine(
             val energy = EnergyGate()
             // Últimos ~2,4 s de audio, sólo en memoria.
             val window = ArrayDeque<ByteArray>()
+            val peaks = ArrayDeque<Int>()
             var detected = false
             var restart = false
             var chunks = 0
             try {
                 val outcome = microphone.capture(echoCancellation) { buffer, length ->
-                    window.addLast(buffer.copyOf(length))
+                    val raw = buffer.copyOf(length)
+                    window.addLast(raw)
+                    peaks.addLast(WakeWordTuning.peakOf(raw, length))
                     while (window.size > WINDOW_CHUNKS) window.removeFirst()
+                    while (peaks.size > WINDOW_CHUNKS) peaks.removeFirst()
+                    // Voz baja o lejana: se amplifica según el pico de los últimos 2,4 s.
+                    val gain = WakeWordTuning.gainFor(peaks.max())
                     val decision = energy.feed(AudioLevelMeter.rmsOfPcm16(buffer, length))
                     if (!decision.process) {
                         chunks++
@@ -72,9 +78,13 @@ class VoskWakeWordEngine(
                     }
                     if (decision.wokeUp) {
                         // Pre-roll: los bloques anteriores para no perder el comienzo de «Sara».
-                        window.toList().dropLast(1).takeLast(PREROLL_CHUNKS).forEach { recognizer.acceptWaveForm(it, it.size) }
+                        window.toList().dropLast(1).takeLast(PREROLL_CHUNKS).forEach {
+                            val boosted = WakeWordTuning.applyGain(it, it.size, gain)
+                            recognizer.acceptWaveForm(boosted, boosted.size)
+                        }
                     }
-                    val candidate = if (recognizer.acceptWaveForm(buffer, length)) {
+                    val chunk = WakeWordTuning.applyGain(raw, length, gain)
+                    val candidate = if (recognizer.acceptWaveForm(chunk, chunk.size)) {
                         gate.onFinal(parseWords(recognizer.result))
                     } else {
                         gate.onPartial(JSONObject(recognizer.partialResult).optString("partial").split(' '))
@@ -110,9 +120,12 @@ class VoskWakeWordEngine(
      * transcripción libre se confunde, también vale ganarle a palabras parecidas («para», «cara»…).
      */
     private fun verify(model: Model, window: ArrayDeque<ByteArray>, musicPlaying: Boolean, sensitivity: Float): Boolean {
-        val audio = ByteArrayOutputStream(window.sumOf { it.size }).apply { window.forEach { write(it) } }.toByteArray()
+        val raw = ByteArrayOutputStream(window.sumOf { it.size }).apply { window.forEach { write(it) } }.toByteArray()
+        val audio = WakeWordTuning.applyGain(raw, raw.size, WakeWordTuning.gainFor(WakeWordTuning.peakOf(raw, raw.size)))
         if (WakeWordTuning.verifiedByTranscript(transcribe(model, audio, null))) return true
-        if (!musicPlaying || sensitivity < 0.3f) return false
+        // La transcripción libre del modelo chico falla seguido con «Sara» dicha rápido o bajo:
+        // si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
+        if (sensitivity < 0.3f) return false
         return "sara" in transcribe(model, audio, COMPETITORS).split(' ')
     }
 
@@ -144,7 +157,7 @@ class VoskWakeWordEngine(
         const val TAG = "VoskWake"
         const val GRAMMAR = "[\"sara\", \"[unk]\"]"
         const val WINDOW_CHUNKS = 24 // 2,4 s
-        const val PREROLL_CHUNKS = 3
+        const val PREROLL_CHUNKS = 5
         const val MUSIC_CHECK_CHUNKS = 20 // cada 2 s
         val COMPETITORS: String = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
     }

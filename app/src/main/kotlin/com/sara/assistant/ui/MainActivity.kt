@@ -65,6 +65,31 @@ class MainActivity : ComponentActivity() {
         afterPermissions = null
         viewModel.refreshSystem()
     }
+    private val grantLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            // «No volver a preguntar»: el único camino es la pantalla de permisos de la app.
+            Toast.makeText(this, "Activalo en Permisos.", Toast.LENGTH_LONG).show()
+            openSafely(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+        }
+        viewModel.refreshSystem()
+    }
+
+    /** Lleva directo a conceder [kind]: diálogo del sistema o la pantalla exacta de Ajustes. */
+    private fun grant(kind: com.sara.core.model.PermissionKind) {
+        val runtime = com.sara.assistant.permissions.PermissionCenter.runtimePermission(kind)
+        if (runtime != null) {
+            grantLauncher.launch(runtime)
+        } else {
+            openSafely(*com.sara.assistant.permissions.PermissionCenter.settingsIntents(this, kind).toTypedArray())
+        }
+    }
+
+    private fun handleGrantIntent(intent: Intent?) {
+        val name = intent?.getStringExtra(com.sara.assistant.permissions.PermissionCenter.EXTRA_GRANT) ?: return
+        intent.removeExtra(com.sara.assistant.permissions.PermissionCenter.EXTRA_GRANT)
+        com.sara.core.model.PermissionKind.entries.firstOrNull { it.name == name }?.let(::grant)
+    }
+
     private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importModel) }
     private val keywordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = true) } }
     private val pvPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = false) } }
@@ -77,11 +102,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent { SaraTheme { SaraApp() } }
         handleAssistIntent(intent)
+        handleGrantIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleAssistIntent(intent)
+        handleGrantIntent(intent)
     }
 
     override fun onResume() {
@@ -223,6 +250,7 @@ class MainActivity : ComponentActivity() {
                             onRequestMic = { withMicPermission(includeNotifications = true) { viewModel.refreshSystem() } },
                             onDownloadModel = viewModel::downloadModel,
                             onNotificationAccess = ::openNotificationAccess,
+                            onGrant = ::grant,
                             updateBanner = {
                                 UpdateBanner(
                                     state = updateState,

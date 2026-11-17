@@ -53,6 +53,22 @@ class SaraAccessibilityService : AccessibilityService() {
         CloseAppsResult.Failed("no encontré el botón para cerrar todo")
     }
 
+    /** Espera el chat de WhatsApp y toca «Enviar». */
+    private suspend fun tapSend(pkg: String): Boolean = withContext(Dispatchers.Main) {
+        repeat(30) { attempt ->
+            delay(if (attempt == 0) 700 else 250)
+            val nodes = windows.mapNotNull { it.root }.filter { it.packageName == pkg }.flatMap { it.descendants() }
+            val send = nodes.firstOrNull { it.viewIdResourceName == "$pkg:id/send" }
+                ?: nodes.firstOrNull { n -> n.labels().any { it == "enviar" || it == "send" } }
+            if (send != null && send.clickableSelfOrParent()?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
+                log("Mensaje enviado")
+                return@withContext true
+            }
+        }
+        log("No encontré el botón «Enviar» de WhatsApp")
+        false
+    }
+
     private fun roots(): List<AccessibilityNodeInfo> =
         windows.mapNotNull { it.root }.ifEmpty { listOfNotNull(rootInActiveWindow) }
 
@@ -108,6 +124,12 @@ class SaraAccessibilityService : AccessibilityService() {
         fun isEnabled(context: Context): Boolean {
             val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
             return enabled.split(':').any { it.startsWith(context.packageName + "/") }
+        }
+
+        suspend fun clickSend(context: Context, pkg: String): Boolean {
+            val service = instance ?: return false
+            if (!isEnabled(context)) return false
+            return service.tapSend(pkg)
         }
 
         suspend fun closeRecentApps(context: Context): CloseAppsResult {

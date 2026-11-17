@@ -53,6 +53,7 @@ fun HomeScreen(
     onRequestMic: () -> Unit,
     onDownloadModel: () -> Unit,
     onNotificationAccess: () -> Unit,
+    onGrant: (com.sara.core.model.PermissionKind) -> Unit = {},
     updateBanner: @Composable () -> Unit = {},
 ) {
     val permissions = system.permissions
@@ -110,24 +111,19 @@ fun HomeScreen(
                 ConversationCard(conversation)
             }
 
-            if (permissions != null && !permissions.recordAudio) {
+            // Cada permiso que falta, con su botón directo. El que pidió la última orden va primero.
+            val pending = system.missing.sortedByDescending { it == conversation.permission }
+            pending.forEach { kind ->
+                val info = com.sara.assistant.permissions.PermissionCenter.info(kind)
                 SetupCard(
-                    title = "Permiso de micrófono",
-                    text = "Sara necesita el micrófono para escucharte. El audio se usa sólo mientras escucha y nunca se guarda.",
-                    action = "Permitir",
-                    onAction = onRequestMic,
+                    title = if (kind == conversation.permission) "Falta: ${info.title}" else info.title,
+                    text = info.why,
+                    action = "Activar",
+                    onAction = { onGrant(kind) },
                 )
             }
             if (settings.wakeEngine == WakeEngineType.VOSK && modelState !is ModelState.Ready) {
                 ModelCard(modelState, onDownloadModel)
-            }
-            if (permissions != null && !permissions.notificationListener) {
-                SetupCard(
-                    title = "Control de apps de música",
-                    text = "Para pausar, pasar canciones y confirmar lo que pasa en Spotify, YouTube Music y otras apps, activá el acceso a notificaciones para SaraAssistant. Sara no lee tus notificaciones.",
-                    action = "Activar acceso",
-                    onAction = onNotificationAccess,
-                )
             }
 
             SectionCard("Activación por voz") {

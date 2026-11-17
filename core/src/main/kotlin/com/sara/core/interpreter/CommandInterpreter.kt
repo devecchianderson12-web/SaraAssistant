@@ -36,6 +36,7 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         val tokens = TextNormalizer.tokens(normalized)
         if (tokens.isEmpty()) return InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "empty")
         val ctx = Context(normalized, tokens)
+        MessageParser.parse(text)?.let { return InterpretationResult(it, 0.9f, normalized, "send-message") }
         return detectCancel(ctx)
             ?: detectCloseApps(ctx)
             ?: detectOpenApp(ctx)

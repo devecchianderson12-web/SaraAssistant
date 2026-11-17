@@ -2,6 +2,7 @@ package com.sara.core.execution
 
 import com.sara.core.model.CommandIntent
 import com.sara.core.model.ErrorKind
+import com.sara.core.model.PermissionKind
 import com.sara.core.model.VolumeChange
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -141,9 +142,43 @@ data class ExecutionResult(
     val success: Boolean,
     val response: String,
     val errorKind: ErrorKind? = null,
-    /** Sugerencia para la interfaz (por ejemplo, pedir acceso a notificaciones). */
-    val needsNotificationAccess: Boolean = false,
+    /** Permiso que faltó: la app muestra un botón para activarlo. */
+    val needsPermission: PermissionKind? = null,
+    /** Si no es nulo, Sara pregunta [Confirmation.question] y sólo ejecuta si le dicen que sí. */
+    val confirmation: Confirmation? = null,
+) {
+    val needsNotificationAccess: Boolean get() = needsPermission == PermissionKind.NOTIFICATION_ACCESS
+}
+
+class Confirmation(
+    val question: String,
+    val declined: String,
+    val onConfirm: suspend () -> ExecutionResult,
 )
+
+data class MessageContact(val name: String, val address: String)
+
+sealed interface MessagePrepareResult {
+    data class Found(val contact: MessageContact) : MessagePrepareResult
+    data object ContactNotFound : MessagePrepareResult
+    data object NoApp : MessagePrepareResult
+    data class NeedsPermission(val kind: PermissionKind) : MessagePrepareResult
+}
+
+sealed interface MessageSendResult {
+    data object Sent : MessageSendResult
+    /** Quedó escrito en el chat; falta tocar «Enviar» (sin accesibilidad no se puede tocar solo). */
+    data object ReadyToSend : MessageSendResult
+    data object NeedsTap : MessageSendResult
+    data object DeviceLocked : MessageSendResult
+    data class Failed(val message: String) : MessageSendResult
+}
+
+/** Mensajería (WhatsApp). */
+interface Messenger {
+    suspend fun prepare(contact: String): MessagePrepareResult
+    suspend fun send(contact: MessageContact, message: String): MessageSendResult
+}
 
 interface CommandExecutor {
     suspend fun execute(intent: CommandIntent): ExecutionResult
@@ -156,6 +191,9 @@ class DefaultCommandExecutor(
     /** Indica si hay acceso a sesiones multimedia (Notification Listener). */
     private val hasMediaSessionAccess: () -> Boolean = { true },
     private val apps: AppLauncher? = null,
+    private val messenger: Messenger? = null,
+    /** Preguntar «¿Lo mando?» antes de enviar mensajes. */
+    private val confirmMessages: () -> Boolean = { true },
 ) : CommandExecutor {
 
     override suspend fun execute(intent: CommandIntent): ExecutionResult = when (intent) {
@@ -168,6 +206,7 @@ class DefaultCommandExecutor(
         CommandIntent.StopMusic -> media(MediaAction.STOP)
         is CommandIntent.AdjustVolume -> adjustVolume(intent.change)
         CommandIntent.CloseBackgroundApps -> closeBackgroundApps()
+        is CommandIntent.SendMessage -> sendMessage(intent)
         CommandIntent.Cancel -> ExecutionResult(true, responses.cancelled())
         is CommandIntent.Unknown -> ExecutionResult(false, responses.notUnderstood(), ErrorKind.RECOGNITION_FAILED)
     }
@@ -176,11 +215,44 @@ class DefaultCommandExecutor(
         val launcher = apps ?: return ExecutionResult(false, responses.cannotOpenApps(), ErrorKind.EXECUTION_FAILED)
         return when (val result = runCatching { launcher.open(name) }.getOrElse { AppLaunchResult.Failed(it.message ?: "error") }) {
             is AppLaunchResult.Opened -> ExecutionResult(true, responses.appOpened(result.label, result.deviceLocked))
-            is AppLaunchResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.label))
+            is AppLaunchResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.label), needsPermission = PermissionKind.OVERLAY)
             is AppLaunchResult.NotFound -> ExecutionResult(false, responses.appNotFound(result.query), ErrorKind.EXECUTION_FAILED)
             is AppLaunchResult.Failed -> ExecutionResult(false, responses.failed(result.message), ErrorKind.EXECUTION_FAILED)
         }
     }
+
+    private suspend fun sendMessage(intent: CommandIntent.SendMessage): ExecutionResult {
+        val m = messenger ?: return ExecutionResult(false, responses.cannotSendMessages(), ErrorKind.EXECUTION_FAILED)
+        return when (val prepared = runCatching { m.prepare(intent.contact) }.getOrElse { return ExecutionResult(false, responses.failed(it.message ?: "error"), ErrorKind.EXECUTION_FAILED) }) {
+            is MessagePrepareResult.Found -> {
+                val contact = prepared.contact
+                val send: suspend () -> ExecutionResult = { deliver(m, contact, intent.message) }
+                if (confirmMessages()) {
+                    ExecutionResult(
+                        true, "",
+                        confirmation = Confirmation(responses.confirmMessage(contact.name, intent.message), responses.messageNotSent(), send),
+                    )
+                } else {
+                    send()
+                }
+            }
+            MessagePrepareResult.ContactNotFound -> ExecutionResult(false, responses.contactNotFound(intent.contact), ErrorKind.EXECUTION_FAILED)
+            MessagePrepareResult.NoApp -> ExecutionResult(false, responses.noWhatsApp(), ErrorKind.EXECUTION_FAILED)
+            is MessagePrepareResult.NeedsPermission ->
+                ExecutionResult(false, responses.needsPermission(prepared.kind), ErrorKind.PERMISSION_MISSING, needsPermission = prepared.kind)
+        }
+    }
+
+    private suspend fun deliver(m: Messenger, contact: MessageContact, message: String): ExecutionResult =
+        when (val r = runCatching { m.send(contact, message) }.getOrElse { MessageSendResult.Failed(it.message ?: "error") }) {
+            MessageSendResult.Sent -> ExecutionResult(true, responses.messageSent(contact.name))
+            MessageSendResult.ReadyToSend -> ExecutionResult(
+                true, responses.messageReady(contact.name), needsPermission = PermissionKind.ACCESSIBILITY,
+            )
+            MessageSendResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen("WhatsApp"), needsPermission = PermissionKind.OVERLAY)
+            MessageSendResult.DeviceLocked -> ExecutionResult(false, responses.unlockToSend(), ErrorKind.EXECUTION_FAILED)
+            is MessageSendResult.Failed -> ExecutionResult(false, responses.messageFailed(), ErrorKind.EXECUTION_FAILED)
+        }
 
     private suspend fun closeBackgroundApps(): ExecutionResult {
         // Primero se corta la música: así queda en silencio aunque no se puedan cerrar las apps.
@@ -189,7 +261,7 @@ class DefaultCommandExecutor(
         val launcher = apps ?: return ExecutionResult(false, responses.cannotCloseApps(), ErrorKind.EXECUTION_FAILED)
         return when (val r = runCatching { launcher.closeBackgroundApps() }.getOrElse { CloseAppsResult.Failed(it.message ?: "error") }) {
             CloseAppsResult.Closed -> ExecutionResult(true, responses.appsClosed())
-            CloseAppsResult.NeedsAccessibility -> ExecutionResult(musicStopped, responses.needsAccessibility(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
+            CloseAppsResult.NeedsAccessibility -> ExecutionResult(musicStopped, responses.needsAccessibility(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped }, needsPermission = PermissionKind.ACCESSIBILITY)
             CloseAppsResult.DeviceLocked -> ExecutionResult(musicStopped, responses.unlockToCloseApps(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
             is CloseAppsResult.Failed -> ExecutionResult(musicStopped, responses.cannotCloseApps(musicStopped), ErrorKind.EXECUTION_FAILED.takeUnless { musicStopped })
         }
@@ -204,12 +276,12 @@ class DefaultCommandExecutor(
         val noAccess = !hasMediaSessionAccess()
         return when (result) {
             is MediaActionResult.Done -> ExecutionResult(true, responses.mediaDone(action, result.appName ?: app, query))
-            is MediaActionResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.appName ?: app ?: "la música"))
+            is MediaActionResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.appName ?: app ?: "la música"), needsPermission = PermissionKind.OVERLAY)
             is MediaActionResult.PausedInstead -> ExecutionResult(true, responses.pausedInsteadOfStop(result.appName))
             is MediaActionResult.NotConfirmed -> ExecutionResult(false, responses.notConfirmed(action, result.appName), ErrorKind.EXECUTION_FAILED)
-            MediaActionResult.SentWithoutVerification -> ExecutionResult(true, responses.sentBlind(action), needsNotificationAccess = noAccess)
+            MediaActionResult.SentWithoutVerification -> ExecutionResult(true, responses.sentBlind(action), needsPermission = PermissionKind.NOTIFICATION_ACCESS.takeIf { noAccess })
             MediaActionResult.NothingPlaying -> ExecutionResult(false, responses.nothingPlaying(), ErrorKind.EXECUTION_FAILED)
-            MediaActionResult.NoMediaApp -> ExecutionResult(false, responses.noMediaApp(), ErrorKind.EXECUTION_FAILED, needsNotificationAccess = noAccess)
+            MediaActionResult.NoMediaApp -> ExecutionResult(false, responses.noMediaApp(), ErrorKind.EXECUTION_FAILED, needsPermission = PermissionKind.NOTIFICATION_ACCESS.takeIf { noAccess })
             is MediaActionResult.Unsupported -> ExecutionResult(false, responses.unsupported(action, result.appName), ErrorKind.EXECUTION_FAILED)
             is MediaActionResult.Failed -> ExecutionResult(false, responses.failed(result.message), ErrorKind.EXECUTION_FAILED)
         }
@@ -310,14 +382,28 @@ class ResponseCatalog(private val random: Random = Random.Default) {
 
     fun appOpened(label: String, locked: Boolean) =
         if (locked) "Abro $label. Desbloqueá el teléfono para verla." else "Abro $label."
-    fun tapToOpen(label: String) =
-        "Te dejé una notificación para abrir $label. Para que la abra directo, activá «Mostrar sobre otras apps» para Sara."
+    fun tapToOpen(label: String) = "Tocá la notificación para abrir $label."
+    fun needsPermission(kind: PermissionKind) = when (kind) {
+        PermissionKind.CONTACTS -> "Necesito ver tus contactos. Te dejé el botón."
+        PermissionKind.ACCESSIBILITY -> "Activame en Accesibilidad. Te dejé el botón."
+        PermissionKind.OVERLAY -> "Necesito un permiso. Te dejé el botón."
+        else -> "Me falta un permiso. Te dejé el botón."
+    }
+    fun cannotSendMessages() = "Todavía no puedo mandar mensajes."
+    fun confirmMessage(name: String, message: String) = "¿Le mando a $name: $message?"
+    fun messageNotSent() = "Listo, no lo mando."
+    fun messageSent(name: String) = "Listo, se lo mandé a $name."
+    fun messageReady(name: String) = "Te dejé el mensaje listo. Tocá enviar."
+    fun messageFailed() = "No pude mandar el mensaje."
+    fun contactNotFound(query: String) = "No encontré a $query en tus contactos."
+    fun noWhatsApp() = "No encontré WhatsApp."
+    fun unlockToSend() = "Desbloqueá el teléfono para mandarlo."
     fun appNotFound(query: String) = "No encontré ninguna app que se llame $query."
     fun cannotOpenApps() = "Todavía no puedo abrir apps en este dispositivo."
     fun appsClosed() = "Listo, cerré todo."
     private fun musicPrefix(stopped: Boolean) = if (stopped) "Saqué la música. " else ""
     fun needsAccessibility(musicStopped: Boolean = false) =
-        musicPrefix(musicStopped) + "Para cerrar apps activá a Sara en Accesibilidad."
+        musicPrefix(musicStopped) + "Activame en Accesibilidad. Te dejé el botón."
     fun unlockToCloseApps(musicStopped: Boolean = false) = musicPrefix(musicStopped) + "Desbloqueá el teléfono para cerrar apps."
     fun cannotCloseApps(musicStopped: Boolean = false) = musicPrefix(musicStopped) + "No pude cerrar las apps."
 

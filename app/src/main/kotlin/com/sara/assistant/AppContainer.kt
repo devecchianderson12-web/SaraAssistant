@@ -77,6 +77,7 @@ class AppContainer(private val app: Application) {
     val appLauncher = com.sara.assistant.apps.AndroidAppLauncher(app, activityStarter, logger)
     val musicUsage = com.sara.assistant.media.MusicUsageTracker(app, logger)
     val mediaControl = AndroidMediaControl(app, activityStarter, appLauncher, musicUsage, logger)
+    private val messenger = com.sara.assistant.apps.WhatsAppMessenger(app, activityStarter, logger)
     val updates = com.sara.assistant.update.UpdateManager(app, logger)
 
     // Motores (instancias reutilizables; la selección depende de los ajustes vigentes).
@@ -122,7 +123,10 @@ class AppContainer(private val app: Application) {
         scope = scope,
         engines = engines,
         interpreter = CompositeCommandInterpreter(RuleBasedCommandInterpreter(), conversational = null),
-        executor = DefaultCommandExecutor(mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher),
+        executor = DefaultCommandExecutor(
+            mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
+            messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
+        ),
         connectivity = connectivity,
         configProvider = { settings.current().toAssistantConfig() },
         feedback = AndroidActivationFeedback(ChimePlayer(), focus, logger),
@@ -133,6 +137,15 @@ class AppContainer(private val app: Application) {
     init {
         scope.launch { history.load() }
         if (mediaControl.hasNotificationAccess()) musicUsage.start()
+        // Si una orden necesita un permiso y Sara está en segundo plano, deja una notificación con
+        // el botón que lleva directo a activarlo (en primer plano lo muestra la pantalla de inicio).
+        scope.launch {
+            orchestrator.events.collect { event ->
+                if (event is com.sara.core.model.AssistantEvent.PermissionNeeded && !isAppInForeground()) {
+                    com.sara.assistant.permissions.PermissionCenter.notify(app, event.kind)
+                }
+            }
+        }
     }
 
     fun SaraSettings.toAssistantConfig() = AssistantConfig(

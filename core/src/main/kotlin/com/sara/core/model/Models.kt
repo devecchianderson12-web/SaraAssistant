@@ -31,6 +31,9 @@ sealed interface CommandIntent {
 
     /** «Cerrá las apps en segundo plano»: saca la música y limpia las apps recientes. */
     data object CloseBackgroundApps : CommandIntent
+
+    /** «Mandale un WhatsApp a Mi Amor que diga …». [message] conserva mayúsculas y acentos. */
+    data class SendMessage(val contact: String, val message: String) : CommandIntent
     data class AdjustVolume(val change: VolumeChange) : CommandIntent
     data object Cancel : CommandIntent
     data class Unknown(val text: String) : CommandIntent
@@ -53,6 +56,7 @@ fun CommandIntent.label(): String = when (this) {
         VolumeChange.Unmute -> "Quitar silencio"
     }
     CommandIntent.CloseBackgroundApps -> "Cerrar apps en segundo plano"
+    is CommandIntent.SendMessage -> "WhatsApp a $contact: $message"
     CommandIntent.Cancel -> "Cancelar"
     is CommandIntent.Unknown -> "No reconocida"
 }
@@ -114,6 +118,13 @@ sealed interface AssistantEvent {
     data class Responded(val text: String, val success: Boolean, val intent: CommandIntent?) : AssistantEvent
     data class Notice(val text: String) : AssistantEvent
     data class Failed(val error: AssistantError) : AssistantEvent
+    /** Una orden necesita un permiso: la app muestra un botón que lleva directo a activarlo. */
+    data class PermissionNeeded(val kind: PermissionKind) : AssistantEvent
+}
+
+/** Permisos o ajustes que alguna función de Sara necesita. */
+enum class PermissionKind {
+    MICROPHONE, NOTIFICATIONS, NOTIFICATION_ACCESS, OVERLAY, ACCESSIBILITY, CONTACTS, BATTERY, DEFAULT_ASSISTANT,
 }
 
 data class HistoryEntry(

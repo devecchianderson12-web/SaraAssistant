@@ -22,7 +22,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-data class Conversation(val heard: String = "", val response: String = "", val notice: String = "")
+data class Conversation(
+    val heard: String = "",
+    val response: String = "",
+    val notice: String = "",
+    /** Permiso que pidió la última orden (se muestra con su botón arriba de todo). */
+    val permission: com.sara.core.model.PermissionKind? = null,
+)
 
 data class EngineStatus(val name: String, val detail: String, val ok: Boolean)
 
@@ -39,6 +45,8 @@ data class SystemStatus(
     /** App de música que Sara usa por defecto (la que más usa el usuario). */
     val musicApp: String? = null,
     val canCloseApps: Boolean = false,
+    /** Permisos que faltan, cada uno con su botón en Inicio. */
+    val missing: List<com.sara.core.model.PermissionKind> = emptyList(),
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -76,6 +84,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     is AssistantEvent.Responded -> _conversation.update { it.copy(response = event.text) }
                     is AssistantEvent.Notice -> _conversation.update { it.copy(notice = event.text) }
                     is AssistantEvent.Failed -> _conversation.update { it.copy(notice = event.error.message) }
+                    is AssistantEvent.PermissionNeeded -> {
+                        _conversation.update { it.copy(permission = event.kind) }
+                        refreshSystem()
+                    }
                 }
             }
         }
@@ -223,6 +235,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             porcupineModel = c.porcupineFiles.model.isFile,
             canOpenAppsFromBackground = android.provider.Settings.canDrawOverlays(getApplication()),
             canCloseApps = com.sara.assistant.apps.SaraAccessibilityService.isEnabled(getApplication()),
+            missing = com.sara.assistant.permissions.PermissionCenter.missing(getApplication()),
             musicApp = runCatching { c.mediaControl.preferredMusicApp()?.label }.getOrNull(),
         )
     }

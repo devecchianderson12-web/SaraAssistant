@@ -115,7 +115,7 @@ class WakeWordAndAudioTest {
 
     @Test
     fun `deteccion por parciales con estabilidad y enfriamiento`() {
-        val gate = com.sara.core.util.WakeWordGate(0.5f)
+        val gate = com.sara.core.util.WakeWordGate(0.3f)
         assertFalse(gate.onPartial(listOf("sara")))
         assertTrue(gate.onPartial(listOf("sara")))
         gate.rejected()
@@ -126,6 +126,19 @@ class WakeWordAndAudioTest {
         assertTrue(gate.onFinal(listOf("sara" to 0.9f)))
         assertEquals(1, WakeWordTuning.requiredPartialHits(0.9f))
         assertEquals(3, WakeWordTuning.requiredPartialHits(0.1f))
+        assertEquals(1, WakeWordTuning.requiredPartialHits(0.5f))
+    }
+
+    @Test
+    fun `ganancia para voz baja`() {
+        assertEquals(6f, WakeWordTuning.gainFor(500), 0.001f)
+        assertEquals(1f, WakeWordTuning.gainFor(20_000), 0.001f)
+        // 1000 y -1000 en PCM 16 bits little-endian.
+        val pcm = byteArrayOf(0xE8.toByte(), 0x03, 0x18, 0xFC.toByte())
+        assertEquals(1000, WakeWordTuning.peakOf(pcm, 4))
+        val louder = WakeWordTuning.applyGain(pcm, 4, 4f)
+        assertEquals(4000, WakeWordTuning.peakOf(louder, 4))
+        assertTrue(WakeWordTuning.peakOf(WakeWordTuning.applyGain(pcm, 4, 100f), 4) >= 32767)
     }
 
     @Test

@@ -15,9 +15,15 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Opcional: abrir apps pedidas por voz cuando Sara está en segundo plano. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- «Mandale un WhatsApp a …»: buscar el contacto por nombre. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Botón directo «Permitir en segundo plano» (batería sin restricciones). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Visibilidad de paquetes (Android 11+) para los servicios que usa Sara. -->
     <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>

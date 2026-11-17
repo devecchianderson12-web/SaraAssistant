@@ -201,6 +201,15 @@ fun SettingsScreen(
             OptionChips("Idioma", languages, settings.language) { v -> actions.update { it.copy(language = v) } }
         }
 
+        // ---------------------------------------------------------------- Mensajes
+        SectionCard("Mensajes") {
+            SwitchRow(
+                "Confirmar antes de enviar",
+                if (settings.confirmMessages) "Sara te lee el mensaje y espera un «sí»" else "Sara manda el WhatsApp sin preguntar",
+                settings.confirmMessages,
+            ) { v -> actions.update { it.copy(confirmMessages = v) } }
+        }
+
         // ---------------------------------------------------------------- Privacidad
         SectionCard("Privacidad") {
             StatusLine("Micrófono", if (micActive) "En uso por Sara ahora" else "Cerrado", !micActive)

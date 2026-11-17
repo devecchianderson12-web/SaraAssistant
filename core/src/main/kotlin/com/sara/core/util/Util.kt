@@ -106,9 +106,43 @@ object WakeWordTuning {
 
     /** Cantidad de resultados parciales seguidos con «sara» para pasar a verificación. */
     fun requiredPartialHits(sensitivity: Float): Int = when {
-        sensitivity >= 0.7f -> 1
-        sensitivity >= 0.3f -> 2
+        sensitivity >= 0.4f -> 1
+        sensitivity >= 0.2f -> 2
         else -> 3
+    }
+
+    /**
+     * Ganancia digital para voz baja o lejana: lleva el pico de la ventana a ~[target] sin pasar
+     * de [maxGain] (para no inflar el ruido de una habitación en silencio).
+     */
+    fun gainFor(peak: Int, target: Int = 12_000, maxGain: Float = 6f): Float =
+        if (peak <= 0) 1f else (target.toFloat() / peak).coerceIn(1f, maxGain)
+
+    /** Aplica [gain] a PCM de 16 bits little-endian, recortando sin desbordar. */
+    fun applyGain(pcm: ByteArray, length: Int, gain: Float): ByteArray {
+        val out = pcm.copyOf(length)
+        if (gain == 1f) return out
+        var i = 0
+        while (i + 1 < length) {
+            val sample = (out[i].toInt() and 0xFF) or (out[i + 1].toInt() shl 8)
+            val scaled = (sample * gain).toInt().coerceIn(-32768, 32767)
+            out[i] = scaled.toByte()
+            out[i + 1] = (scaled shr 8).toByte()
+            i += 2
+        }
+        return out
+    }
+
+    fun peakOf(pcm: ByteArray, length: Int): Int {
+        var peak = 0
+        var i = 0
+        while (i + 1 < length) {
+            val sample = (pcm[i].toInt() and 0xFF) or (pcm[i + 1].toInt() shl 8)
+            val abs = kotlin.math.abs(sample.toShort().toInt())
+            if (abs > peak) peak = abs
+            i += 2
+        }
+        return peak
     }
 }
 
@@ -116,7 +150,7 @@ object WakeWordTuning {
  * Compuerta de energía para ahorrar batería: en silencio el reconocedor no procesa audio.
  * Cuando vuelve a haber sonido se le entregan los bloques previos para no perder el comienzo.
  */
-class EnergyGate(private val idleAfterChunks: Int = 8, private val minRms: Double = 120.0) {
+class EnergyGate(private val idleAfterChunks: Int = 15, private val minRms: Double = 45.0, private val ratio: Double = 1.7) {
     private var noiseFloor = -1.0
     private var quietChunks = 0
     var idle = false
@@ -129,7 +163,8 @@ class EnergyGate(private val idleAfterChunks: Int = 8, private val minRms: Doubl
             rms < noiseFloor -> rms
             else -> noiseFloor * 0.995 + rms * 0.005
         }
-        val loud = rms > maxOf(noiseFloor * 2.5, minRms)
+        // Umbral bajo: una voz suave o lejos del teléfono también tiene que despertar al detector.
+        val loud = rms > maxOf(noiseFloor * ratio, minRms)
         if (loud) {
             quietChunks = 0
             if (idle) {
