@@ -74,7 +74,8 @@ class CommandInterpreterTest {
     @Test
     fun `cancelar y frases no reconocidas`() {
         assertIntent(CommandIntent.Cancel, "nada", "cancelá", "olvidalo")
-        assertTrue(intentOf("¿qué hora es?") is CommandIntent.Unknown)
+        assertTrue(intentOf("¿qué hora es?") is CommandIntent.Chat)
+        assertTrue(intentOf("¿quién ganó el partido?") is CommandIntent.Unknown)
         assertTrue(intentOf("Sara") is CommandIntent.Unknown)
         assertTrue(intentOf("") is CommandIntent.Unknown)
         assertTrue(intentOf("poné el volumen") is CommandIntent.Unknown)
