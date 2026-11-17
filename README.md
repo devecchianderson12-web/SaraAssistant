@@ -1,11 +1,5 @@
 # SaraAssistant
 
-> **Novedades:** Sara ahora tiene habilidades (alarmas, recordatorios, rutinas, clima, calendario,
-> llamadas, mapas, ajustes, listas y más), un planificador con IA y conversación continua. La
-> documentación actualizada de arquitectura, permisos, limitaciones y pruebas está en
-> [docs/SARA.md](docs/SARA.md).
-
-
 Asistente de voz para Android, nativo en Kotlin + Jetpack Compose. Se activa diciendo **«Sara»** o tocando el círculo central, entiende órdenes en español (con preferencia rioplatense) y en la versión 1.0 controla **música** y **volumen**.
 
 ```

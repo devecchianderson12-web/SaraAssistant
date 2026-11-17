@@ -177,32 +177,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val memories = c.memory.entries
     fun forget(key: String) { c.memory.remove(key) }
 
-    // Rutinas programadas y recordatorios (se editan desde Ajustes).
-    private val _routines = MutableStateFlow(c.scheduler.routines())
-    val routines: StateFlow<List<com.sara.assistant.skills.ScheduledRoutine>> = _routines.asStateFlow()
-    private val _reminders = MutableStateFlow(c.scheduler.reminders())
-    val reminders: StateFlow<List<com.sara.assistant.skills.Reminder>> = _reminders.asStateFlow()
-
-    fun refreshSchedule() {
-        _routines.value = c.scheduler.routines()
-        _reminders.value = c.scheduler.reminders().sortedBy { it.at }
-    }
-
-    fun toggleRoutine(r: com.sara.assistant.skills.ScheduledRoutine) {
-        c.scheduler.updateRoutine(r.copy(enabled = !r.enabled))
-        refreshSchedule()
-    }
-
-    fun deleteRoutine(r: com.sara.assistant.skills.ScheduledRoutine) {
-        c.scheduler.removeRoutine(r.id)
-        refreshSchedule()
-    }
-
-    fun deleteReminder(r: com.sara.assistant.skills.Reminder) {
-        c.scheduler.removeReminder(r.id)
-        refreshSchedule()
-    }
-
     private fun keyName(provider: AiProvider) =
         if (provider == AiProvider.GOOGLE) SecretStore.GEMINI_KEY else SecretStore.ANTHROPIC_KEY
 
@@ -257,7 +231,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshSystem() = viewModelScope.launch {
-        refreshSchedule()
         val engines = c.engines
         suspend fun status(name: String, availability: suspend () -> Availability): EngineStatus {
             val a = runCatching { availability() }.getOrElse { Availability.Unavailable(com.sara.core.engine.UnavailableReason.NOT_SUPPORTED, it.message ?: "error") }

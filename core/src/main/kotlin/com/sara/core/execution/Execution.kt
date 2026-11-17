@@ -200,12 +200,6 @@ interface Messenger {
     suspend fun send(contact: MessageContact, message: String): MessageSendResult
 }
 
-/** Planificador: resuelve pedidos que no son una orden conocida combinando habilidades. */
-interface Planner {
-    fun isAvailable(): Boolean
-    suspend fun handle(text: String): ExecutionResult
-}
-
 interface CommandExecutor {
     suspend fun execute(intent: CommandIntent): ExecutionResult
 }
@@ -222,8 +216,6 @@ class DefaultCommandExecutor(
     private val confirmMessages: () -> Boolean = { true },
     private val memory: MemoryStore? = null,
     private val assistant: ConversationalAssistant? = null,
-    private val skills: com.sara.core.skills.SkillRegistry? = null,
-    private val planner: Planner? = null,
 ) : CommandExecutor {
 
     override suspend fun execute(intent: CommandIntent): ExecutionResult = when (intent) {
@@ -242,9 +234,6 @@ class DefaultCommandExecutor(
         is CommandIntent.Forget -> forget(intent.key)
         CommandIntent.RecallMemory -> recall()
         is CommandIntent.Chat -> chat(intent.text)
-        is CommandIntent.Skill -> runSkill(intent)
-        is CommandIntent.Sequence -> runSequence(intent.steps, 0, emptyList())
-        is CommandIntent.Plan -> plan(intent.text)
         CommandIntent.Cancel -> ExecutionResult(true, responses.cancelled())
         is CommandIntent.Unknown -> ExecutionResult(false, responses.notUnderstood(), ErrorKind.RECOGNITION_FAILED)
     }
@@ -289,54 +278,6 @@ class DefaultCommandExecutor(
         val all = memory?.all().orEmpty()
         if (all.isEmpty()) return ExecutionResult(true, responses.nothingRemembered())
         return ExecutionResult(true, responses.recall(all.map { (k, v) -> MemoryKeys.describe(k, v) }))
-    }
-
-    /** Acción de una habilidad; las sensibles (mensajes, llamadas, borrar) piden confirmación antes. */
-    private suspend fun runSkill(intent: CommandIntent.Skill): ExecutionResult {
-        val registry = skills ?: return ExecutionResult(false, responses.cannotDoThat(), ErrorKind.EXECUTION_FAILED)
-        val action = registry.find(intent.skill, intent.action)
-            ?: return ExecutionResult(false, responses.cannotDoThat(), ErrorKind.EXECUTION_FAILED)
-        val run: suspend () -> ExecutionResult = { registry.run(intent.skill, intent.action, intent.args).toExecution() }
-        if (action.risk == com.sara.core.skills.Risk.SENSITIVE) {
-            val question = action.confirm?.invoke(intent.args) ?: responses.confirmGeneric()
-            return ExecutionResult(true, "", confirmation = Confirmation(question, responses.notDone(), run))
-        }
-        return run()
-    }
-
-    /**
-     * Pasos en orden. Si uno necesita confirmación o una respuesta, se pregunta y, al responder,
-     * se sigue con el resto. Cada paso informa su propio resultado (también si falló), así queda
-     * claro qué se hizo y qué no.
-     */
-    private suspend fun runSequence(steps: List<CommandIntent>, index: Int, said: List<String>, failed: Boolean = false): ExecutionResult {
-        if (index >= steps.size) return ExecutionResult(!failed, said.joinToString(" ").ifBlank { responses.done() })
-        val result = execute(steps[index])
-        fun continueAfter(r: ExecutionResult): suspend () -> ExecutionResult = {
-            runSequence(steps, index + 1, said + r.response, failed || !r.success).let { next ->
-                if (r.needsPermission != null && next.needsPermission == null) next.copy(needsPermission = r.needsPermission) else next
-            }
-        }
-        result.confirmation?.let { c ->
-            return result.copy(confirmation = Confirmation(c.question, (said + c.declined).joinToString(" ")) { continueAfter(c.onConfirm())() })
-        }
-        result.followUp?.let { f ->
-            return result.copy(followUp = FollowUp(f.question) { answer -> continueAfter(f.onAnswer(answer))() })
-        }
-        return continueAfter(result)()
-    }
-
-    /** Pedido nuevo o complejo: el planificador (IA con habilidades); si no hay, se responde como pregunta. */
-    private suspend fun plan(text: String): ExecutionResult {
-        val p = planner?.takeIf { it.isAvailable() } ?: return chat(text)
-        return runCatching { p.handle(text) }.getOrElse { chat(text) }
-    }
-
-    private fun com.sara.core.skills.SkillResult.toExecution(): ExecutionResult = when (this) {
-        is com.sara.core.skills.SkillResult.Done -> ExecutionResult(true, message)
-        is com.sara.core.skills.SkillResult.Partial -> ExecutionResult(true, message)
-        is com.sara.core.skills.SkillResult.NeedsPermission -> ExecutionResult(false, message, ErrorKind.PERMISSION_MISSING, needsPermission = kind)
-        is com.sara.core.skills.SkillResult.Failed -> ExecutionResult(false, message, ErrorKind.EXECUTION_FAILED)
     }
 
     private suspend fun chat(text: String): ExecutionResult {
@@ -533,10 +474,6 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun recall(items: List<String>) = "Recuerdo que " + items.joinToString("; ") + "."
     fun needsAi() = "Para preguntas cargá la clave de Google. Te dejé el botón."
     fun whatToSay() = "¿Qué le digo?"
-    fun cannotDoThat() = "Todavía no sé hacer eso."
-    fun confirmGeneric() = "¿Lo hago?"
-    fun notDone() = "Listo, no lo hago."
-    fun done() = "Listo."
     fun tookTooLong() = "Tardé demasiado, probá de nuevo."
     fun aiFailed() = "No pude responder ahora."
     fun confirmMessage(name: String, message: String) = "¿Le mando «$message» a $name?"

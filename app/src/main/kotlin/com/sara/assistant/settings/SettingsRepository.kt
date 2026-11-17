@@ -56,8 +56,6 @@ data class SaraSettings(
     /** Leer el mensaje y esperar un «sí» antes de mandarlo. */
     val confirmMessages: Boolean = true,
     val aiProvider: AiProvider = AiProvider.GOOGLE,
-    /** Seguir escuchando unos segundos después de responder (charla sin repetir «Sara»). */
-    val continuousConversation: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -106,7 +104,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val azureRegion = stringPreferencesKey("azure_region")
         val confirmMessages = booleanPreferencesKey("confirm_messages")
         val aiProvider = stringPreferencesKey("ai_provider")
-        val continuousConversation = booleanPreferencesKey("continuous_conversation")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -138,7 +135,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             azureRegion = this[Keys.azureRegion] ?: d.azureRegion,
             confirmMessages = this[Keys.confirmMessages] ?: d.confirmMessages,
             aiProvider = this[Keys.aiProvider].toEnum(d.aiProvider),
-            continuousConversation = this[Keys.continuousConversation] ?: d.continuousConversation,
         )
     }
 
@@ -166,6 +162,5 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.azureRegion] = s.azureRegion
         this[Keys.confirmMessages] = s.confirmMessages
         this[Keys.aiProvider] = s.aiProvider.name
-        this[Keys.continuousConversation] = s.continuousConversation
     }
 }

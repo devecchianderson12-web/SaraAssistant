@@ -202,8 +202,6 @@ class MainActivity : ComponentActivity() {
         val message by viewModel.message.collectAsStateWithLifecycle()
         val updateState by viewModel.updateState.collectAsStateWithLifecycle()
         val memories by viewModel.memories.collectAsStateWithLifecycle()
-        val routines by viewModel.routines.collectAsStateWithLifecycle()
-        val reminders by viewModel.reminders.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         val aiRequested by aiDialogRequested
         LaunchedEffect(aiRequested) { if (aiRequested) tab = Tab.SETTINGS }
@@ -277,7 +275,6 @@ class MainActivity : ComponentActivity() {
                             settings = settings, system = system, modelState = modelState, serviceRunning = running,
                             micActive = micActive, voices = voices, diagnostics = diagnostics, memories = memories,
                             aiDialogRequested = aiRequested, onAiDialogShown = { aiDialogRequested.value = false },
-                            routines = routines, reminders = reminders,
                             actions = SettingsActions(
                                 update = { viewModel.update(it) },
                                 onWakeToggle = wakeToggle,
@@ -287,10 +284,6 @@ class MainActivity : ComponentActivity() {
                                 saveAiKey = { p, k -> viewModel.saveAiKey(p, k) },
                                 clearAiKey = viewModel::clearAiKey,
                                 forget = viewModel::forget,
-                                grant = ::grant,
-                                toggleRoutine = viewModel::toggleRoutine,
-                                deleteRoutine = viewModel::deleteRoutine,
-                                deleteReminder = viewModel::deleteReminder,
                                 clearAzure = viewModel::clearAzure,
                                 savePorcupineKey = viewModel::savePorcupineKey,
                                 importPorcupineKeyword = { keywordPicker.launch(arrayOf("*/*")) },

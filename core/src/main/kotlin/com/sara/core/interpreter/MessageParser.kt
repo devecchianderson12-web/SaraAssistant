@@ -79,7 +79,7 @@ object MessageParser {
 
     private val GROUP = Regex("^(?:el\\s+|un\\s+|mi\\s+)?(?:grupo|chat)\\b\\s*(?:que\\s+(?:dice|se\\s+llama|tiene\\s+de\\s+nombre)|llamado|de\\s+nombre|de)?\\s*", RegexOption.IGNORE_CASE)
     private val TAIL = Regex(
-        "\\s*(?:,|\\s(?:en|de)\\s+(?:mi\\s+)?$WA\\b|\\s(?:en|de)\\s+el\\s+(?:cual|que)\\b|\\sdonde\\b|\\sque\\s+(?:es|tiene|est[aá])(?=\\s|$)|" +
+        "\\s*(?:,|\\s(?:en|de)\\s+(?:mi\\s+)?$WA\\b|\\s(?:en|de)\\s+el\\s+(?:cual|que)\\b|\\sdonde\\b|\\sque\\s+(?:es|tiene|est[aá])\\b|" +
             "\\s(?:en|de)\\s+(?:los\\s+|la\\s+parte\\s+de\\s+)?archivad[oa]s?\\b).*$",
         RegexOption.IGNORE_CASE,
     )

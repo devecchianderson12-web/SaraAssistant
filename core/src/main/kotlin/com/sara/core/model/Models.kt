@@ -43,15 +43,6 @@ sealed interface CommandIntent {
 
     /** Preguntas y charla («¿cómo estás?», «¿qué tiempo hace?»): local o con IA. */
     data class Chat(val text: String) : CommandIntent
-
-    /** Acción de una habilidad (alarma, clima, linterna, calendario…) con sus parámetros. */
-    data class Skill(val skill: String, val action: String, val args: Map<String, String> = emptyMap()) : CommandIntent
-
-    /** Varias órdenes seguidas: «poné música y bajá el volumen al 30». */
-    data class Sequence(val steps: List<CommandIntent>) : CommandIntent
-
-    /** Pedido complejo o nuevo: lo resuelve el planificador (IA) combinando habilidades. */
-    data class Plan(val text: String) : CommandIntent
     data class AdjustVolume(val change: VolumeChange) : CommandIntent
     data object Cancel : CommandIntent
     data class Unknown(val text: String) : CommandIntent
@@ -79,9 +70,6 @@ fun CommandIntent.label(): String = when (this) {
     is CommandIntent.Forget -> "Olvidar: $key"
     CommandIntent.RecallMemory -> "Qué recuerdo"
     is CommandIntent.Chat -> "Pregunta: $text"
-    is CommandIntent.Skill -> "$skill.$action" + if (args.isEmpty()) "" else " " + args.entries.joinToString(", ") { "${it.key}=${it.value}" }
-    is CommandIntent.Sequence -> steps.joinToString(" → ") { it.label() }
-    is CommandIntent.Plan -> "Plan: $text"
     CommandIntent.Cancel -> "Cancelar"
     is CommandIntent.Unknown -> "No reconocida"
 }
@@ -152,11 +140,6 @@ enum class PermissionKind {
     MICROPHONE, NOTIFICATIONS, NOTIFICATION_ACCESS, OVERLAY, ACCESSIBILITY, CONTACTS, BATTERY, DEFAULT_ASSISTANT,
     /** Clave de la IA (Google o Claude) para responder preguntas. */
     AI_KEY,
-    LOCATION, PHONE, CALENDAR,
-    /** «Modificar ajustes del sistema» (brillo). */
-    WRITE_SETTINGS,
-    /** Acceso a «No molestar». */
-    DND_ACCESS,
 }
 
 data class HistoryEntry(

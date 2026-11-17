@@ -66,9 +66,6 @@ data class AssistantConfig(
     val endSilenceMillis: Long = 1_700,
     /** Si no entendió, vuelve a preguntar una vez en lugar de salir. */
     val retryOnce: Boolean = true,
-    /** Después de responder sigue escuchando unos segundos para seguir la charla sin decir «Sara». */
-    val continuousConversation: Boolean = false,
-    val followUpSilenceMillis: Long = 5_000,
 )
 
 /** Señales no verbales y manejo de foco de audio, implementadas por la plataforma. */
@@ -316,35 +313,9 @@ class AssistantOrchestrator(
                         continue
                     }
                     execute(text, interpretation, cfg)
-                    if (cfg.continuousConversation && interpretation.intent !is CommandIntent.Cancel) followUpConversation(cfg)
                 }
             }
             return
-        }
-    }
-
-    /**
-     * Conversación continua: tras responder, escucha unos segundos más. Si no habla o no es una
-     * orden/pregunta, termina en silencio (sin «no te entendí»), así no reacciona a ruidos.
-     */
-    private suspend fun followUpConversation(cfg: AssistantConfig) {
-        val quick = cfg.copy(noSpeechTimeoutMillis = cfg.followUpSilenceMillis)
-        repeat(MAX_CONVERSATION_TURNS) {
-            machine.moveTo(AssistantState.Listening())
-            val heard = listen(quick) as? RecognitionResult.Success ?: return
-            val text = heard.text.trim()
-            if (text.isEmpty()) return
-            _events.emit(AssistantEvent.Heard(text, heard.engineId))
-            machine.moveTo(AssistantState.Processing(text))
-            val interpretation = interpreter.interpret(text)
-            when (interpretation.intent) {
-                is CommandIntent.Unknown -> return
-                is CommandIntent.Cancel -> {
-                    speak(responses.cancelled(), cfg)
-                    return
-                }
-                else -> execute(text, interpretation, cfg)
-            }
         }
     }
 
@@ -484,9 +455,8 @@ class AssistantOrchestrator(
     private companion object {
         const val TAG = "Orchestrator"
         const val MAX_FOLLOW_UPS = 3
-        const val MAX_CONVERSATION_TURNS = 6
         /** Ninguna orden puede dejar a Sara trabada: si tarda más, se corta y vuelve a escuchar. */
-        const val EXECUTION_TIMEOUT_MS = 60_000L
+        const val EXECUTION_TIMEOUT_MS = 40_000L
         val FATAL_WAKE_ERRORS = setOf(EngineErrorType.PERMISSION, EngineErrorType.NOT_AVAILABLE, EngineErrorType.CREDENTIALS)
     }
 }

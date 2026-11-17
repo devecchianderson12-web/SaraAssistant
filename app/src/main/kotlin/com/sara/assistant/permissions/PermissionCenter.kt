@@ -30,9 +30,6 @@ object PermissionCenter {
 
     data class Info(val title: String, val why: String)
 
-    /** Los que Sara necesita para lo básico: se muestran siempre en Inicio. El resto, en Ajustes › Permisos. */
-    val ESSENTIAL = setOf(PermissionKind.MICROPHONE, PermissionKind.NOTIFICATIONS, PermissionKind.NOTIFICATION_ACCESS, PermissionKind.BATTERY)
-
     fun info(kind: PermissionKind): Info = when (kind) {
         PermissionKind.MICROPHONE -> Info("Micrófono", "Para escucharte. El audio nunca se guarda.")
         PermissionKind.NOTIFICATIONS -> Info("Notificaciones", "Para avisarte y dejarte botones cuando hace falta algo.")
@@ -50,13 +47,8 @@ object PermissionCenter {
         PermissionKind.DEFAULT_ASSISTANT -> Info("Asistente predeterminado", "Para que Sara arranque sola al reiniciar el teléfono.")
         PermissionKind.AI_KEY -> Info(
             "Preguntas con Google",
-            "Para responder noticias, búsquedas y pedidos complejos. La clave de Google es gratis: tocá Activar y seguí los pasos.",
+            "Para responder el clima, noticias y cualquier pregunta. La clave de Google es gratis: tocá Activar y seguí los pasos.",
         )
-        PermissionKind.LOCATION -> Info("Ubicación", "Para el clima de donde estás, «dónde estoy» y lugares cercanos. Sólo cuando lo pedís.")
-        PermissionKind.PHONE -> Info("Llamadas", "Para llamar directamente cuando lo pedís (sin este permiso, Sara deja el número marcado).")
-        PermissionKind.CALENDAR -> Info("Calendario", "Para decirte tus eventos de hoy y mañana.")
-        PermissionKind.WRITE_SETTINGS -> Info("Modificar ajustes", "Para cambiar el brillo de la pantalla.")
-        PermissionKind.DND_ACCESS -> Info("No molestar", "Para activar y desactivar el modo No molestar.")
     }
 
     /** Permisos que se piden con el diálogo del sistema (un toque en «Permitir»). */
@@ -64,18 +56,12 @@ object PermissionCenter {
         PermissionKind.MICROPHONE -> Manifest.permission.RECORD_AUDIO
         PermissionKind.CONTACTS -> Manifest.permission.READ_CONTACTS
         PermissionKind.NOTIFICATIONS -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
-        PermissionKind.LOCATION -> Manifest.permission.ACCESS_COARSE_LOCATION
-        PermissionKind.PHONE -> Manifest.permission.CALL_PHONE
-        PermissionKind.CALENDAR -> Manifest.permission.READ_CALENDAR
         else -> null
     }
 
     fun isGranted(context: Context, kind: PermissionKind): Boolean = when (kind) {
         PermissionKind.NOTIFICATIONS -> Build.VERSION.SDK_INT < 33 || granted(context, Manifest.permission.POST_NOTIFICATIONS)
-        PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.PHONE, PermissionKind.CALENDAR -> granted(context, runtimePermission(kind)!!)
-        PermissionKind.LOCATION -> granted(context, Manifest.permission.ACCESS_COARSE_LOCATION) || granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
-        PermissionKind.WRITE_SETTINGS -> Settings.System.canWrite(context)
-        PermissionKind.DND_ACCESS -> context.getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted
+        PermissionKind.MICROPHONE, PermissionKind.CONTACTS -> granted(context, runtimePermission(kind)!!)
         PermissionKind.NOTIFICATION_ACCESS -> NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         PermissionKind.OVERLAY -> Settings.canDrawOverlays(context)
         PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isWorking(context)
@@ -124,10 +110,7 @@ object PermissionCenter {
                 Intent(Settings.ACTION_VOICE_INPUT_SETTINGS),
                 Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
             )
-            PermissionKind.WRITE_SETTINGS -> listOf(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, pkg))
-            PermissionKind.DND_ACCESS -> listOf(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
-            PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.NOTIFICATIONS, PermissionKind.AI_KEY,
-            PermissionKind.LOCATION, PermissionKind.PHONE, PermissionKind.CALENDAR -> emptyList()
+            PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.NOTIFICATIONS, PermissionKind.AI_KEY -> emptyList()
         } + appDetails
     }
 

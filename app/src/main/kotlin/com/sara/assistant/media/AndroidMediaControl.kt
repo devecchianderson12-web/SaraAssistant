@@ -33,18 +33,7 @@ import kotlinx.coroutines.withContext
  * controlar las sesiones multimedia de otras apps. Sara no lee ni guarda notificaciones.
  */
 class SaraNotificationListener : NotificationListenerService() {
-    override fun onListenerDisconnected() {
-        if (instance === this) instance = null
-    }
-
-    companion object {
-        /** Para leer el resumen de notificaciones cuando el usuario lo pide. */
-        @Volatile var instance: SaraNotificationListener? = null
-            private set
-    }
-
     override fun onListenerConnected() {
-        instance = this
         // Recién concedido el acceso: empezar a aprender qué app de música se usa más.
         com.sara.assistant.SaraApp.containerOrNull(applicationContext)?.musicUsage?.start()
     }

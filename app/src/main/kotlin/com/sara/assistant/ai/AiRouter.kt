@@ -1,51 +1,24 @@
 package com.sara.assistant.ai
 
 import com.sara.assistant.settings.AiProvider
-import com.sara.core.execution.ExecutionResult
-import com.sara.core.execution.Planner
 import com.sara.core.memory.ConversationalAssistant
 
-/**
- * Reparte el trabajo entre proveedores:
- * - Preguntas con información actual: Google (búsqueda) primero; si no hay clave, Claude.
- * - Planificación y pedidos complejos: Claude primero (mejor razonamiento); si no hay clave o falla,
- *   Google. La preferencia de Ajustes decide cuál va primero cuando las dos sirven.
- */
+/** Elige la IA según Ajustes; si la elegida no tiene clave, usa la otra si está configurada. */
 class AiRouter(
     private val provider: () -> AiProvider,
     val google: GeminiAssistant,
     val claude: ClaudeAssistant,
-) : ConversationalAssistant, Planner {
-
-    private fun ordered(forPlanning: Boolean): List<Any> {
-        val list = when {
-            forPlanning -> listOf(claude, google)
-            provider() == AiProvider.CLAUDE -> listOf(claude, google)
-            else -> listOf(google, claude)
-        }
-        return list.filter { (it as ConversationalAssistant).isAvailable() }
+) : ConversationalAssistant {
+    private fun current(): ConversationalAssistant? {
+        val preferred = if (provider() == AiProvider.GOOGLE) google else claude
+        val other = if (preferred === google) claude else google
+        return preferred.takeIf { it.isAvailable() } ?: other.takeIf { it.isAvailable() }
     }
 
-    override fun isAvailable(): Boolean = google.isAvailable() || claude.isAvailable()
+    override fun isAvailable(): Boolean = current() != null
 
-    override suspend fun reply(text: String): String {
-        val first = ordered(forPlanning = false).firstOrNull() as? ConversationalAssistant
-            ?: return "Para eso activá la IA en Ajustes."
-        return first.reply(text)
-    }
-
-    override suspend fun handle(text: String): ExecutionResult {
-        val candidates = ordered(forPlanning = true).map { it as Planner }
-        if (candidates.isEmpty()) return ExecutionResult(false, "Para eso activá la IA en Ajustes.")
-        var last: ExecutionResult? = null
-        for (planner in candidates) {
-            val result = planner.handle(text)
-            // Si el primero falló por la red o la clave, se prueba con el otro proveedor.
-            if (result.success || result.confirmation != null || result.followUp != null) return result
-            last = result
-        }
-        return last!!
-    }
+    override suspend fun reply(text: String): String =
+        current()?.reply(text) ?: "Para eso activá la IA en Ajustes."
 
     fun reset() {
         google.reset()

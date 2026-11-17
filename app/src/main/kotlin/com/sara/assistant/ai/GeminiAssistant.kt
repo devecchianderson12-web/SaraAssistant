@@ -25,8 +25,7 @@ class GeminiAssistant(
     private val secrets: SecretStore,
     private val memory: MemoryStore,
     private val logger: SaraLogger,
-    private val support: PlannerSupport? = null,
-) : ConversationalAssistant, com.sara.core.execution.Planner {
+) : ConversationalAssistant {
     private val history = mutableListOf<JSONObject>()
     private var lastTurnAt = 0L
     /** Modelo que respondió bien la última vez (si el alias deja de existir, se elige otro de la lista). */
@@ -36,99 +35,7 @@ class GeminiAssistant(
 
     override fun isAvailable(): Boolean = secrets.has(SecretStore.GEMINI_KEY)
 
-    fun reset() {
-        synchronized(history) { history.clear() }
-        synchronized(planHistory) { planHistory.clear() }
-    }
-
-    // ------------------------------------------------------------------ Planificador (funciones)
-
-    private val planHistory = mutableListOf<JSONObject>()
-    private var lastPlanAt = 0L
-    @Volatile private var planPendingReset = false
-
-    override suspend fun handle(text: String): com.sara.core.execution.ExecutionResult = withContext(Dispatchers.IO) {
-        val s = support ?: return@withContext com.sara.core.execution.ExecutionResult(false, "No tengo planificador.")
-        val key = secrets.get(SecretStore.GEMINI_KEY) ?: return@withContext s.failure("Para eso activá la IA en Ajustes.")
-        s.beginTurn()
-        synchronized(planHistory) {
-            if (planPendingReset || System.currentTimeMillis() - lastPlanAt > CONVERSATION_IDLE_MS || planHistory.size > MAX_HISTORY * 2) planHistory.clear()
-            planPendingReset = false
-            planHistory += userTurn(s.contextLine() + "\n" + text)
-        }
-        guardedPlan(s) { planLoop(s, key) }
-    }
-
-    private suspend fun guardedPlan(s: PlannerSupport, block: suspend () -> com.sara.core.execution.ExecutionResult): com.sara.core.execution.ExecutionResult = try {
-        block().also { lastPlanAt = System.currentTimeMillis() }
-    } catch (e: IOException) {
-        synchronized(planHistory) { planHistory.clear() }
-        s.failure(errorMessage(e))
-    }
-
-    private suspend fun planLoop(s: PlannerSupport, key: String): com.sara.core.execution.ExecutionResult {
-        repeat(PlannerSupport.MAX_STEPS) {
-            val response = generateWithFallback(key, synchronized(planHistory) { JSONArray(planHistory.toList()) }, declarations(s))
-            val content = response.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")
-                ?: return s.failure(blockedReply(response))
-            synchronized(planHistory) { planHistory += content.put("role", "model") }
-            val parts = content.optJSONArray("parts") ?: JSONArray()
-            val calls = (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.optJSONObject("functionCall") }.map { fc ->
-                val args = fc.optJSONObject("args") ?: JSONObject()
-                PlannerSupport.Call(fc.optString("id"), fc.optString("name"), s.stringify(args.keys().asSequence().associateWith { args.get(it) }))
-            }
-            if (calls.isEmpty()) return s.finalResult(parts.texts())
-            s.confirmationFor(
-                calls,
-                resume = { withContext(Dispatchers.IO) { guardedPlan(s) { answer(s, calls); planLoop(s, key) } } },
-                onDecline = { planPendingReset = true },
-            )?.let { return it }
-            answer(s, calls)
-        }
-        synchronized(planHistory) { planHistory.clear() }
-        return s.failure("No pude terminar eso en pocos pasos.")
-    }
-
-    private suspend fun answer(s: PlannerSupport, calls: List<PlannerSupport.Call>) {
-        planPendingReset = false
-        val parts = JSONArray()
-        for (call in calls) {
-            val (output, _) = s.run(call)
-            val fr = JSONObject().put("name", call.name).put("response", JSONObject().put("result", output))
-            if (call.id.isNotBlank()) fr.put("id", call.id)
-            parts.put(JSONObject().put("functionResponse", fr))
-        }
-        synchronized(planHistory) { planHistory += JSONObject().put("role", "user").put("parts", parts) }
-    }
-
-    /** Las acciones de las habilidades como funciones de Gemini (tipos en mayúscula, formato de la API). */
-    private fun declarations(s: PlannerSupport): JSONArray = JSONArray(s.tools().map { (name, description, schema) ->
-        JSONObject().put("name", name).put("description", description).put("parameters", toGeminiSchema(schema))
-    })
-
-    @Suppress("UNCHECKED_CAST")
-    private fun toGeminiSchema(schema: Map<String, Any>): JSONObject {
-        val props = JSONObject()
-        (schema["properties"] as Map<String, Map<String, Any>>).forEach { (k, v) ->
-            val p = JSONObject().put("type", (v["type"] as String).uppercase()).put("description", v["description"])
-            (v["enum"] as? List<String>)?.let { p.put("enum", JSONArray(it)) }
-            props.put(k, p)
-        }
-        val out = JSONObject().put("type", "OBJECT").put("properties", props)
-        val required = schema["required"] as List<String>
-        if (required.isNotEmpty()) out.put("required", JSONArray(required))
-        return out
-    }
-
-    private fun errorMessage(e: IOException): String = when {
-        e is ApiError && e.code == 400 && e.message.orEmpty().contains("API key", ignoreCase = true) -> "La clave de Google no es válida."
-        e is ApiError && (e.code == 401 || e.code == 403) -> "La clave de Google no tiene permiso."
-        e is ApiError && e.code == 429 && e.message.orEmpty().contains("limit: 0") -> "Tu clave de Google no tiene cuota gratis. Creá otra en un proyecto nuevo."
-        e is ApiError && e.code == 429 -> "Llegué al límite gratis, probá en un rato."
-        e is ApiError -> "No pude responder ahora.".also { logger.w(TAG, "Gemini ${e.code}: ${e.message}") }
-        e is java.net.SocketTimeoutException -> "Google tardó demasiado, probá de nuevo."
-        else -> "No tengo conexión.".also { logger.w(TAG, "Sin conexión con Google", e) }
-    }
+    fun reset() = synchronized(history) { history.clear() }
 
     override suspend fun reply(text: String): String = withContext(Dispatchers.IO) {
         val key = secrets.get(SecretStore.GEMINI_KEY) ?: return@withContext "Para eso activá la IA en Ajustes."
@@ -176,16 +83,16 @@ class GeminiAssistant(
      * cuota 0, o la búsqueda de Google no está incluida). Ante un 429/404 se prueba con la búsqueda
      * desactivada y con otros Gemini Flash de la cuenta, y se recuerda el primero que funcione.
      */
-    private fun generateWithFallback(key: String, contents: JSONArray, functions: JSONArray? = null): JSONObject {
+    private fun generateWithFallback(key: String, contents: JSONArray): JSONObject {
         var lastError: ApiError? = null
         val tried = mutableSetOf<String>()
         fun attempt(candidate: String, search: Boolean): JSONObject? {
             if (!tried.add("$candidate/$search")) return null
             return try {
-                generate(key, candidate, contents, search, functions).also {
+                generate(key, candidate, contents, search).also {
                     if (candidate != model || search != useSearch) logger.d(TAG, "Usando $candidate (búsqueda: $search)")
                     model = candidate
-                    if (functions == null) useSearch = search
+                    useSearch = search
                 }
             } catch (e: ApiError) {
                 logger.w(TAG, "$candidate (búsqueda: $search) -> ${e.code}: ${e.message?.take(300)}")
@@ -193,12 +100,6 @@ class GeminiAssistant(
                 lastError = e
                 null
             }
-        }
-        // Con funciones (planificador) no se manda la búsqueda en el mismo pedido: la búsqueda es otra herramienta.
-        if (functions != null) {
-            attempt(model, false)?.let { return it }
-            for (candidate in listModels(key).take(MAX_MODEL_TRIES)) attempt(candidate, false)?.let { return it }
-            throw lastError ?: ApiError(404, "Sin modelos disponibles")
         }
         attempt(model, useSearch)?.let { return it }
         if (useSearch) attempt(model, false)?.let { return it }
@@ -209,13 +110,12 @@ class GeminiAssistant(
         throw lastError ?: ApiError(404, "Sin modelos disponibles")
     }
 
-    private fun generate(key: String, model: String, contents: JSONArray, search: Boolean, functions: JSONArray? = null): JSONObject {
+    private fun generate(key: String, model: String, contents: JSONArray, search: Boolean): JSONObject {
         val body = JSONObject()
-            .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", if (functions != null) PlannerSupport.PLANNER_PROMPT else SYSTEM_PROMPT))))
+            .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_PROMPT))))
             .put("contents", contents)
         // Búsqueda de Google: respuestas con información actual.
-        if (functions != null) body.put("tools", JSONArray().put(JSONObject().put("functionDeclarations", functions)))
-        else if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+        if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
         // Respuestas cortas y sin «pensar» de más: así contesta en un par de segundos.
         val config = JSONObject().put("maxOutputTokens", 400)
         if (useThinkingLevel) config.put("thinkingConfig", JSONObject().put("thinkingLevel", "minimal"))
@@ -226,7 +126,7 @@ class GeminiAssistant(
             // Modelos que no aceptan «thinkingLevel»: se reintenta sin esa opción y se recuerda.
             if (e.code != 400 || !useThinkingLevel || !e.message.orEmpty().contains("thinking", ignoreCase = true)) throw e
             useThinkingLevel = false
-            generate(key, model, contents, search, functions)
+            generate(key, model, contents, search)
         }
     }
 

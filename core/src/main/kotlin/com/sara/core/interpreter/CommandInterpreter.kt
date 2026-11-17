@@ -24,60 +24,20 @@ class CompositeCommandInterpreter(
     private val memory: MemoryStore? = null,
     /** Si hay IA, lo que las reglas no entienden se le pregunta a ella. */
     private val aiAvailable: () -> Boolean = { false },
-    /** Si hay planificador (IA con habilidades), los pedidos nuevos o complejos van a él. */
-    private val plannerAvailable: () -> Boolean = { false },
 ) : CommandInterpreter {
     override suspend fun interpret(text: String): InterpretationResult {
         val routine = memory?.get(MemoryKeys.routineKey(text.trim().removePrefix("Sara").removePrefix("sara").trim(' ', ',')))
-        // Una rutina puede tener varias órdenes («sacá la música y cerrá las apps»).
-        if (routine != null) return (splitCompound(routine) ?: rules.interpret(routine)).copy(ruleId = "routine")
-        splitCompound(text)?.let { return it }
+        if (routine != null) return rules.interpret(routine).copy(ruleId = "routine")
         val local = rules.interpret(text)
-        if (local.intent is CommandIntent.Unknown) {
-            val question = looksLikeQuestion(local.normalizedText)
-            when {
-                // Preguntas de información: respuesta directa (rápida) con búsqueda.
-                question && aiAvailable() -> return InterpretationResult(CommandIntent.Chat(text), 0.7f, local.normalizedText, "ai-chat")
-                // Pedidos nuevos o con varios pasos: el planificador combina habilidades.
-                plannerAvailable() -> return InterpretationResult(CommandIntent.Plan(text), 0.6f, local.normalizedText, "planner")
-                // Sin IA: Sara explica cómo activarla en vez de «no te entendí».
-                aiAvailable() || question -> return InterpretationResult(CommandIntent.Chat(text), 0.7f, local.normalizedText, "ai-chat")
-            }
+        // Preguntas («¿cómo está el clima?»): a la IA si hay; si no, Sara explica cómo activarla.
+        if (local.intent is CommandIntent.Unknown && (aiAvailable() || looksLikeQuestion(local.normalizedText))) {
+            return InterpretationResult(CommandIntent.Chat(text), 0.7f, local.normalizedText, "ai-chat")
         }
         val ai = conversational
         if (local.intent !is CommandIntent.Unknown || ai == null) return local
         val remote = runCatching { ai.interpret(text) }.getOrNull() ?: return local
         return if (remote.intent is CommandIntent.Unknown) local else remote
     }
-}
-
-/** Órdenes que se pueden encadenar (no preguntas ni charla). */
-private fun CommandIntent.isAction() = this !is CommandIntent.Unknown && this !is CommandIntent.Chat && this !is CommandIntent.Plan &&
-    this !is CommandIntent.Cancel && this !is CommandIntent.Sequence
-
-private val CONNECTOR = Regex(
-    "\\s*(?:,\\s*)?\\b(?:y\\s+(?:despues|después|luego|tambien|también|ademas|además)|y|despues|después|luego|ademas|además)\\b\\s*,?\\s*|\\s*[,;]\\s+",
-    RegexOption.IGNORE_CASE,
-)
-
-/**
- * «Poné música y bajá el volumen al 30», «cerrá las apps, después apagá la linterna»: si cada parte
- * es una orden conocida, se ejecutan en orden. Los mensajes y recuerdos se analizan enteros (su texto
- * puede tener «y»).
- */
-private suspend fun CompositeCommandInterpreter.splitCompound(text: String): InterpretationResult? = splitCompoundWith(text)
-
-internal fun splitCompoundWith(text: String): InterpretationResult? {
-    if (MessageParser.parse(text) != null || MemoryParser.parse(text) != null) return null
-    val parts = text.split(CONNECTOR).map { it.trim() }.filter { it.isNotBlank() }
-    if (parts.size < 2 || parts.size > 5) return null
-    val rules = RuleBasedCommandInterpreter()
-    val steps = parts.map { rules.interpretNow(it).intent }
-    if (!steps.all { it.isAction() }) return null
-    // «Sacá la música, pará y cerrá las apps»: la misma orden dos veces seguidas cuenta una vez.
-    val distinct = steps.filterIndexed { i, s -> i == 0 || s != steps[i - 1] }
-    if (distinct.size == 1) return InterpretationResult(distinct[0], 0.85f, TextNormalizer.normalize(text), "sequence-single")
-    return InterpretationResult(CommandIntent.Sequence(distinct), 0.85f, TextNormalizer.normalize(text), "sequence")
 }
 
 private val QUESTION_START = setOf(
@@ -106,7 +66,6 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         MessageParser.parse(text)?.let { return InterpretationResult(it, 0.9f, normalized, "send-message") }
         return detectCancel(ctx)
             ?: SmallTalk.answer(text)?.let { ctx.result(CommandIntent.Chat(text), 0.8f, "smalltalk") }
-            ?: com.sara.core.skills.SkillParser.parse(text)?.let { ctx.result(it, 0.85f, "skill") }
             ?: detectCloseApps(ctx)
             ?: detectOpenApp(ctx)
             ?: detectVolume(ctx)
