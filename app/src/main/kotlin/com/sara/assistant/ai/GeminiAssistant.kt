@@ -30,6 +30,7 @@ class GeminiAssistant(
     private var lastTurnAt = 0L
     /** Modelo que respondió bien la última vez (si el alias deja de existir, se elige otro de la lista). */
     @Volatile private var model = DEFAULT_MODEL
+    @Volatile private var useSearch = true
 
     override fun isAvailable(): Boolean = secrets.has(SecretStore.GEMINI_KEY)
 
@@ -43,15 +44,7 @@ class GeminiAssistant(
             JSONArray(history + turn)
         }
         try {
-            val response = try {
-                generate(key, model, contents)
-            } catch (e: ApiError) {
-                if (e.code != 404) throw e
-                // El alias ya no existe: se busca el Flash más nuevo disponible para esta clave.
-                model = pickModel(key) ?: throw e
-                logger.d(TAG, "Usando $model")
-                generate(key, model, contents)
-            }
+            val response = generateWithFallback(key, contents)
             val candidate = response.optJSONArray("candidates")?.optJSONObject(0)
                 ?: return@withContext blockedReply(response)
             val content = candidate.optJSONObject("content") ?: return@withContext "No encontré una respuesta."
@@ -69,6 +62,8 @@ class GeminiAssistant(
             when {
                 e.code == 400 && e.message.orEmpty().contains("API key", ignoreCase = true) -> "La clave de Google no es válida."
                 e.code == 401 || e.code == 403 -> "La clave de Google no tiene permiso."
+                e.code == 429 && e.message.orEmpty().contains("limit: 0") ->
+                    "Tu clave de Google no tiene cuota gratis. Creá otra en un proyecto nuevo."
                 e.code == 429 -> "Llegué al límite gratis, probá en un rato."
                 else -> "No pude responder ahora."
             }
@@ -78,26 +73,60 @@ class GeminiAssistant(
         }
     }
 
-    private fun generate(key: String, model: String, contents: JSONArray): JSONObject {
+    /**
+     * El nivel gratis de Google no da cuota para todos los modelos (a veces el más nuevo tiene
+     * cuota 0, o la búsqueda de Google no está incluida). Ante un 429/404 se prueba con la búsqueda
+     * desactivada y con otros Gemini Flash de la cuenta, y se recuerda el primero que funcione.
+     */
+    private fun generateWithFallback(key: String, contents: JSONArray): JSONObject {
+        var lastError: ApiError? = null
+        val tried = mutableSetOf<String>()
+        fun attempt(candidate: String, search: Boolean): JSONObject? {
+            if (!tried.add("$candidate/$search")) return null
+            return try {
+                generate(key, candidate, contents, search).also {
+                    if (candidate != model || search != useSearch) logger.d(TAG, "Usando $candidate (búsqueda: $search)")
+                    model = candidate
+                    useSearch = search
+                }
+            } catch (e: ApiError) {
+                logger.w(TAG, "$candidate (búsqueda: $search) -> ${e.code}: ${e.message?.take(300)}")
+                if (e.code !in RETRYABLE || e.message.orEmpty().contains("API key", ignoreCase = true)) throw e
+                lastError = e
+                null
+            }
+        }
+        attempt(model, useSearch)?.let { return it }
+        if (useSearch) attempt(model, false)?.let { return it }
+        for (candidate in listModels(key).take(MAX_MODEL_TRIES)) {
+            attempt(candidate, true)?.let { return it }
+            attempt(candidate, false)?.let { return it }
+        }
+        throw lastError ?: ApiError(404, "Sin modelos disponibles")
+    }
+
+    private fun generate(key: String, model: String, contents: JSONArray, search: Boolean): JSONObject {
         val body = JSONObject()
             .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM_PROMPT))))
             .put("contents", contents)
-            // Búsqueda de Google: respuestas con información actual.
-            .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+        // Búsqueda de Google: respuestas con información actual.
+        if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
         return request("$BASE/models/$model:generateContent", key, body)
     }
 
-    /** El Gemini Flash más nuevo que acepte generateContent (sin variantes de imagen, audio o «lite»). */
-    private fun pickModel(key: String): String? {
-        val models = request("$BASE/models?pageSize=200", key, null).optJSONArray("models") ?: return null
+    /** Gemini Flash de la cuenta que aceptan generateContent: estables y más nuevos primero, después «lite». */
+    private fun listModels(key: String): List<String> {
+        val models = runCatching { request("$BASE/models?pageSize=200", key, null).optJSONArray("models") }.getOrNull()
+            ?: return FALLBACK_MODELS
         return (0 until models.length()).map { models.getJSONObject(it) }
             .filter { m ->
                 val name = m.optString("name")
                 val methods = m.optJSONArray("supportedGenerationMethods")?.toString().orEmpty()
                 "flash" in name && "generateContent" in methods && EXCLUDED.none { it in name }
             }
-            .maxByOrNull { versionOf(it.optString("name")) }
-            ?.optString("name")?.removePrefix("models/")
+            .map { it.optString("name").removePrefix("models/") }
+            .sortedWith(compareBy<String> { "lite" in it }.thenByDescending { versionOf(it) })
+            .ifEmpty { FALLBACK_MODELS }
     }
 
     private fun versionOf(name: String): Double {
@@ -161,7 +190,11 @@ class GeminiAssistant(
         const val DEFAULT_MODEL = "gemini-flash-latest"
         const val MAX_HISTORY = 20
         const val CONVERSATION_IDLE_MS = 5 * 60_000L
-        val EXCLUDED = listOf("lite", "image", "tts", "audio", "live", "embedding", "thinking-exp", "8b")
+        val EXCLUDED = listOf("image", "tts", "audio", "live", "embedding", "thinking-exp", "8b", "computer")
+        /** 429 (sin cuota para ese modelo o la búsqueda), 404 (modelo inexistente), 400 (herramienta no admitida). */
+        val RETRYABLE = setOf(400, 404, 429)
+        const val MAX_MODEL_TRIES = 4
+        val FALLBACK_MODELS = listOf("gemini-flash-latest", "gemini-flash-lite-latest")
         val SYSTEM_PROMPT = """
             Sos Sara, una asistente de voz en un teléfono Android. Hablás en español rioplatense, con voseo, cálida y con humor suave.
             Tus respuestas se leen en voz alta: respondé en una o dos oraciones cortas, sin listas, sin emojis, sin markdown, sin enlaces y sin citar fuentes. Si el usuario pide una explicación, podés extenderte un poco más.
