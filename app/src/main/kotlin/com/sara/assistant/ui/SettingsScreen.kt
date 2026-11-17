@@ -76,6 +76,10 @@ class SettingsActions(
     val saveAiKey: (com.sara.assistant.settings.AiProvider, String?) -> Unit = { _, _ -> },
     val clearAiKey: (com.sara.assistant.settings.AiProvider) -> Unit = {},
     val forget: (String) -> Unit = {},
+    val grant: (com.sara.core.model.PermissionKind) -> Unit = {},
+    val toggleRoutine: (com.sara.assistant.skills.ScheduledRoutine) -> Unit = {},
+    val deleteRoutine: (com.sara.assistant.skills.ScheduledRoutine) -> Unit = {},
+    val deleteReminder: (com.sara.assistant.skills.Reminder) -> Unit = {},
 )
 
 private val modeOptions = listOf(EngineMode.AUTOMATIC to "Automático", EngineMode.ONLINE to "Online", EngineMode.OFFLINE to "Offline")
@@ -95,6 +99,8 @@ fun SettingsScreen(
     memories: Map<String, String> = emptyMap(),
     aiDialogRequested: Boolean = false,
     onAiDialogShown: () -> Unit = {},
+    routines: List<com.sara.assistant.skills.ScheduledRoutine> = emptyList(),
+    reminders: List<com.sara.assistant.skills.Reminder> = emptyList(),
 ) {
     var aiDialog by remember { mutableStateOf(false) }
     LaunchedEffect(aiDialogRequested) {
@@ -120,6 +126,11 @@ fun SettingsScreen(
             SwitchRow("Activación manual", "Tocar el círculo central para hablar", settings.manualActivationEnabled) { v ->
                 actions.update { it.copy(manualActivationEnabled = v) }
             }
+            SwitchRow(
+                "Conversación continua",
+                "Después de responder sigue escuchando unos segundos: podés seguir hablando sin decir «Sara»",
+                settings.continuousConversation,
+            ) { v -> actions.update { it.copy(continuousConversation = v) } }
             OptionChips(
                 "Motor de activación",
                 listOf(WakeEngineType.VOSK to "Vosk (sin cuenta)", WakeEngineType.PORCUPINE to "Porcupine"),
@@ -281,6 +292,33 @@ fun SettingsScreen(
         }
 
         // ---------------------------------------------------------------- Sistema
+        // ---------------------------------------------------------------- Rutinas y recordatorios
+        SectionCard("Rutinas y recordatorios") {
+            Text(
+                "Decí por ejemplo «todos los días a las 8 decime el clima» o «recordame mañana a las 9 llamar al médico».",
+                style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted,
+            )
+            if (routines.isEmpty() && reminders.isEmpty()) {
+                Text("No hay rutinas ni recordatorios.", style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
+            }
+            routines.forEach { r ->
+                StatusLine(if (r.enabled) "Rutina" else "Rutina (pausada)", r.describe(), r.enabled, if (r.enabled) "Pausar" else "Activar") { actions.toggleRoutine(r) }
+                TextButton(onClick = { actions.deleteRoutine(r) }) { Text("Borrar rutina", color = SaraColors.Red) }
+            }
+            reminders.forEach { r ->
+                StatusLine("Recordatorio", "${r.text} · ${com.sara.assistant.skills.Scheduler.describeTime(r.at)}", true, "Borrar") { actions.deleteReminder(r) }
+            }
+        }
+
+        // ---------------------------------------------------------------- Permisos
+        SectionCard("Permisos") {
+            com.sara.core.model.PermissionKind.entries.forEach { kind ->
+                val info = com.sara.assistant.permissions.PermissionCenter.info(kind)
+                val ok = kind !in system.missing
+                StatusLine(info.title, if (ok) "Activado" else info.why, ok, if (ok) null else "Activar", if (ok) null else ({ actions.grant(kind) }))
+            }
+        }
+
         SectionCard("Sistema") {
             StatusLine("Servicio de escucha", if (serviceRunning) "En ejecución (notificación visible)" else "Detenido", serviceRunning)
             StatusLine(

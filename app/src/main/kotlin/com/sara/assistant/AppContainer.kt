@@ -82,24 +82,65 @@ class AppContainer(private val app: Application) {
     /** Preferencias y rutinas que el usuario le enseña a Sara. */
     val memory = com.sara.assistant.data.PrefsMemoryStore(app)
     private val rules = RuleBasedCommandInterpreter()
-    private val claude = com.sara.assistant.ai.ClaudeAssistant(app, secrets, memory, logger, ::runSpokenOrder)
-    private val gemini = com.sara.assistant.ai.GeminiAssistant(secrets, memory, logger)
-    /** IA elegida en Ajustes (Google por defecto). */
-    val ai = com.sara.assistant.ai.AiRouter({ settings.settings.value.aiProvider }, gemini, claude)
-    private val executor = DefaultCommandExecutor(
-        mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
-        messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
-        memory = memory, assistant = ai,
-    )
 
-    /** Órdenes que pide la IA («ejecutar»): mismas reglas y ejecutor que la voz, sin volver a la IA. */
-    private suspend fun runSpokenOrder(text: String): String {
-        val intent = rules.interpretNow(text).intent
-        if (intent is com.sara.core.model.CommandIntent.Unknown || intent is com.sara.core.model.CommandIntent.Chat) {
-            return "Sara no tiene una orden para eso."
+    // ---------------------------------------------------------------- Habilidades y cerebro
+    val scheduler = com.sara.assistant.skills.Scheduler(app)
+    private val location = com.sara.assistant.skills.LocationProvider(app)
+    private val lists = com.sara.core.skills.ListBook(com.sara.assistant.skills.PrefsTextStore(app, "sara_lists"))
+    private val plannerSupport = com.sara.assistant.ai.PlannerSupport({ skills }, memory)
+    private val claude = com.sara.assistant.ai.ClaudeAssistant(secrets, plannerSupport, logger)
+    private val gemini = com.sara.assistant.ai.GeminiAssistant(secrets, memory, logger, plannerSupport)
+    /** IA: Google para preguntas con datos actuales; Claude (si hay clave) para planificar. */
+    val ai = com.sara.assistant.ai.AiRouter({ settings.settings.value.aiProvider }, gemini, claude)
+
+    /** Todas las habilidades que Sara (y la IA) pueden usar. */
+    val skills: com.sara.core.skills.SkillRegistry by lazy {
+        com.sara.core.skills.SkillRegistry(
+            listOf(
+                com.sara.core.skills.CommandSkills { executor },
+                com.sara.core.skills.ListsSkill(lists),
+                com.sara.core.skills.CalculatorSkill(),
+                com.sara.assistant.skills.AlarmSkill(app, activityStarter),
+                com.sara.assistant.skills.ReminderSkill(scheduler),
+                com.sara.assistant.skills.RoutineSkill(scheduler),
+                com.sara.assistant.skills.WeatherSkill(location),
+                com.sara.assistant.skills.DeviceSkill(app, activityStarter),
+                com.sara.assistant.skills.CallsSkill(app, activityStarter),
+                com.sara.assistant.skills.CalendarSkill(app, activityStarter),
+                com.sara.assistant.skills.MapsSkill(activityStarter, location),
+                com.sara.assistant.skills.NotificationsSkill(app),
+                com.sara.assistant.skills.GoogleSkill(ai),
+                com.sara.assistant.skills.TranslatorSkill(ai),
+                com.sara.assistant.skills.SmartHomeSkill(app, activityStarter),
+                com.sara.assistant.skills.DiagnosticsSkill(
+                    missing = { com.sara.assistant.permissions.PermissionCenter.missing(app).filter { it in com.sara.assistant.permissions.PermissionCenter.ESSENTIAL } },
+                    describe = { com.sara.assistant.permissions.PermissionCenter.info(it).title.lowercase() },
+                    checks = { diagnosticChecks() },
+                ),
+            ),
+            isGranted = { com.sara.assistant.permissions.PermissionCenter.isGranted(app, it) },
+        )
+    }
+
+    private val executor: DefaultCommandExecutor by lazy {
+        DefaultCommandExecutor(
+            mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
+            messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
+            memory = memory, assistant = ai, skills = skills, planner = ai,
+        )
+    }
+
+    /** Lo que el diagnóstico revisa además de los permisos. */
+    private suspend fun diagnosticChecks(): List<String> = buildList {
+        if (!connectivity.isOnline()) add("no hay conexión a Internet")
+        if (!ai.isAvailable()) add("no hay clave de IA cargada (sólo funciones locales)")
+        if (com.sara.assistant.apps.SaraAccessibilityService.isEnabled(app) && !com.sara.assistant.apps.SaraAccessibilityService.isWorking(app)) {
+            add("la accesibilidad está activada pero trabada: apagala y prendela")
         }
-        val result = executor.execute(intent)
-        return if (result.confirmation != null) "Los mensajes se mandan pidiéndoselos a Sara directamente." else result.response
+        val wake = engines.wakeWordEngine()
+        val availability = runCatching { wake?.availability() }.getOrNull()
+        if (availability is com.sara.core.engine.Availability.Unavailable) add("la detección de «Sara» no está lista: ${availability.detail}")
+        if (!scheduler.exactAlarmsAllowed()) add("las alarmas exactas están limitadas: los recordatorios pueden demorarse unos minutos")
     }
     val updates = com.sara.assistant.update.UpdateManager(app, logger)
 
@@ -145,7 +186,7 @@ class AppContainer(private val app: Application) {
     val orchestrator = AssistantOrchestrator(
         scope = scope,
         engines = engines,
-        interpreter = CompositeCommandInterpreter(rules, memory = memory, aiAvailable = ai::isAvailable),
+        interpreter = CompositeCommandInterpreter(rules, memory = memory, aiAvailable = ai::isAvailable, plannerAvailable = ai::isAvailable),
         executor = executor,
         connectivity = connectivity,
         configProvider = { settings.current().toAssistantConfig() },
@@ -157,6 +198,8 @@ class AppContainer(private val app: Application) {
     init {
         scope.launch { history.load() }
         if (mediaControl.hasNotificationAccess()) musicUsage.start()
+        // Recordatorios y rutinas: al iniciar el proceso se vuelven a programar por si se perdieron.
+        scope.launch { runCatching { scheduler.rescheduleAll() } }
         // Si una orden necesita un permiso y Sara está en segundo plano, deja una notificación con
         // el botón que lleva directo a activarlo (en primer plano lo muestra la pantalla de inicio).
         scope.launch {
@@ -176,6 +219,7 @@ class AppContainer(private val app: Application) {
         voiceMode = voiceMode,
         languageTag = language,
         endSilenceMillis = speechPauseMillis.toLong(),
+        continuousConversation = continuousConversation,
         onlineVoice = VoiceParams(onlineVoiceId, speechRate, voiceVolume, language),
         offlineVoice = VoiceParams(offlineVoiceId, speechRate, voiceVolume, language),
     )
