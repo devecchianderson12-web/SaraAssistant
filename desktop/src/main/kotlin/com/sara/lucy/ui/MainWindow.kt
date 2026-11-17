@@ -49,6 +49,10 @@ private val MUTED = Color(160, 150, 200)
 private val ACCENT = Color(150, 95, 255)
 
 internal fun darkButton(text: String, action: () -> Unit) = JButton(text).apply {
+    // El estilo de Windows ignora los colores (quedaban botones blancos con letra blanca).
+    setUI(javax.swing.plaf.basic.BasicButtonUI())
+    isOpaque = true
+    isContentAreaFilled = true
     isFocusPainted = false
     background = Color(40, 30, 70)
     foreground = TEXT
@@ -156,7 +160,7 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
     /** Texto largo en varias líneas, centrado. */
     private fun JLabel.setWrapped(text: String) {
         val clean = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        this.text = if (clean.isBlank()) "" else "<html><body style='width:380px'><p align='center'>$clean</p></body></html>"
+        this.text = if (clean.isBlank()) "" else if (clean.length < 48) clean else "<html><body style='width:380px'><center>$clean</center></body></html>"
     }
 
     fun showWindow() = SwingUtilities.invokeLater {

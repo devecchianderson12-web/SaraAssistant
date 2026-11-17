@@ -256,11 +256,14 @@ class VoskSpeechRecognitionEngine(
         var heardSpeech = false
         var lastPartial = ""
         var lastChange = start
+        val gain = RunningGain()
         // La orden que vino pegada al nombre: se reconoce primero ese audio.
-        handoff.take()?.let { chunks ->
+        // Sólo si después del nombre hay más palabras (si no, era ruido: se escucha normal).
+        handoff.take()?.takeIf { hasWordsAfterName(model, it) }?.let { chunks ->
             chunks.forEach {
                 audio.write(it)
-                recognizer.acceptWaveForm(it, it.size)
+                val boosted = WakeWordTuning.applyGain(it, it.size, gain.next(it, it.size))
+                recognizer.acceptWaveForm(boosted, boosted.size)
             }
             heardSpeech = true
             lastPartial = JSONObject(recognizer.partialResult).optString("partial").trim()
@@ -270,7 +273,9 @@ class VoskSpeechRecognitionEngine(
             val outcome = microphone.capture { buffer, length ->
                 val elapsed = System.currentTimeMillis() - start
                 if (refine != null && audio.size() < MAX_AUDIO_BYTES) audio.write(buffer, 0, length)
-                if (recognizer.acceptWaveForm(buffer, length)) {
+                // Micrófonos bajos (muy común en notebooks): se lleva la voz a un nivel que Vosk entienda.
+                val chunk = WakeWordTuning.applyGain(buffer, length, gain.next(buffer, length))
+                if (recognizer.acceptWaveForm(chunk, chunk.size)) {
                     val t = JSONObject(recognizer.result).optString("text").trim()
                     if (t.isNotEmpty()) {
                         text = t
@@ -311,6 +316,24 @@ class VoskSpeechRecognitionEngine(
             }
         } finally {
             recognizer.close()
+        }
+    }
+
+    private fun hasWordsAfterName(model: Model, chunks: List<ByteArray>): Boolean {
+        val pcm = ByteArrayOutputStream().apply { chunks.forEach { write(it) } }.toByteArray()
+        val text = Recognizer(model, Microphone.SAMPLE_RATE.toFloat()).use { r ->
+            r.acceptWaveForm(pcm, pcm.size)
+            JSONObject(r.finalResult).optString("text")
+        }
+        return text.split(' ').filter { it.isNotBlank() && it !in WakeWordTuning.profile.aliases }.size >= 1
+    }
+
+    /** Ganancia según el pico más alto de la orden hasta ahora (no sube y baja a cada rato). */
+    private class RunningGain {
+        private var peak = 2_500
+        fun next(pcm: ByteArray, length: Int): Float {
+            peak = maxOf(peak, WakeWordTuning.peakOf(pcm, length))
+            return WakeWordTuning.gainFor(peak, maxGain = 4f)
         }
     }
 

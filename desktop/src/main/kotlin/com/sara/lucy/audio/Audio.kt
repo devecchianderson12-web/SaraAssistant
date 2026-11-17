@@ -40,6 +40,7 @@ class Microphone(private val levels: AudioLevelMeter) {
             EngineError(EngineErrorType.AUDIO_INPUT, "No encontré un micrófono. Revisá que esté conectado."),
         )
         busy.set(true)
+        history = DoubleArray(0)
         var allSilent = true
         try {
             line.start()
@@ -87,16 +88,27 @@ class Microphone(private val levels: AudioLevelMeter) {
         return null
     }
 
-    /** 48 kHz → 16 kHz promediando (filtro pasa bajos simple). */
-    private fun downsample(src: ByteArray, length: Int, factor: Int, out: ByteArray): ByteArray {
-        val samples = length / 2 / factor
+    /** Muestras anteriores del bloque previo (para que el filtro no corte entre bloques). */
+    private var history = DoubleArray(0)
+
+    /**
+     * 48 kHz → 16 kHz con un filtro pasa bajos de verdad (sinc con ventana, corte en 7 kHz): sin él,
+     * los agudos se «doblan» sobre la voz y Vosk entiende cualquier cosa.
+     */
+    internal fun downsample(src: ByteArray, length: Int, factor: Int, out: ByteArray): ByteArray {
+        val n = length / 2
+        val taps = FILTER.size
+        if (history.size != taps - 1) history = DoubleArray(taps - 1)
+        val x = DoubleArray(taps - 1 + n)
+        System.arraycopy(history, 0, x, 0, taps - 1)
+        for (i in 0 until n) x[taps - 1 + i] = ((src[i * 2 + 1].toInt() shl 8) or (src[i * 2].toInt() and 0xFF)).toShort().toDouble()
+        System.arraycopy(x, n, history, 0, taps - 1)
+        val samples = n / factor
         for (i in 0 until samples) {
-            var sum = 0
-            for (k in 0 until factor) {
-                val j = (i * factor + k) * 2
-                sum += ((src[j + 1].toInt() shl 8) or (src[j].toInt() and 0xFF)).toShort().toInt()
-            }
-            val s = sum / factor
+            var acc = 0.0
+            val end = i * factor + taps - 1
+            for (k in 0 until taps) acc += FILTER[k] * x[end - k]
+            val s = acc.toInt().coerceIn(-32768, 32767)
             out[i * 2] = (s and 0xFF).toByte()
             out[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
         }
@@ -106,6 +118,19 @@ class Microphone(private val levels: AudioLevelMeter) {
     companion object {
         const val SAMPLE_RATE = 16_000
         const val CHUNK_BYTES = SAMPLE_RATE / 10 * 2
+
+        /** Pasa bajos de 63 coeficientes (ventana de Hamming) para 48 kHz con corte en 7 kHz. */
+        private val FILTER: DoubleArray = run {
+            val taps = 63
+            val fc = 7_000.0 / 48_000.0
+            val h = DoubleArray(taps) { i ->
+                val m = i - (taps - 1) / 2.0
+                val sinc = if (m == 0.0) 2 * fc else kotlin.math.sin(2 * PI * fc * m) / (PI * m)
+                sinc * (0.54 - 0.46 * kotlin.math.cos(2 * PI * i / (taps - 1)))
+            }
+            val sum = h.sum()
+            DoubleArray(taps) { h[it] / sum }
+        }
     }
 }
 
