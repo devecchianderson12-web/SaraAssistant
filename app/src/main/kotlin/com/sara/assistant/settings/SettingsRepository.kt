@@ -75,6 +75,8 @@ data class SaraSettings(
     val onlineInCar: Boolean = false,
     /** Respuesta rápida: ejecuta las órdenes completas sin esperar la pausa de fin de frase. */
     val quickResponse: Boolean = true,
+    /** Charla: después de responder una pregunta sigue escuchando para conversar (no después de órdenes). */
+    val chatFollowUp: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -132,6 +134,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val musicWhileListening = stringPreferencesKey("music_while_listening")
         val onlineInCar = booleanPreferencesKey("online_in_car")
         val quickResponse = booleanPreferencesKey("quick_response")
+        val chatFollowUp = booleanPreferencesKey("chat_follow_up")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -172,6 +175,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             musicWhileListening = this[Keys.musicWhileListening].toEnum(d.musicWhileListening),
             onlineInCar = this[Keys.onlineInCar] ?: d.onlineInCar,
             quickResponse = this[Keys.quickResponse] ?: d.quickResponse,
+            chatFollowUp = this[Keys.chatFollowUp] ?: d.chatFollowUp,
         )
     }
 
@@ -208,5 +212,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.musicWhileListening] = s.musicWhileListening.name
         this[Keys.onlineInCar] = s.onlineInCar
         this[Keys.quickResponse] = s.quickResponse
+        this[Keys.chatFollowUp] = s.chatFollowUp
     }
 }

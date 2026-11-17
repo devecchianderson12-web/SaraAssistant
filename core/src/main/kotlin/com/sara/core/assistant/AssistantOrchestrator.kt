@@ -74,6 +74,8 @@ data class AssistantConfig(
     /** Palabra de activación «Ey Sara» (true) o «Sara» sola (false). */
     val wakeRequiresPrefix: Boolean = true,
     val followUpSilenceMillis: Long = 5_000,
+    /** Charla: después de responder una pregunta (no una orden) sigue escuchando para conversar. */
+    val chatFollowUp: Boolean = false,
     /** Respuesta rápida: ejecuta las órdenes completas sin esperar la pausa larga de fin de frase. */
     val quickResponse: Boolean = false,
 )
@@ -331,7 +333,11 @@ class AssistantOrchestrator(
                         continue
                     }
                     execute(text, interpretation, cfg)
-                    if (cfg.continuousConversation && interpretation.intent !is CommandIntent.Cancel) followUpConversation(cfg)
+                    when {
+                        cfg.continuousConversation && interpretation.intent !is CommandIntent.Cancel -> followUpConversation(cfg)
+                        // Charla: si le hiciste una pregunta (no una orden), sigue escuchando para conversar.
+                        cfg.chatFollowUp && interpretation.intent is CommandIntent.Chat -> followUpConversation(cfg, chatOnly = true)
+                    }
                 }
             }
             return
@@ -342,9 +348,9 @@ class AssistantOrchestrator(
      * Conversación continua: tras responder, escucha unos segundos más. Si no habla o no es una
      * orden/pregunta, termina en silencio (sin «no te entendí»), así no reacciona a ruidos.
      */
-    private suspend fun followUpConversation(cfg: AssistantConfig) {
-        val quick = cfg.copy(noSpeechTimeoutMillis = cfg.followUpSilenceMillis)
-        repeat(MAX_CONVERSATION_TURNS) {
+    private suspend fun followUpConversation(cfg: AssistantConfig, chatOnly: Boolean = false) {
+        val quick = cfg.copy(noSpeechTimeoutMillis = if (chatOnly) CHAT_FOLLOW_UP_MS else cfg.followUpSilenceMillis)
+        repeat(if (chatOnly) MAX_CHAT_TURNS else MAX_CONVERSATION_TURNS) {
             machine.moveTo(AssistantState.Listening())
             val heard = listen(quick) as? RecognitionResult.Success ?: return
             val text = heard.text.trim()
@@ -358,7 +364,11 @@ class AssistantOrchestrator(
                     speak(responses.cancelled(), cfg)
                     return
                 }
-                else -> execute(text, interpretation, cfg)
+                else -> {
+                    execute(text, interpretation, cfg)
+                    // En la charla, una orden («poné música») la termina: hace la orden y se calla.
+                    if (chatOnly && interpretation.intent !is CommandIntent.Chat) return
+                }
             }
         }
     }
@@ -572,6 +582,9 @@ class AssistantOrchestrator(
         const val QUICK_MIN_STABLE_MS = 300L
         const val MAX_FOLLOW_UPS = 3
         const val MAX_CONVERSATION_TURNS = 6
+        /** Charla: hasta 20 idas y vueltas sin decir «Sara»; si no hablás en 7 s, vuelve a esperar. */
+        const val MAX_CHAT_TURNS = 20
+        const val CHAT_FOLLOW_UP_MS = 7_000L
         /** Ninguna orden puede dejar a Sara trabada: si tarda más, se corta y vuelve a escuchar. */
         const val EXECUTION_TIMEOUT_MS = 60_000L
         val FATAL_WAKE_ERRORS = setOf(EngineErrorType.PERMISSION, EngineErrorType.NOT_AVAILABLE, EngineErrorType.CREDENTIALS)

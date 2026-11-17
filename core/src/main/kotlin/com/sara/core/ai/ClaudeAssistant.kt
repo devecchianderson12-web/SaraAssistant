@@ -180,6 +180,6 @@ class ClaudeAssistant(
         const val TAG = "Claude"
         const val MODEL = "claude-opus-5-5"
         const val MAX_HISTORY = 40
-        const val CONVERSATION_IDLE_MS = 5 * 60_000L
+        const val CONVERSATION_IDLE_MS = 15 * 60_000L
     }
 }

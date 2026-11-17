@@ -142,6 +142,20 @@ class AssistantOrchestratorTest {
     }
 
     @Test
+    fun `charla sigue escuchando despues de una pregunta y se calla despues de una orden`() = runTest {
+        val offline = FakeRecognizer("vosk", false)
+            .willReturn("¿cómo estás?").willReturn("¿qué hora es?").willReturn("poné música").willReturn("subí el volumen")
+        val h = Harness(this, FakeEngineProvider(offline = offline, offlineVoiceEngine = FakeVoice("tts", false)),
+            AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE, chatFollowUp = true))
+
+        h.orchestrator.activate()
+        advanceUntilIdle()
+
+        assertEquals(listOf(MediaAction.PLAY to null), h.media.calls)
+        assertEquals(3, offline.calls) // no siguió escuchando después de «poné música»
+    }
+
+    @Test
     fun `orden pegada al nombre no pregunta y la ejecuta directo`() = runTest {
         val wake = FakeWakeWord()
         val offline = FakeRecognizer("vosk", false).willReturn("luci poné música")

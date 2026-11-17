@@ -134,7 +134,9 @@ class GeminiAssistant(
         val key = apiKey()?.takeIf { it.isNotBlank() } ?: return@withContext "Para eso activá la IA en Ajustes."
         val turn = userTurn(contextLine() + "\n" + text)
         val contents = synchronized(history) {
-            if (System.currentTimeMillis() - lastTurnAt > CONVERSATION_IDLE_MS || history.size > MAX_HISTORY) history.clear()
+            if (System.currentTimeMillis() - lastTurnAt > CONVERSATION_IDLE_MS) history.clear()
+            // Charla larga: se olvidan las vueltas más viejas (de a pares pregunta/respuesta), no todo.
+            while (history.size > MAX_HISTORY) repeat(2) { history.removeAt(0) }
             JSONArray(history + turn)
         }
         try {
@@ -305,8 +307,8 @@ class GeminiAssistant(
         const val TAG = "Gemini"
         const val BASE = "https://generativelanguage.googleapis.com/v1beta"
         const val DEFAULT_MODEL = "gemini-flash-lite-latest"
-        const val MAX_HISTORY = 20
-        const val CONVERSATION_IDLE_MS = 5 * 60_000L
+        const val MAX_HISTORY = 30
+        const val CONVERSATION_IDLE_MS = 15 * 60_000L
         val EXCLUDED = listOf("image", "tts", "audio", "live", "embedding", "thinking-exp", "8b", "computer")
         /** 429 (sin cuota para ese modelo o la búsqueda), 404 (modelo inexistente), 400 (herramienta no admitida). */
         val RETRYABLE = setOf(400, 404, 429)
@@ -314,7 +316,8 @@ class GeminiAssistant(
         val FALLBACK_MODELS = listOf("gemini-flash-lite-latest", "gemini-flash-latest")
         val SYSTEM_PROMPT: String get() = """
             Sos ${com.sara.core.model.AssistantIdentity.name}, una asistente de voz en ${com.sara.core.model.AssistantIdentity.platform}. Hablás en español rioplatense, con voseo, cálida y con humor suave.
-            Tus respuestas se leen en voz alta: respondé en una o dos oraciones cortas, sin listas, sin emojis, sin markdown, sin enlaces y sin citar fuentes. Si el usuario pide una explicación, podés extenderte un poco más.
+            Tus respuestas se leen en voz alta: sin listas, sin emojis, sin markdown, sin enlaces y sin citar fuentes. A un dato puntual respondé en una o dos oraciones; si te piden una explicación, una opinión o charlar, podés extenderte (hasta cinco o seis oraciones), siempre hablado y natural.
+            Es una conversación: acordate de lo que se habló antes y seguí el hilo («¿y eso por qué?», «contame más» se refieren a lo anterior). Opiná, contá cosas y, cuando venga bien, hacé una pregunta para seguir charlando, como una amiga; no termines siempre con pregunta.
             Para el clima, noticias, resultados, precios, horarios o cualquier dato que pueda cambiar, buscá en Google y respondé con el dato concreto y actualizado (por ejemplo, temperatura y si va a llover). Si no te dicen la ciudad, usá la zona horaria del contexto para deducirla.
             Cada mensaje del usuario empieza con la fecha, la hora y lo que recordás de él entre corchetes: usalo como contexto, no lo repitas.
             En esta respuesta no ejecutás acciones en el ${com.sara.core.model.AssistantIdentity.device} (mandar mensajes, abrir apps, poner música). Nunca digas que hiciste algo así; si te lo piden, explicá en una frase cómo pedírselo, por ejemplo «decime: mandá un WhatsApp a Juan que diga hola».

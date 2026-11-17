@@ -228,6 +228,12 @@ fun SettingsScreen(
 
             SubHeader("Comportamiento")
             SwitchRow(
+                "Charlar después de una pregunta",
+                if (system.aiConfigured) "Cuando le preguntás algo (no una orden), sigue escuchando unos segundos para conversar sin decir «Sara». Después de una orden se calla."
+                else "Necesita la clave de IA (Inteligencia y memoria). Sin clave sólo charla básica.",
+                settings.chatFollowUp,
+            ) { v -> actions.update { it.copy(chatFollowUp = v) } }
+            SwitchRow(
                 "Conversación continua",
                 "Después de responder sigue escuchando unos segundos sin que la llames (apagado: hace la orden y se calla)",
                 settings.continuousConversation,
