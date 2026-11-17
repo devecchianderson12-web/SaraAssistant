@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sara.assistant.container
 import com.sara.assistant.data.SecretStore
+import com.sara.assistant.settings.AiProvider
 import com.sara.assistant.services.SaraListeningService
 import com.sara.assistant.settings.SaraSettings
 import com.sara.assistant.settings.WakeEngineType
@@ -48,6 +49,8 @@ data class SystemStatus(
     /** Permisos que faltan, cada uno con su botón en Inicio. */
     val missing: List<com.sara.core.model.PermissionKind> = emptyList(),
     val aiConfigured: Boolean = false,
+    val googleKey: Boolean = false,
+    val claudeKey: Boolean = false,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -174,15 +177,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val memories = c.memory.entries
     fun forget(key: String) { c.memory.remove(key) }
 
-    fun saveAiKey(key: String?) {
-        if (!key.isNullOrBlank()) c.secrets.put(SecretStore.ANTHROPIC_KEY, key.trim())
-        c.claude.reset()
+    private fun keyName(provider: AiProvider) =
+        if (provider == AiProvider.GOOGLE) SecretStore.GEMINI_KEY else SecretStore.ANTHROPIC_KEY
+
+    /** Guarda la clave (si se escribió una) y deja elegida esa IA. */
+    fun saveAiKey(provider: AiProvider, key: String?) = viewModelScope.launch {
+        if (!key.isNullOrBlank()) c.secrets.put(keyName(provider), key.trim())
+        c.settings.update { it.copy(aiProvider = provider) }
+        c.ai.reset()
         refreshSystem()
     }
 
-    fun clearAiKey() {
-        c.secrets.put(SecretStore.ANTHROPIC_KEY, null)
-        c.claude.reset()
+    fun clearAiKey(provider: AiProvider) {
+        c.secrets.put(keyName(provider), null)
+        c.ai.reset()
         refreshSystem()
     }
     fun clearDiagnostics() = c.logger.clear()
@@ -252,7 +260,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             canOpenAppsFromBackground = android.provider.Settings.canDrawOverlays(getApplication()),
             canCloseApps = com.sara.assistant.apps.SaraAccessibilityService.isEnabled(getApplication()),
             missing = com.sara.assistant.permissions.PermissionCenter.missing(getApplication()),
-            aiConfigured = c.claude.isAvailable(),
+            aiConfigured = c.ai.isAvailable(),
+            googleKey = c.secrets.has(SecretStore.GEMINI_KEY),
+            claudeKey = c.secrets.has(SecretStore.ANTHROPIC_KEY),
             musicApp = runCatching { c.mediaControl.preferredMusicApp()?.label }.getOrNull(),
         )
     }

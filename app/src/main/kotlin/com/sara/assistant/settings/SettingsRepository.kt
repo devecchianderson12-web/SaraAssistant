@@ -22,6 +22,8 @@ enum class WakeEngineType { VOSK, PORCUPINE }
 enum class OnlineRecognizerType { SYSTEM, AZURE }
 enum class OfflineRecognizerType { AUTO, VOSK, ANDROID_ON_DEVICE }
 enum class OnlineVoiceType { AZURE, SYSTEM_NETWORK }
+/** IA para preguntas: Google (Gemini con búsqueda de Google) o Claude. */
+enum class AiProvider { GOOGLE, CLAUDE }
 
 data class SaraSettings(
     // Activación
@@ -53,6 +55,7 @@ data class SaraSettings(
     // Mensajes
     /** Leer el mensaje y esperar un «sí» antes de mandarlo. */
     val confirmMessages: Boolean = true,
+    val aiProvider: AiProvider = AiProvider.GOOGLE,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -100,6 +103,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val saveHistory = booleanPreferencesKey("save_history")
         val azureRegion = stringPreferencesKey("azure_region")
         val confirmMessages = booleanPreferencesKey("confirm_messages")
+        val aiProvider = stringPreferencesKey("ai_provider")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -130,6 +134,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             saveHistory = this[Keys.saveHistory] ?: d.saveHistory,
             azureRegion = this[Keys.azureRegion] ?: d.azureRegion,
             confirmMessages = this[Keys.confirmMessages] ?: d.confirmMessages,
+            aiProvider = this[Keys.aiProvider].toEnum(d.aiProvider),
         )
     }
 
@@ -156,5 +161,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.saveHistory] = s.saveHistory
         this[Keys.azureRegion] = s.azureRegion
         this[Keys.confirmMessages] = s.confirmMessages
+        this[Keys.aiProvider] = s.aiProvider.name
     }
 }

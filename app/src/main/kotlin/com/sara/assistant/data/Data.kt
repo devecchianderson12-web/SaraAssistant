@@ -84,6 +84,7 @@ class SecretStore(context: Context) {
         const val AZURE_KEY = "azure_speech_key"
         const val PORCUPINE_ACCESS_KEY = "porcupine_access_key"
         const val ANTHROPIC_KEY = "anthropic_api_key"
+        const val GEMINI_KEY = "gemini_api_key"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val ALIAS = "sara_secrets_v1"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"

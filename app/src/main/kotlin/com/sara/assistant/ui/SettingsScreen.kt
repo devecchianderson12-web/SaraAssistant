@@ -72,8 +72,8 @@ class SettingsActions(
     val checkUpdates: () -> Unit,
     val openOverlaySettings: () -> Unit,
     val openAccessibilitySettings: () -> Unit = {},
-    val saveAiKey: (String?) -> Unit = {},
-    val clearAiKey: () -> Unit = {},
+    val saveAiKey: (com.sara.assistant.settings.AiProvider, String?) -> Unit = { _, _ -> },
+    val clearAiKey: (com.sara.assistant.settings.AiProvider) -> Unit = {},
     val forget: (String) -> Unit = {},
 )
 
@@ -209,7 +209,7 @@ fun SettingsScreen(
         // ---------------------------------------------------------------- Inteligencia y memoria
         SectionCard("Inteligencia y memoria") {
             StatusLine(
-                "IA (Claude)",
+                if (settings.aiProvider == com.sara.assistant.settings.AiProvider.GOOGLE) "IA: Google (Gemini + búsqueda)" else "IA: Claude",
                 if (system.aiConfigured) "Activa: responde preguntas, el clima y charla" else "Sin clave: sólo órdenes y charla básica",
                 system.aiConfigured, "Configurar",
             ) { aiDialog = true }
@@ -338,12 +338,12 @@ fun SettingsScreen(
         )
     }
     if (aiDialog) {
-        AiKeyDialog(system.aiConfigured, onDismiss = { aiDialog = false }, onSave = { key ->
+        AiKeyDialog(settings.aiProvider, system.googleKey, system.claudeKey, onDismiss = { aiDialog = false }, onSave = { provider, key ->
             aiDialog = false
-            actions.saveAiKey(key)
-        }, onClear = {
+            actions.saveAiKey(provider, key)
+        }, onClear = { provider ->
             aiDialog = false
-            actions.clearAiKey()
+            actions.clearAiKey(provider)
         })
     }
 
@@ -432,25 +432,44 @@ private fun VoicePickerDialog(title: String, voices: List<VoiceOption>?, onDismi
 }
 
 @Composable
-private fun AiKeyDialog(hasKey: Boolean, onDismiss: () -> Unit, onSave: (String?) -> Unit, onClear: () -> Unit) {
+private fun AiKeyDialog(
+    current: com.sara.assistant.settings.AiProvider,
+    googleKey: Boolean,
+    claudeKey: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (com.sara.assistant.settings.AiProvider, String?) -> Unit,
+    onClear: (com.sara.assistant.settings.AiProvider) -> Unit,
+) {
+    var provider by remember { mutableStateOf(current) }
     var key by remember { mutableStateOf("") }
+    val google = provider == com.sara.assistant.settings.AiProvider.GOOGLE
+    val hasKey = if (google) googleKey else claudeKey
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = SaraColors.SurfaceHigh,
-        title = { Text("IA (Claude)") },
+        title = { Text("Inteligencia de Sara") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Creá una clave en platform.claude.com › API Keys y pegala acá. Se guarda cifrada en el teléfono. Cada pregunta tiene un costo pequeño en tu cuenta de Anthropic.", style = MaterialTheme.typography.bodyMedium)
+                OptionChips(
+                    "Usar",
+                    listOf(com.sara.assistant.settings.AiProvider.GOOGLE to "Google", com.sara.assistant.settings.AiProvider.CLAUDE to "Claude"),
+                    provider,
+                ) { provider = it; key = "" }
+                Text(
+                    if (google) "Busca todo en Google. Clave gratis: entrá a aistudio.google.com › «Get API key» › «Create API key», copiala y pegala acá."
+                    else "Creá una clave en platform.claude.com › API Keys. Cada pregunta tiene un costo pequeño en tu cuenta de Anthropic.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 OutlinedTextField(
                     key, { key = it }, singleLine = true,
-                    label = { Text(if (hasKey) "Clave (guardada, dejá vacío para conservarla)" else "Clave (sk-ant-…)") },
+                    label = { Text(if (hasKey) "Clave (guardada, dejá vacío para conservarla)" else if (google) "Clave (AIza…)" else "Clave (sk-ant-…)") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 )
-                if (hasKey) TextButton(onClick = onClear) { Text("Eliminar clave guardada", color = SaraColors.Red) }
+                if (hasKey) TextButton(onClick = { onClear(provider) }) { Text("Eliminar clave guardada", color = SaraColors.Red) }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(key.ifBlank { null }) }) { Text("Guardar") } },
+        confirmButton = { TextButton(onClick = { onSave(provider, key.ifBlank { null }) }) { Text("Guardar") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }

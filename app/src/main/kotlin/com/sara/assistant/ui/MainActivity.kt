@@ -273,7 +273,7 @@ class MainActivity : ComponentActivity() {
                                 testVoice = { viewModel.testVoice() },
                                 loadVoices = { viewModel.loadVoices(it) },
                                 saveAzure = { k, r -> viewModel.saveAzure(k, r) },
-                                saveAiKey = viewModel::saveAiKey,
+                                saveAiKey = { p, k -> viewModel.saveAiKey(p, k) },
                                 clearAiKey = viewModel::clearAiKey,
                                 forget = viewModel::forget,
                                 clearAzure = viewModel::clearAzure,

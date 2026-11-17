@@ -82,11 +82,14 @@ class AppContainer(private val app: Application) {
     /** Preferencias y rutinas que el usuario le enseña a Sara. */
     val memory = com.sara.assistant.data.PrefsMemoryStore(app)
     private val rules = RuleBasedCommandInterpreter()
-    val claude = com.sara.assistant.ai.ClaudeAssistant(app, secrets, memory, logger, ::runSpokenOrder)
+    private val claude = com.sara.assistant.ai.ClaudeAssistant(app, secrets, memory, logger, ::runSpokenOrder)
+    private val gemini = com.sara.assistant.ai.GeminiAssistant(secrets, memory, logger)
+    /** IA elegida en Ajustes (Google por defecto). */
+    val ai = com.sara.assistant.ai.AiRouter({ settings.settings.value.aiProvider }, gemini, claude)
     private val executor = DefaultCommandExecutor(
         mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
         messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
-        memory = memory, assistant = claude,
+        memory = memory, assistant = ai,
     )
 
     /** Órdenes que pide la IA («ejecutar»): mismas reglas y ejecutor que la voz, sin volver a la IA. */
@@ -142,7 +145,7 @@ class AppContainer(private val app: Application) {
     val orchestrator = AssistantOrchestrator(
         scope = scope,
         engines = engines,
-        interpreter = CompositeCommandInterpreter(rules, memory = memory, aiAvailable = claude::isAvailable),
+        interpreter = CompositeCommandInterpreter(rules, memory = memory, aiAvailable = ai::isAvailable),
         executor = executor,
         connectivity = connectivity,
         configProvider = { settings.current().toAssistantConfig() },
