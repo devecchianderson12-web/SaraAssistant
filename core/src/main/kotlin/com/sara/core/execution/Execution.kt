@@ -158,6 +158,11 @@ data class ExecutionResult(
     val confirmation: Confirmation? = null,
     /** Si no es nulo, Sara pregunta [FollowUp.question] y le pasa la respuesta a [FollowUp.onAnswer]. */
     val followUp: FollowUp? = null,
+    /**
+     * La respuesta trae información que hay que decir (clima, hora, batería, una respuesta de la IA).
+     * Si es false y salió bien, Sara sólo dice «Okey, voy.» y hace la orden en silencio.
+     */
+    val informative: Boolean = false,
 ) {
     val needsNotificationAccess: Boolean get() = needsPermission == PermissionKind.NOTIFICATION_ACCESS
 }
@@ -240,7 +245,7 @@ class DefaultCommandExecutor(
         is CommandIntent.SendMessage -> sendMessage(intent)
         is CommandIntent.Remember -> remember(intent)
         is CommandIntent.Forget -> forget(intent.key)
-        CommandIntent.RecallMemory -> recall()
+        CommandIntent.RecallMemory -> recall().copy(informative = true)
         is CommandIntent.Chat -> chat(intent.text)
         is CommandIntent.Skill -> runSkill(intent)
         is CommandIntent.Sequence -> runSequence(intent.steps, 0, emptyList())
@@ -296,7 +301,11 @@ class DefaultCommandExecutor(
         val registry = skills ?: return ExecutionResult(false, responses.cannotDoThat(), ErrorKind.EXECUTION_FAILED)
         val action = registry.find(intent.skill, intent.action)
             ?: return ExecutionResult(false, responses.cannotDoThat(), ErrorKind.EXECUTION_FAILED)
-        val run: suspend () -> ExecutionResult = { registry.run(intent.skill, intent.action, intent.args).toExecution() }
+        // Las consultas (clima, batería, calendario…) y lo que quedó a medias se dicen enteras.
+        val run: suspend () -> ExecutionResult = {
+            val result = registry.run(intent.skill, intent.action, intent.args)
+            result.toExecution().copy(informative = action.risk == com.sara.core.skills.Risk.INFO || result is com.sara.core.skills.SkillResult.Partial)
+        }
         if (action.risk == com.sara.core.skills.Risk.SENSITIVE) {
             val question = action.confirm?.invoke(intent.args) ?: responses.confirmGeneric()
             return ExecutionResult(true, "", confirmation = Confirmation(question, responses.notDone(), run))
@@ -309,11 +318,13 @@ class DefaultCommandExecutor(
      * se sigue con el resto. Cada paso informa su propio resultado (también si falló), así queda
      * claro qué se hizo y qué no.
      */
-    private suspend fun runSequence(steps: List<CommandIntent>, index: Int, said: List<String>, failed: Boolean = false): ExecutionResult {
-        if (index >= steps.size) return ExecutionResult(!failed, said.joinToString(" ").ifBlank { responses.done() })
+    private suspend fun runSequence(
+        steps: List<CommandIntent>, index: Int, said: List<String>, failed: Boolean = false, informative: Boolean = false,
+    ): ExecutionResult {
+        if (index >= steps.size) return ExecutionResult(!failed, said.joinToString(" ").ifBlank { responses.done() }, informative = informative)
         val result = execute(steps[index])
         fun continueAfter(r: ExecutionResult): suspend () -> ExecutionResult = {
-            runSequence(steps, index + 1, said + r.response, failed || !r.success).let { next ->
+            runSequence(steps, index + 1, said + r.response, failed || !r.success, informative || r.informative).let { next ->
                 if (r.needsPermission != null && next.needsPermission == null) next.copy(needsPermission = r.needsPermission) else next
             }
         }
@@ -329,7 +340,8 @@ class DefaultCommandExecutor(
     /** Pedido nuevo o complejo: el planificador (IA con habilidades); si no hay, se responde como pregunta. */
     private suspend fun plan(text: String): ExecutionResult {
         val p = planner?.takeIf { it.isAvailable() } ?: return chat(text)
-        return runCatching { p.handle(text) }.getOrElse { chat(text) }
+        // El planificador resume lo que hizo: se dice entero.
+        return runCatching { p.handle(text) }.getOrElse { chat(text) }.let { it.copy(informative = true) }
     }
 
     private fun com.sara.core.skills.SkillResult.toExecution(): ExecutionResult = when (this) {
@@ -339,7 +351,9 @@ class DefaultCommandExecutor(
         is com.sara.core.skills.SkillResult.Failed -> ExecutionResult(false, message, ErrorKind.EXECUTION_FAILED)
     }
 
-    private suspend fun chat(text: String): ExecutionResult {
+    private suspend fun chat(text: String): ExecutionResult = chatAnswer(text).copy(informative = true)
+
+    private suspend fun chatAnswer(text: String): ExecutionResult {
         SmallTalk.answer(text)?.let { return ExecutionResult(true, it) }
         val ai = assistant?.takeIf { it.isAvailable() }
             ?: return ExecutionResult(false, responses.needsAi(), ErrorKind.EXECUTION_FAILED, needsPermission = PermissionKind.AI_KEY)
@@ -537,6 +551,8 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun confirmGeneric() = "¿Lo hago?"
     fun notDone() = "Listo, no lo hago."
     fun done() = "Listo."
+    /** Confirmación corta de una orden: Sara no repite lo que le pediste. */
+    val acknowledgement = "Okey, voy."
     fun tookTooLong() = "Tardé demasiado, probá de nuevo."
     fun aiFailed() = "No pude responder ahora."
     fun confirmMessage(name: String, message: String) = "¿Le mando «$message» a $name?"

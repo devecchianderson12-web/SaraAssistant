@@ -57,7 +57,7 @@ data class SaraSettings(
     val confirmMessages: Boolean = true,
     val aiProvider: AiProvider = AiProvider.GOOGLE,
     /** Seguir escuchando unos segundos después de responder (charla sin repetir «Sara»). */
-    val continuousConversation: Boolean = true,
+    val continuousConversation: Boolean = false,
     /** Activación con «Ey Sara» (true, menos falsas activaciones) o con «Sara» sola. */
     val heySara: Boolean = true,
 )
@@ -108,7 +108,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val azureRegion = stringPreferencesKey("azure_region")
         val confirmMessages = booleanPreferencesKey("confirm_messages")
         val aiProvider = stringPreferencesKey("ai_provider")
-        val continuousConversation = booleanPreferencesKey("continuous_conversation")
+        val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
         val heySara = booleanPreferencesKey("hey_sara")
     }
 

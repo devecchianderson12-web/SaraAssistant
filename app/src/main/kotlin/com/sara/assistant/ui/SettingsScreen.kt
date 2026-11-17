@@ -134,7 +134,7 @@ fun SettingsScreen(
             }
             SwitchRow(
                 "Conversación continua",
-                "Después de responder sigue escuchando unos segundos: podés seguir hablando sin decir «Sara»",
+                "Después de responder sigue escuchando unos segundos sin que la llames (apagado: hace la orden y se calla)",
                 settings.continuousConversation,
             ) { v -> actions.update { it.copy(continuousConversation = v) } }
             OptionChips(

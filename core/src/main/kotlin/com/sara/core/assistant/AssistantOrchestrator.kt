@@ -202,7 +202,7 @@ class AssistantOrchestrator(
         }
         for ((engine, params) in targets) {
             if (engine.availability() !is Availability.Available) continue
-            for (phrase in responses.listeningPhrases + responses.retryPhrases) {
+            for (phrase in responses.listeningPhrases + responses.retryPhrases + responses.acknowledgement) {
                 runCatching { engine.prepare(phrase, params.copy(cacheable = true)) }
                     .onFailure { logger.w(TAG, "No se pudo pregrabar «$phrase»", it) }
             }
@@ -438,7 +438,12 @@ class AssistantOrchestrator(
         }.onFailure { logger.w(TAG, "No se pudo guardar el historial", it) }
         _events.emit(AssistantEvent.Responded(execution.response, execution.success, intent))
         execution.needsPermission?.let { _events.emit(AssistantEvent.PermissionNeeded(it)) }
-        if (execution.response.isNotBlank()) speak(execution.response, cfg)
+        // Una orden que salió bien: «Okey, voy.» y nada más (el detalle queda escrito en pantalla).
+        val brief = execution.success && !execution.informative && execution.needsPermission == null && intent !is CommandIntent.Cancel
+        when {
+            brief -> speak(responses.acknowledgement, cfg, cacheable = true)
+            execution.response.isNotBlank() -> speak(execution.response, cfg)
+        }
     }
 
     private suspend fun handleRecognitionFailure(error: EngineError, cfg: AssistantConfig) {
