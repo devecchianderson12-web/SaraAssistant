@@ -55,6 +55,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
     private val autostart = JCheckBox("Iniciar con Windows", Autostart.isEnabled())
     private val hotkey = JCheckBox("Atajo Ctrl+Alt+L para hablarle (se aplica al reiniciar Lucy)", s.hotkey)
     private val duck = JCheckBox("Bajar la música de las otras apps mientras te escucho y hablo", s.duckMusic)
+    private val echo = JCheckBox("Cancelación de eco (que la música de la compu no me active ni tape tu voz)", s.echoCancellation)
 
     // Voz
     private val voices = JComboBox<VoiceOption>()
@@ -96,7 +97,8 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         tabs.addTab("General", form(
             row(wake), row(hey),
             labeled("Sensibilidad (más = te escucha desde más lejos, pero se activa más por error)", sensitivity),
-            labeled("Cuando la llamás", ack), row(continuous), row(duck), row(autostart), row(hotkey), row(minimized),
+            labeled("Cuando la llamás", ack), row(continuous), row(duck), row(echo),
+            row(JButton("Probar micrófono").apply { addActionListener { testMicrophone() } }), row(autostart), row(hotkey), row(minimized),
         ))
         tabs.addTab("Voz", form(
             labeled("Voz", voices), labeled("Velocidad", rate), labeled("Volumen de la voz", volume),
@@ -175,6 +177,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         acknowledgement = Acknowledgement.entries[ack.selectedIndex.coerceAtLeast(0)],
         continuousConversation = continuous.isSelected,
         duckMusic = duck.isSelected,
+        echoCancellation = echo.isSelected,
         hotkey = hotkey.isSelected,
         startMinimized = minimized.isSelected,
         voiceId = (voices.selectedItem as? VoiceOption)?.id,
@@ -215,6 +218,22 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         }
         onSaved()
         dispose()
+    }
+
+    /** Graba 4 segundos: muestra el nivel, qué micrófono usa y qué entendió, y lo reproduce. */
+    private fun testMicrophone() {
+        val wasListening = app.orchestrator.isWakeWordEnabled
+        app.orchestrator.setWakeWordEnabled(false)
+        val dialog = JOptionPane("Hablá ahora: «Lucy, poné música»… (4 segundos)", JOptionPane.INFORMATION_MESSAGE, JOptionPane.DEFAULT_OPTION, null, arrayOf<Any>())
+        val window = dialog.createDialog(this, "Probar micrófono").apply { isModal = false; isVisible = true }
+        app.scope.launch(Dispatchers.IO) {
+            val result = runCatching { app.microphoneTest() }.getOrElse { "No pude probar: ${it.message}" }
+            launch(Dispatchers.Swing) {
+                window.dispose()
+                JOptionPane.showMessageDialog(this@SettingsDialog, result, "Probar micrófono", JOptionPane.INFORMATION_MESSAGE)
+                if (wasListening) app.orchestrator.setWakeWordEnabled(true)
+            }
+        }
     }
 
     private fun diagnostics() {

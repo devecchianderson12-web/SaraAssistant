@@ -24,18 +24,23 @@ sealed interface CaptureOutcome {
     data class Failed(val error: EngineError) : CaptureOutcome
 }
 
+/** Fuente de audio PCM 16 bits mono 16 kHz en bloques de 100 ms (el micrófono, o un archivo en pruebas). */
+interface AudioSource {
+    suspend fun capture(onChunk: (ByteArray, Int) -> Boolean): CaptureOutcome
+}
+
 /**
  * Micrófono: PCM 16 bits mono a 16 kHz en bloques de 100 ms. Se abre sólo durante [capture] y se
  * libera siempre al terminar o cancelar; nunca se guarda audio. Si la placa no da 16 kHz, graba a
  * 48 kHz y convierte.
  */
-class Microphone(private val levels: AudioLevelMeter) {
+class Microphone(private val levels: AudioLevelMeter) : AudioSource {
     private val busy = AtomicBoolean(false)
 
     /** `true` mientras Lucy tiene el micrófono abierto. */
     val active: Boolean get() = busy.get()
 
-    suspend fun capture(onChunk: (ByteArray, Int) -> Boolean): CaptureOutcome = withContext(Dispatchers.IO) {
+    override suspend fun capture(onChunk: (ByteArray, Int) -> Boolean): CaptureOutcome = withContext(Dispatchers.IO) {
         val (line, rate) = open() ?: return@withContext CaptureOutcome.Failed(
             EngineError(EngineErrorType.AUDIO_INPUT, "No encontré un micrófono. Revisá que esté conectado."),
         )

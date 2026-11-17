@@ -89,11 +89,25 @@ data class WakeWordProfile(
         /** «Lucy»: el modelo en español la escribe «luci» (probado con audio en Windows). */
         val LUCY = WakeWordProfile(
             keyword = "luci",
-            aliases = setOf("luci", "lucy", "lusi", "lucie", "luchi"),
+            aliases = setOf("luci", "lucy", "lusi", "luchi"),
             competitors = listOf(
-                "luci", "lucio", "lucía", "luz", "luces", "lucha", "lunes", "lucas", "luis", "luisa", "lupe", "susi", "rosi",
-                "lo", "hice", "si", "que", "de", "pone", "música", "este", "eso", "cuando", "bueno", "vamos", "todo",
-                "algo", "pasa", "casa", "no", "hola", "oye", "luego", "lugar", "[unk]",
+                // Muchas palabras comunes: así «luci» sólo gana si de verdad se dijo (con pocas
+                // palabras, cualquier canción o charla terminaba «pareciéndose» a «luci»).
+                "luci", "luz", "luces", "lucio", "lucas", "luis", "luisa", "lunes", "luego", "lugar", "lucha", "luna", "lujo",
+                "lupe", "lucir", "luce", "lucía", "la", "las", "lo", "los", "le", "les", "el", "un", "una", "unos", "de", "del",
+                "a", "al", "en", "con", "por", "para", "sin", "sobre", "entre", "hasta", "desde", "y", "o", "e", "u", "ni",
+                "que", "qué", "quien", "como", "cómo", "cuando", "donde", "dónde", "si", "sí", "no", "ya", "muy", "más", "menos",
+                "tan", "bien", "mal", "yo", "tu", "tú", "vos", "él", "ella", "nos", "nosotros", "ellos", "me", "te", "se", "mi",
+                "mis", "su", "sus", "tus", "es", "son", "era", "fue", "ser", "estar", "está", "estaba", "están", "hay", "ha",
+                "he", "hace", "hacer", "hice", "dijo", "dice", "decir", "digo", "voy", "va", "vamos", "van", "ir", "vino",
+                "viene", "venir", "ver", "veo", "vemos", "mira", "mirá", "tengo", "tiene", "tenemos", "tener", "puedo", "puede",
+                "quiero", "quiere", "casa", "día", "noche", "hoy", "mañana", "tarde", "ahora", "después", "antes", "siempre",
+                "nunca", "todo", "toda", "todos", "nada", "algo", "alguien", "amor", "vida", "mundo", "tiempo", "vez", "veces",
+                "cosa", "gente", "hombre", "mujer", "chica", "chico", "madre", "padre", "hijo", "hija", "música", "canción",
+                "baila", "bailar", "canta", "cantar", "corazón", "sol", "cielo", "mar", "fuego", "calle", "ciudad",
+                "hola", "oye", "eso", "este", "esta", "esto", "ese", "esa", "así", "pasa", "paso", "pues", "bueno", "claro",
+                "dale", "uno", "dos", "tres", "cuatro", "cinco", "diez", "cien", "mil", "susi", "rosi", "lusa",
+                "[unk]",
             ),
             prefixedPhrases = listOf("y luci", "e luci", "hay luci", "oye luci", "ey luci", "hey luci"),
         )

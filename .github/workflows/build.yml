@@ -191,6 +191,11 @@ jobs:
           java -cp "$lib/*" com.sara.lucy.MainKt --write-icon windows/Launcher/lucy.ico
           if (-not (Test-Path windows/Launcher/lucy.ico)) { throw "sin ícono" }
 
+      # «Lucy» con audio real y el modelo de voz: se activa al llamarla y no con charla ni canciones.
+      - name: Prueba de la palabra «Lucy» con el modelo real
+        shell: pwsh
+        run: ./gradlew --no-daemon :desktop:test --tests "com.sara.lucy.WakeWordAudioTest" "-PlucyModel=$PWD/content/model" -PlucyVersion=${{ github.run_number }}
+
       - name: Empaquetar (Java propio, sin instalar nada)
         shell: pwsh
         run: |

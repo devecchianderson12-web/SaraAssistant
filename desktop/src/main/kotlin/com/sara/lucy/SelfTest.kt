@@ -89,6 +89,8 @@ class SelfTest(private val dir: File) {
         runCatching { app.system.obj("battery") }.fold({ ok("batería", it.toString()) }, { fail("batería", it.toString()) })
         runCatching { app.system.obj("info", timeoutMillis = 30_000) }.fold({ ok("info", it.toString()) }, { fail("info", it.toString()) })
         runCatching { app.system.obj("radio", mapOf("kind" to "WiFi", "state" to "query")) }.fold({ ok("radios", it.toString()) }, { info("radios", it.message ?: "") })
+        val mic = runBlocking { withTimeoutOrNull(12_000) { var n = 0; app.microphone.capture { _, _ -> ++n < 10 } } }
+        info("micrófono", "${app.microphone.mode}: $mic")
         val sealed = app.system.call("protect", mapOf("text" to "clave-de-prueba")) as String
         if (app.system.call("unprotect", mapOf("text" to sealed)) == "clave-de-prueba") ok("cifrado de claves") else fail("cifrado de claves", "no coincide")
     }

@@ -9,6 +9,164 @@ $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Speech
 Add-Type -AssemblyName System.Security
 
+# --- Micrófono con cancelación de eco (modo «mic») -------------------------------------------------
+# El «Voice Capture DSP» de Windows (el de las llamadas): graba el micrófono y le resta lo que suena
+# por los parlantes (música, la voz de Lucy), además de reducir ruido. Sale PCM 16 kHz mono 16 bits
+# por la salida estándar, en binario, después de una línea «READY».
+if ($Mode -eq 'mic') {
+  Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+namespace LucyMic {
+  [ComImport, Guid("59eff8b9-938c-4a26-82f2-95cb84cdc837"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IMediaBuffer {
+    [PreserveSig] int SetLength(uint len);
+    [PreserveSig] int GetMaxLength(out uint max);
+    [PreserveSig] int GetBufferAndLength(out IntPtr buf, out uint len);
+  }
+  [ClassInterface(ClassInterfaceType.None), ComVisible(true)]
+  public class Buffer : IMediaBuffer {
+    public readonly IntPtr Data; public readonly uint Max; public uint Length;
+    public Buffer(uint max) { Max = max; Data = Marshal.AllocHGlobal((int)max); }
+    public int SetLength(uint len) { if (len > Max) return unchecked((int)0x80070057); Length = len; return 0; }
+    public int GetMaxLength(out uint max) { max = Max; return 0; }
+    public int GetBufferAndLength(out IntPtr buf, out uint len) { buf = Data; len = Length; return 0; }
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct OutputBuffer { public IntPtr pBuffer; public uint dwStatus; public long rtTimestamp; public long rtTimelength; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct MediaType {
+    public Guid majortype; public Guid subtype; public int bFixedSizeSamples; public int bTemporalCompression;
+    public uint lSampleSize; public Guid formattype; public IntPtr pUnk; public uint cbFormat; public IntPtr pbFormat;
+  }
+  [ComImport, Guid("d8ad0f58-5494-4102-97c5-ec798e59bcf4"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IMediaObject {
+    [PreserveSig] int GetStreamCount(out int i, out int o);
+    [PreserveSig] int GetInputStreamInfo(int s, out int f);
+    [PreserveSig] int GetOutputStreamInfo(int s, out int f);
+    [PreserveSig] int GetInputType(int s, int t, IntPtr mt);
+    [PreserveSig] int GetOutputType(int s, int t, IntPtr mt);
+    [PreserveSig] int SetInputType(int s, IntPtr mt, int f);
+    [PreserveSig] int SetOutputType(int s, ref MediaType mt, int f);
+    [PreserveSig] int GetInputCurrentType(int s, IntPtr mt);
+    [PreserveSig] int GetOutputCurrentType(int s, IntPtr mt);
+    [PreserveSig] int GetInputSizeInfo(int s, out int a, out int b, out int c);
+    [PreserveSig] int GetOutputSizeInfo(int s, out int a, out int b);
+    [PreserveSig] int GetInputMaxLatency(int s, out long l);
+    [PreserveSig] int SetInputMaxLatency(int s, long l);
+    [PreserveSig] int Flush();
+    [PreserveSig] int Discontinuity(int s);
+    [PreserveSig] int AllocateStreamingResources();
+    [PreserveSig] int FreeStreamingResources();
+    [PreserveSig] int GetInputStatus(int s, out int f);
+    [PreserveSig] int ProcessInput(int s, IntPtr b, int f, long t, long l);
+    [PreserveSig] int ProcessOutput(int flags, int count, [In, Out] OutputBuffer[] buffers, out int status);
+    [PreserveSig] int Lock(int l);
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PropertyKey { public Guid fmtid; public int pid; public PropertyKey(Guid g, int p) { fmtid = g; pid = p; } }
+  [StructLayout(LayoutKind.Explicit, Size = 24)]
+  public struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public int intVal; [FieldOffset(8)] public short boolVal; }
+  [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IPropertyStore {
+    [PreserveSig] int GetCount(out int c);
+    [PreserveSig] int GetAt(int i, out PropertyKey k);
+    [PreserveSig] int GetValue(ref PropertyKey k, out PropVariant v);
+    [PreserveSig] int SetValue(ref PropertyKey k, ref PropVariant v);
+    [PreserveSig] int Commit();
+  }
+  [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IMMDeviceCollection { [PreserveSig] int GetCount(out int n); [PreserveSig] int Item(int i, out IMMDevice d); }
+  [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IMMDevice {
+    [PreserveSig] int Activate(ref Guid id, int ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+    [PreserveSig] int OpenPropertyStore(int access, out IntPtr store);
+    [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+  }
+  [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IMMDeviceEnumerator {
+    [PreserveSig] int EnumAudioEndpoints(int flow, int state, out IMMDeviceCollection c);
+    [PreserveSig] int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice d);
+  }
+  [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorCom { }
+  [ComImport, Guid("745057C7-F353-4F2D-A7EE-58434477730E")] class AecDmo { }
+
+  public static class Capture {
+    static readonly Guid AecProps = new Guid("6f52c567-0360-4bd2-9617-ccbf1421c939");
+
+    // Posición del dispositivo predeterminado (de consola) en la lista de dispositivos activos.
+    static int IndexOfDefault(int flow) {
+      var en = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());
+      IMMDevice def; if (en.GetDefaultAudioEndpoint(flow, 0, out def) != 0) return -1;
+      string defId; def.GetId(out defId);
+      IMMDeviceCollection all; en.EnumAudioEndpoints(flow, 1, out all);
+      int n; all.GetCount(out n);
+      for (int i = 0; i < n; i++) { IMMDevice d; all.Item(i, out d); string id; d.GetId(out id); if (id == defId) return i; }
+      return -1;
+    }
+
+    static void Set(IPropertyStore ps, int pid, int value, bool isBool) {
+      var key = new PropertyKey(AecProps, pid);
+      var v = new PropVariant();
+      if (isBool) { v.vt = 11; v.boolVal = (short)(value != 0 ? -1 : 0); } else { v.vt = 3; v.intVal = value; }
+      int hr = ps.SetValue(ref key, ref v);
+      if (hr != 0) throw new Exception("propiedad " + pid + ": 0x" + hr.ToString("X8"));
+    }
+
+    public static void Run() {
+      var dmo = (IMediaObject)(new AecDmo());
+      var ps = (IPropertyStore)dmo;
+      Set(ps, 3, 1, true);   // modo fuente: el DSP graba solo
+      Set(ps, 2, 0, false);  // SINGLE_CHANNEL_AEC: cancelación de eco
+      int mic = IndexOfDefault(1), spk = IndexOfDefault(0);
+      if (mic >= 0 && spk >= 0) Set(ps, 4, (int)(((uint)spk << 16) | ((uint)mic & 0xFFFF)), false);
+      var wf = Marshal.AllocHGlobal(18);
+      var bytes = new byte[18];
+      BitConverter.GetBytes((short)1).CopyTo(bytes, 0); BitConverter.GetBytes((short)1).CopyTo(bytes, 2);
+      BitConverter.GetBytes(16000).CopyTo(bytes, 4); BitConverter.GetBytes(32000).CopyTo(bytes, 8);
+      BitConverter.GetBytes((short)2).CopyTo(bytes, 12); BitConverter.GetBytes((short)16).CopyTo(bytes, 14);
+      Marshal.Copy(bytes, 0, wf, 18);
+      var mt = new MediaType {
+        majortype = new Guid("73647561-0000-0010-8000-00AA00389B71"), subtype = new Guid("00000001-0000-0010-8000-00AA00389B71"),
+        bFixedSizeSamples = 1, lSampleSize = 2, formattype = new Guid("05589f81-c356-11ce-bf01-00aa0055595a"), cbFormat = 18, pbFormat = wf,
+      };
+      int hr = dmo.SetOutputType(0, ref mt, 0);
+      if (hr != 0) throw new Exception("SetOutputType 0x" + hr.ToString("X8"));
+      hr = dmo.AllocateStreamingResources();
+      if (hr != 0) throw new Exception("AllocateStreamingResources 0x" + hr.ToString("X8"));
+      var buffer = new Buffer(32000);
+      var ptr = Marshal.GetComInterfaceForObject(buffer, typeof(IMediaBuffer));
+      var outs = new OutputBuffer[1];
+      var stdout = Console.OpenStandardOutput();
+      var ready = System.Text.Encoding.ASCII.GetBytes("READY\n");
+      stdout.Write(ready, 0, ready.Length); stdout.Flush();
+      var chunk = new byte[32000];
+      while (true) {
+        uint status;
+        do {
+          buffer.Length = 0;
+          outs[0].pBuffer = ptr; outs[0].dwStatus = 0;
+          int st; hr = dmo.ProcessOutput(0, 1, outs, out st);
+          if (hr < 0) throw new Exception("ProcessOutput 0x" + hr.ToString("X8"));
+          status = outs[0].dwStatus;
+          if (buffer.Length > 0) {
+            Marshal.Copy(buffer.Data, chunk, 0, (int)buffer.Length);
+            stdout.Write(chunk, 0, (int)buffer.Length);
+          }
+        } while ((status & 0x01000000) != 0);
+        stdout.Flush();
+        Thread.Sleep(10);
+      }
+    }
+  }
+}
+"@
+  try { [LucyMic.Capture]::Run() } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 3 }
+  exit 0
+}
+
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;

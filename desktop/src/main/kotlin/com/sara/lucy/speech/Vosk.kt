@@ -15,6 +15,7 @@ import com.sara.core.util.EnergyGate
 import com.sara.core.util.SaraLogger
 import com.sara.core.util.WakeWordGate
 import com.sara.core.util.WakeWordTuning
+import com.sara.lucy.audio.AudioSource
 import com.sara.lucy.audio.CaptureOutcome
 import com.sara.lucy.audio.Microphone
 import org.json.JSONObject
@@ -96,7 +97,7 @@ private fun microphoneError() = EngineError(
  */
 class VoskWakeWordEngine(
     private val models: VoskModels,
-    private val microphone: Microphone,
+    private val microphone: AudioSource,
     private val logger: SaraLogger,
     private val handoff: SpeechHandoff,
 ) : WakeWordEngine {
@@ -188,10 +189,21 @@ class VoskWakeWordEngine(
             if (sensitivity < 0.3f) return false
             return WakeWordTuning.verifiedWithPrefix(transcribe(model, audio, list(WakeWordTuning.PREFIXED_PHRASES + WakeWordTuning.COMPETITOR_GRAMMAR)))
         }
-        if (WakeWordTuning.verifiedByTranscript(free)) return true
+        // El nombre tiene que estar al final de lo escuchado: el detector reacciona apenas se dice.
+        if (nearEnd(free)) return true.also { logger.d(TAG, "Verificado: «$free»") }
         if (sensitivity < 0.3f) return false
-        return WakeWordTuning.profile.keyword in transcribe(model, audio, list(WakeWordTuning.COMPETITOR_GRAMMAR)).split(' ')
+        // Charla o canción seguida (muchas palabras y ninguna es el nombre): no es un llamado.
+        if (free.split(' ').count { it.isNotBlank() && it != "[unk]" } >= MAX_FREE_WORDS) {
+            logger.d(TAG, "Libre: «$free» · parece charla, no un llamado")
+            return false
+        }
+        val contest = transcribe(model, audio, list(WakeWordTuning.COMPETITOR_GRAMMAR))
+        logger.d(TAG, "Libre: «$free» · contra parecidas: «$contest»")
+        return nearEnd(contest)
     }
+
+    private fun nearEnd(text: String): Boolean =
+        text.split(' ').filter { it.isNotBlank() && it != "[unk]" }.takeLast(2).any { it in WakeWordTuning.KEYWORD_ALIASES }
 
     private fun parseWords(json: String): List<Pair<String, Float>> {
         val obj = JSONObject(json)
@@ -220,6 +232,7 @@ class VoskWakeWordEngine(
         const val WINDOW_CHUNKS = 24 // 2,4 s
         const val PREROLL_CHUNKS = 5
         const val TAIL_CHUNKS = 5
+        const val MAX_FREE_WORDS = 5
         const val TAIL_LOUD = 3
         /** Audio previo a la activación que se pasa (incluye el nombre, que el intérprete ignora). */
         const val HANDOFF_CHUNKS = 14
@@ -236,7 +249,7 @@ class VoskWakeWordEngine(
  */
 class VoskSpeechRecognitionEngine(
     private val models: VoskModels,
-    private val microphone: Microphone,
+    private val microphone: AudioSource,
     private val handoff: SpeechHandoff,
     private val refine: (suspend (ByteArray, String) -> String?)? = null,
 ) : SpeechRecognitionEngine {

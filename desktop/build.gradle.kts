@@ -43,3 +43,8 @@ val versionResource = tasks.register("lucyVersionResource") {
     doLast { out.get().file("lucy-version.txt").asFile.apply { parentFile.mkdirs(); writeText(lucyVersion.get()) } }
 }
 sourceSets.main { resources.srcDir(versionResource) }
+
+// Prueba de la palabra «Lucy» con el modelo real: ./gradlew :desktop:test -PlucyModel=<carpeta del modelo>
+tasks.test {
+    systemProperty("lucy.model", providers.gradleProperty("lucyModel").getOrElse(""))
+}

@@ -136,6 +136,8 @@ data class LucySettings(
     /** Mandar el audio de cada orden a Google para entenderla mejor (si hay clave). */
     val preciseRecognition: Boolean = true,
     val duckMusic: Boolean = true,
+    /** Cancelación de eco de Windows: la música de la compu no la despierta ni tapa tu voz. */
+    val echoCancellation: Boolean = true,
     val sphereVisible: Boolean = true,
     val sphereAlways: Boolean = false,
     val sphereSize: Int = 170,
@@ -152,7 +154,7 @@ data class LucySettings(
         .put("wakeWordEnabled", wakeWordEnabled).put("sensitivity", sensitivity.toDouble()).put("heyPrefix", heyPrefix)
         .put("acknowledgement", acknowledgement.name).put("voiceId", voiceId ?: "").put("speechRate", speechRate.toDouble())
         .put("voiceVolume", voiceVolume.toDouble()).put("speechPauseMillis", speechPauseMillis).put("continuousConversation", continuousConversation)
-        .put("aiProvider", aiProvider.name).put("preciseRecognition", preciseRecognition).put("duckMusic", duckMusic)
+        .put("aiProvider", aiProvider.name).put("preciseRecognition", preciseRecognition).put("duckMusic", duckMusic).put("echoCancellation", echoCancellation)
         .put("sphereVisible", sphereVisible).put("sphereAlways", sphereAlways).put("sphereSize", sphereSize)
         .put("sphereX", sphereX ?: JSONObject.NULL).put("sphereY", sphereY ?: JSONObject.NULL).put("hotkey", hotkey)
         .put("saveHistory", saveHistory).put("city", city).put("checkUpdates", checkUpdates).put("startMinimized", startMinimized)
@@ -173,6 +175,7 @@ data class LucySettings(
                 aiProvider = runCatching { AiProvider.valueOf(j.optString("aiProvider")) }.getOrDefault(d.aiProvider),
                 preciseRecognition = j.optBoolean("preciseRecognition", d.preciseRecognition),
                 duckMusic = j.optBoolean("duckMusic", d.duckMusic),
+                echoCancellation = j.optBoolean("echoCancellation", d.echoCancellation),
                 sphereVisible = j.optBoolean("sphereVisible", d.sphereVisible),
                 sphereAlways = j.optBoolean("sphereAlways", d.sphereAlways),
                 sphereSize = j.optInt("sphereSize", d.sphereSize).coerceIn(90, 400),

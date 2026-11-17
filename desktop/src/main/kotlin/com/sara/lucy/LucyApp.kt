@@ -29,6 +29,7 @@ import com.sara.core.util.AudioLevelMeter
 import com.sara.core.util.WakeWordProfile
 import com.sara.core.util.WakeWordTuning
 import com.sara.lucy.audio.Chime
+import com.sara.lucy.audio.AecMicrophone
 import com.sara.lucy.audio.Microphone
 import com.sara.lucy.data.DiagnosticsLog
 import com.sara.lucy.data.FileCommandHistory
@@ -96,7 +97,8 @@ class LucyApp {
     val system = WinBridge("system", logger)
     val voiceBridge = WinBridge("voice", logger)
     val secrets = SecretStore(File(LucyPaths.home, "keys.json"), system, logger)
-    val microphone = Microphone(levels)
+    /** Micrófono con cancelación de eco de Windows (si no anda, el común). */
+    val microphone = AecMicrophone(levels, Microphone(levels), logger) { settings.current.echoCancellation }
     val models = VoskModels(logger)
     val history = FileCommandHistory(File(LucyPaths.home, "history.json")) { settings.current.saveHistory }
     val memory = FileMemoryStore(File(LucyPaths.home, "memory.json"))
@@ -151,6 +153,39 @@ class LucyApp {
         DefaultCommandExecutor(
             media, volume, apps = appLauncher, memory = memory, assistant = ai, skills = skills, planner = ai,
         )
+    }
+
+    /** «Probar micrófono»: 4 segundos de audio → nivel, micrófono usado, lo que entiende; y lo reproduce. */
+    suspend fun microphoneTest(): String {
+        val pcm = java.io.ByteArrayOutputStream()
+        var peak = 0
+        val outcome = microphone.capture { buf, len ->
+            pcm.write(buf, 0, len)
+            peak = maxOf(peak, WakeWordTuning.peakOf(buf, len))
+            pcm.size() < 16_000 * 2 * 4
+        }
+        if (outcome is com.sara.lucy.audio.CaptureOutcome.Failed) return outcome.error.message
+        val audio = pcm.toByteArray()
+        val model = models.model() ?: return "Falta el modelo de voz."
+        val boosted = WakeWordTuning.applyGain(audio, audio.size, WakeWordTuning.gainFor(peak, maxGain = 4f))
+        val heard = org.vosk.Recognizer(model, 16_000f).use { r ->
+            r.acceptWaveForm(boosted, boosted.size)
+            org.json.JSONObject(r.finalResult).optString("text")
+        }
+        runCatching {
+            val format = javax.sound.sampled.AudioFormat(16_000f, 16, 1, true, false)
+            val line = javax.sound.sampled.AudioSystem.getSourceDataLine(format)
+            line.open(format); line.start(); line.write(audio, 0, audio.size); line.drain(); line.close()
+        }
+        val level = peak * 100 / 32_768
+        val verdict = when {
+            peak == 0 -> "No llega nada de audio: revisá Configuración de Windows › Privacidad › Micrófono."
+            level < 5 -> "Llega muy bajo: subí el volumen del micrófono en Configuración › Sistema › Sonido."
+            level > 95 -> "Llega saturado: bajá un poco el volumen del micrófono."
+            else -> "El nivel está bien."
+        }
+        logger.d(TAG, "Prueba de micrófono: ${microphone.mode}, pico $level%, entendió «$heard»")
+        return "Micrófono: ${microphone.mode}.\nNivel máximo: $level%. $verdict\nEntendí: «${heard.ifBlank { "(nada)" }}»\n\n(Te lo acabo de reproducir para que escuches cómo me llega.)"
     }
 
     suspend fun diagnosticChecks(): List<String> = buildList {
@@ -259,6 +294,7 @@ class LucyApp {
 
     fun shutdown() {
         orchestrator.shutdown()
+        microphone.stop()
         if (ducked) runCatching { system.call("duck", mapOf("on" to false, "exclude" to emptyList<Long>())) }
         system.stop()
         voiceBridge.stop()
