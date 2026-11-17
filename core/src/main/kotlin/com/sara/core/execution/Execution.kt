@@ -408,7 +408,7 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     private fun pick(vararg options: String) = options[random.nextInt(options.size)]
 
     /** Frases de confirmación: son fijas para poder tenerlas pregrabadas y responder al instante. */
-    val listeningPhrases = listOf("Te escucho.", "Decime.", "Te escucho, decime.")
+    val listeningPhrases = listOf("Decime.", "¿Sí?", "Dime.")
     fun listening() = listeningPhrases[random.nextInt(listeningPhrases.size)]
 
     /** Cuando no escuchó o no entendió: vuelve a preguntar una vez (también pregrabadas). */
@@ -475,7 +475,7 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun needsAi() = "Para preguntas cargá la clave de Google. Te dejé el botón."
     fun whatToSay() = "¿Qué le digo?"
     fun aiFailed() = "No pude responder ahora."
-    fun confirmMessage(name: String, message: String) = "¿Le mando a $name: $message?"
+    fun confirmMessage(name: String, message: String) = "¿Le mando «$message» a $name?"
     fun messageNotSent() = "Listo, no lo mando."
     fun messageSent(name: String) = "Listo, se lo mandé a $name."
     fun messageReady(name: String) = "Te dejé el mensaje listo. Tocá enviar."
@@ -486,7 +486,7 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun unlockToSend() = "Desbloqueá el teléfono para mandarlo."
     fun appNotFound(query: String) = "No encontré ninguna app que se llame $query."
     fun cannotOpenApps() = "Todavía no puedo abrir apps en este dispositivo."
-    fun appsClosed() = "Listo, cerré todo."
+    fun appsClosed() = "Listo."
     private fun musicPrefix(stopped: Boolean) = if (stopped) "Saqué la música. " else ""
     fun needsAccessibility(musicStopped: Boolean = false) =
         musicPrefix(musicStopped) + "Activame en Accesibilidad. Te dejé el botón."

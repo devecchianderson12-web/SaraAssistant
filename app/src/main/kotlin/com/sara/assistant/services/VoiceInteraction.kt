@@ -114,12 +114,12 @@ class SaraSession(context: Context) : VoiceInteractionSession(context) {
         val c = context.container
         val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         scope = sessionScope
-        status.text = "Te escucho…"
+        status.text = "Decime…"
         transcript.text = ""
         sessionScope.launch {
             c.orchestrator.state.collect { state ->
                 status.text = when (state) {
-                    is AssistantState.Listening -> "Te escucho…"
+                    is AssistantState.Listening -> "Decime…"
                     is AssistantState.Processing -> "Procesando…"
                     is AssistantState.Executing -> "En eso…"
                     is AssistantState.Speaking -> state.text

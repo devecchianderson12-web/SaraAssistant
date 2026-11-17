@@ -33,12 +33,21 @@ object MessageParser {
         "^(?:mand|env[ií]|escrib)[a-záéíóú]*\\s+$WHAT\\s*,?\\s*(?:$VIA\\s+)?(?:a|al|para)\\s+(.+)$",
     )
 
+    /** «Enviame un mensaje a/por WhatsApp que diga hola a Juan»: el contacto va al final. */
+    private val SEND_CONTACT_LAST = Regex(
+        "^(?:mand|env[ií]|escrib)[a-záéíóú]*\\s+$WHAT\\s*,?\\s*(?:a|al|por|en|de)\\s+$WA\\s*,?\\s*" +
+            "(?:que\\s+(?:diga|dice|le\\s+diga)|diciendo(?:le)?|diciéndole|con\\s+el\\s+(?:texto|mensaje)|:)\\s*[:,]?\\s*(.+)$",
+    )
+    private val TRAILING_CONTACT = Regex("^(.+)\\s+(?:a|al|para)\\s+(.+)$")
+    private val ONLY_WA = Regex("^$WA$")
+
     fun parse(text: String): CommandIntent.SendMessage? {
         val original = text.trim()
         val lower = original.lowercase()
         if (lower.length != original.length) return null
         val lead = LEAD.find(lower)?.value?.length ?: 0
         val body = lower.substring(lead)
+        SEND_CONTACT_LAST.find(body)?.let { m -> return messageThenContact(original, lead + m.groups[1]!!.range.first) }
         val match = SEND.find(body) ?: TELL.find(body)
         if (match == null) {
             val partial = SEND_NO_TEXT.find(body) ?: return null
@@ -48,12 +57,24 @@ object MessageParser {
             return CommandIntent.SendMessage(target.first, "", group = target.second)
         }
         val target = cleanContact(original.substring(lead + match.groups[1]!!.range.first, lead + match.groups[1]!!.range.last + 1))
+        // «… a WhatsApp que diga hola a Juan»: lo que parecía el contacto era la app.
+        if (ONLY_WA.matches(target.first)) return messageThenContact(original, lead + match.groups[2]!!.range.first)
         val contact = target.first
         val range = match.groups[2]!!.range
         val message = original.substring(lead + range.first, lead + range.last + 1)
             .trim().trim('"', '“', '”', '«', '»', '\'', ' ')
         if (contact.isEmpty() || message.isEmpty()) return null
         return CommandIntent.SendMessage(contact, message.replaceFirstChar { it.uppercase() }, group = target.second)
+    }
+
+    /** Texto desde [start]: «hola a Juan» -> mensaje «Hola», contacto «juan» (el último «a»). */
+    private fun messageThenContact(original: String, start: Int): CommandIntent.SendMessage? {
+        val rest = original.substring(start).trim().trimEnd('.', '!', '?')
+        val m = TRAILING_CONTACT.find(rest) ?: return null
+        val message = m.groupValues[1].trim().trim('"', '“', '”', '«', '»', '\'', ' ', ',')
+        val target = cleanContact(m.groupValues[2])
+        if (message.isEmpty() || target.first.isEmpty()) return null
+        return CommandIntent.SendMessage(target.first, message.replaceFirstChar { it.uppercase() }, group = target.second)
     }
 
     private val GROUP = Regex("^(?:el\\s+|un\\s+|mi\\s+)?(?:grupo|chat)\\b\\s*(?:que\\s+(?:dice|se\\s+llama|tiene\\s+de\\s+nombre)|llamado|de\\s+nombre|de)?\\s*", RegexOption.IGNORE_CASE)

@@ -131,7 +131,7 @@ fun SettingsScreen(
             Text("Más sensibilidad = responde más fácil, pero puede activarse por error.", style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
             OptionChips(
                 "Al detectar «Sara»",
-                listOf(Acknowledgement.VOICE to "Dice «Te escucho»", Acknowledgement.CHIME to "Señal sonora", Acknowledgement.VOICE_AND_CHIME to "Ambas", Acknowledgement.NONE to "Nada"),
+                listOf(Acknowledgement.VOICE to "Dice «Decime» / «¿Sí?»", Acknowledgement.CHIME to "Señal sonora", Acknowledgement.VOICE_AND_CHIME to "Ambas", Acknowledgement.NONE to "Nada"),
                 settings.acknowledgement,
             ) { v -> actions.update { it.copy(acknowledgement = v) } }
             SwitchRow("Escuchar con música de fondo", "Cancela el eco del parlante mientras suena música (si el teléfono lo admite)", settings.echoCancellation) { v ->

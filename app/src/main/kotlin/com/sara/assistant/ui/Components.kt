@@ -1,13 +1,7 @@
 package com.sara.assistant.ui
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -43,11 +37,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.PathEffect
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.sin
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -68,15 +71,32 @@ import com.sara.core.model.AssistantState
  * Indicador central: un orbe con anillos que respiran según el estado y reaccionan al nivel
  * real de audio (micrófono o voz de Sara). Se dibuja en un único Canvas para mantener 60 fps.
  */
+/**
+ * Nebulosa al estilo «Jarvis»: nubes de color que giran y se mezclan, partículas, anillos
+ * técnicos que rotan y barras alrededor que laten con el volumen de la voz. Se calma cuando Sara
+ * espera y se enciende cuando escucha o habla.
+ */
 @Composable
 fun SaraOrb(state: AssistantState, level: Float, enabled: Boolean, size: Dp, onClick: () -> Unit) {
     val color by animateColorAsState(state.color(), tween(450), label = "orbColor")
-    val smoothLevel by animateFloatAsState(level, spring(stiffness = 300f), label = "level")
-    val transition = rememberInfiniteTransition(label = "orb")
-    val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2600, easing = LinearEasing)), label = "phase")
-    val breath by transition.animateFloat(0.96f, 1.04f, infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breath")
-    val rotation by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(9000, easing = LinearEasing)), label = "rotation")
-    val active = state !is AssistantState.Inactive
+    val smoothLevel by animateFloatAsState(level.coerceIn(0f, 1f), spring(stiffness = 260f), label = "level")
+    val energy by animateFloatAsState(
+        when (state) {
+            is AssistantState.Listening -> 1f
+            is AssistantState.Speaking -> 0.9f
+            is AssistantState.Processing, is AssistantState.Executing -> 0.75f
+            is AssistantState.Error -> 0.5f
+            AssistantState.WaitingForWakeWord -> 0.4f
+            AssistantState.Inactive -> 0.18f
+        },
+        tween(700), label = "energy",
+    )
+    val time by produceState(0f) {
+        val start = withFrameNanos { it }
+        while (true) withFrameNanos { value = (it - start) / 1_000_000_000f }
+    }
+    // Mientras habla, aunque el motor de voz no informe volumen, la nebulosa «respira» como una voz.
+    val speaking = state is AssistantState.Speaking
     val pressed = remember { MutableInteractionSource() }
 
     Box(
@@ -88,46 +108,107 @@ fun SaraOrb(state: AssistantState, level: Float, enabled: Boolean, size: Dp, onC
             .semantics { contentDescription = "Activar a Sara" },
     ) {
         Canvas(Modifier.size(size)) {
-            val center = Offset(this.size.width / 2, this.size.height / 2)
-            val base = this.size.minDimension * 0.28f
-            val energetic = state is AssistantState.Listening || state is AssistantState.Speaking
+            val c = Offset(this.size.width / 2, this.size.height / 2)
+            val r = this.size.minDimension / 2
+            val voice = if (speaking) maxOf(smoothLevel, 0.35f + 0.25f * sin(time * 9f) * sin(time * 3.3f)) else smoothLevel
+            val pulse = (voice * energy).coerceIn(0f, 1f)
+            val palette = listOf(SaraColors.Violet, SaraColors.Cyan, SaraColors.Pink, color, SaraColors.Violet, SaraColors.Cyan, color)
 
-            // Halo
+            // Resplandor de fondo.
             drawCircle(
-                brush = Brush.radialGradient(listOf(color.copy(alpha = if (active) 0.35f else 0.12f), Color.Transparent), center, base * (2.0f + smoothLevel * 0.6f)),
-                radius = base * (2.0f + smoothLevel * 0.6f), center = center,
+                Brush.radialGradient(listOf(color.copy(alpha = 0.10f + 0.30f * energy), Color.Transparent), c, r),
+                radius = r, center = c,
             )
-            // Anillos que se expanden
-            if (active) {
-                val rings = if (energetic) 3 else 2
-                for (i in 0 until rings) {
-                    val p = (phase + i.toFloat() / rings) % 1f
-                    val radius = base * (1.05f + p * (0.75f + smoothLevel * 0.5f))
-                    drawCircle(color.copy(alpha = (1f - p) * if (energetic) 0.55f else 0.3f), radius, center, style = Stroke(width = 2.dp.toPx()))
+
+            // Nubes de la nebulosa (se suman entre sí, como luz).
+            palette.forEachIndexed { i, tint ->
+                val dir = if (i % 2 == 0) 1f else -1f
+                val angle = time * (0.18f + i * 0.05f) * dir * (0.5f + energy) + i * 0.9f
+                val dist = r * (0.10f + 0.10f * sin(time * 0.7f + i)) * (1f + pulse * 0.9f)
+                val p = Offset(c.x + cos(angle) * dist, c.y + sin(angle) * dist)
+                val blob = r * (0.26f + 0.05f * sin(time * 1.3f + i * 1.7f)) * (1f + pulse * 0.55f)
+                drawCircle(
+                    Brush.radialGradient(listOf(tint.copy(alpha = 0.20f + 0.30f * energy), Color.Transparent), p, blob),
+                    radius = blob, center = p, blendMode = BlendMode.Plus,
+                )
+            }
+
+            // Núcleo brillante.
+            val core = r * (0.12f + 0.10f * pulse + 0.015f * sin(time * 2f))
+            drawCircle(
+                Brush.radialGradient(
+                    listOf(Color.White.copy(alpha = 0.35f + 0.5f * pulse), color.copy(alpha = 0.35f), Color.Transparent), c, core * 2.2f,
+                ),
+                radius = core * 2.2f, center = c, blendMode = BlendMode.Plus,
+            )
+
+            // Partículas en órbita.
+            for (j in 0 until PARTICLES) {
+                val seedA = frac(j * 0.618034f)
+                val seedB = frac(j * 0.414214f)
+                val dir = if (j % 3 == 0) -1f else 1f
+                val angle = j * 2.39996f + time * (0.08f + seedB * 0.35f) * dir * (0.4f + energy)
+                val radius = r * (0.22f + seedA * 0.55f) * (1f + pulse * 0.30f * sin(time * 3f + j))
+                val twinkle = 0.25f + 0.75f * abs(sin(time * (1.2f + seedA * 2f) + j))
+                drawCircle(
+                    palette[j % palette.size].copy(alpha = twinkle * (0.35f + 0.65f * energy)),
+                    radius = (0.8f + seedB * 1.6f).dp.toPx() * (1f + pulse * 0.6f),
+                    center = Offset(c.x + cos(angle) * radius, c.y + sin(angle) * radius),
+                    blendMode = BlendMode.Plus,
+                )
+            }
+
+            // Barras que laten con la voz, alrededor de la nebulosa.
+            val ring = r * 0.80f
+            val tick = 1.6.dp.toPx()
+            for (k in 0 until BARS) {
+                val a = k * (2f * PI.toFloat() / BARS) + time * 0.15f
+                val wobble = 0.5f + 0.5f * sin(time * 6f + k * 0.7f) * cos(time * 2.3f + k * 0.31f)
+                val length = r * (0.015f + 0.11f * pulse * wobble + 0.01f * energy)
+                val dirV = Offset(cos(a), sin(a))
+                drawLine(
+                    color.copy(alpha = 0.25f + 0.6f * energy),
+                    start = c + dirV * ring, end = c + dirV * (ring + length), strokeWidth = tick,
+                )
+            }
+
+            // Anillos técnicos que giran (estilo «Jarvis»).
+            val arcStroke = Stroke(width = 2.dp.toPx())
+            rotate(time * 40f * (0.4f + energy), c) {
+                for (q in 0 until 3) {
+                    drawArc(
+                        SaraColors.Cyan.copy(alpha = 0.25f + 0.45f * energy), startAngle = q * 120f, sweepAngle = 70f, useCenter = false,
+                        topLeft = Offset(c.x - r * 0.70f, c.y - r * 0.70f), size = Size(r * 1.40f, r * 1.40f), style = arcStroke,
+                    )
                 }
             }
-            // Núcleo con gradiente giratorio
-            val coreRadius = base * (if (active) breath else 1f) * (1f + smoothLevel * 0.18f)
-            rotate(rotation, center) {
+            rotate(-time * 22f, c) {
                 drawCircle(
-                    brush = Brush.sweepGradient(listOf(SaraColors.Violet, SaraColors.Cyan, SaraColors.Pink, SaraColors.Violet), center),
-                    radius = coreRadius, center = center,
+                    color.copy(alpha = 0.18f + 0.35f * energy), radius = r * 0.93f, center = c,
+                    style = Stroke(width = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 9.dp.toPx()))),
                 )
             }
             drawCircle(
-                brush = Brush.radialGradient(listOf(Color.White.copy(alpha = 0.18f), color.copy(alpha = 0.55f)), center, coreRadius),
-                radius = coreRadius * 0.97f, center = center,
+                Color.White.copy(alpha = 0.10f + 0.35f * pulse), radius = r * (0.58f + 0.10f * pulse), center = c,
+                style = Stroke(width = (1f + 3f * pulse).dp.toPx()),
             )
-            if (!active) drawCircle(SaraColors.Background.copy(alpha = 0.45f), coreRadius, center)
+            if (state is AssistantState.Inactive) drawCircle(SaraColors.Background.copy(alpha = 0.35f), r, c)
         }
-        Icon(
-            painter = painterResource(R.drawable.ic_mic),
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(size * 0.16f).scale(1f + smoothLevel * 0.1f),
-        )
+        // El micrófono sólo cuando Sara no está escuchando ni hablando (para tocar y hablar).
+        if (energy < 0.6f) {
+            Icon(
+                painter = painterResource(R.drawable.ic_mic),
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.size(size * 0.13f),
+            )
+        }
     }
 }
+
+private const val PARTICLES = 70
+private const val BARS = 64
+private fun frac(x: Float) = x - floor(x)
 
 @Composable
 fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {

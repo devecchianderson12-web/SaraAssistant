@@ -90,7 +90,7 @@ class AssistantOrchestratorTest {
         advanceUntilIdle()
 
         assertEquals(listOf(MediaAction.PLAY to null), h.media.calls)
-        assertEquals(listOf("Te escucho.", "Perfecto, voy a reproducir música en Música."), voice.spoken)
+        assertEquals(listOf("Decime.", "Perfecto, voy a reproducir música en Música."), voice.spoken)
         assertEquals(
             listOf(StateKind.INACTIVE, StateKind.WAITING, StateKind.SPEAKING, StateKind.LISTENING, StateKind.PROCESSING, StateKind.EXECUTING, StateKind.SPEAKING, StateKind.WAITING),
             h.visited,

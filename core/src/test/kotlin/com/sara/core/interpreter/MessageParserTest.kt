@@ -45,6 +45,18 @@ class MessageParserTest {
     }
 
     @Test
+    fun `contacto al final`() {
+        assertEquals(
+            CommandIntent.SendMessage("juan pérez", "Hola"),
+            intentOf("enviame un mensaje a wpp que diga hola a Juan Pérez"),
+        )
+        assertEquals(
+            CommandIntent.SendMessage("mi amor", "Te extraño mucho"),
+            intentOf("mandá un mensaje por WhatsApp diciendo te extraño mucho a mi amor"),
+        )
+    }
+
+    @Test
     fun `no confunde otras ordenes`() {
         assertNull(MessageParser.parse("abrí WhatsApp"))
         assertEquals(CommandIntent.OpenApp("whatsapp"), intentOf("abrí WhatsApp"))
@@ -87,7 +99,7 @@ class MessageParserTest {
             .execute(CommandIntent.SendMessage("miamor", "Hola"))
         assertNotNull(result.confirmation)
         val confirmation = result.confirmation!!
-        assertEquals("¿Le mando a Mi Amor: Hola?", confirmation.question)
+        assertEquals("¿Le mando «Hola» a Mi Amor?", confirmation.question)
         assertNull(m.sent)
         assertEquals("Listo, se lo mandé a Mi Amor.", confirmation.onConfirm().response)
         assertEquals("Hola", m.sent?.second)
