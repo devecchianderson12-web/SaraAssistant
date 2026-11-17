@@ -151,6 +151,8 @@ jobs:
   windows:
     name: Lucy para Windows (.exe)
     runs-on: windows-latest
+    permissions:
+      contents: write
     timeout-minutes: 40
     env:
       LUCY_ONLY: "1"
@@ -196,7 +198,7 @@ jobs:
           jpackage --type app-image --name Lucy --app-version "1.0.${{ github.run_number }}" --vendor Lucy `
             --input desktop/build/install/Lucy/lib --main-jar $jar --main-class com.sara.lucy.MainKt `
             --icon windows/Launcher/lucy.ico --app-content content/model --dest image `
-            --java-options "-Xmx512m -XX:+UseSerialGC -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8" `
+            --java-options "-Xmx512m -XX:+UseSerialGC -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Djna.encoding=UTF-8" `
             --add-modules "java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.scripting,java.sql,java.xml,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.localedata,jdk.charsets,jdk.zipfs,jdk.accessibility" `
             --jlink-options "--strip-debug --no-man-pages --no-header-files --compress=zip-6"
           Get-ChildItem image/Lucy | Format-Table Name, Length
@@ -229,6 +231,17 @@ jobs:
           name: lucy-autoprueba
           path: autoprueba/
           if-no-files-found: ignore
+
+      # En ejecuciones manuales, la captura de Lucy se guarda en la rama «capturas-lucy» para revisarla.
+      - name: Publicar captura (manual)
+        if: github.event_name == 'workflow_dispatch' && hashFiles('autoprueba/lucy.png') != ''
+        shell: bash
+        run: |
+          mkdir capturas && cp autoprueba/lucy.png autoprueba/selftest.txt capturas/ && cd capturas
+          git init -q && git checkout -q -b capturas-lucy
+          git -c user.name=ci -c user.email=ci@example.invalid add .
+          git -c user.name=ci -c user.email=ci@example.invalid commit -qm "Captura de Lucy ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" capturas-lucy
 
       - name: Publicar .exe como artefacto
         uses: actions/upload-artifact@v4

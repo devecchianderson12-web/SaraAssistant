@@ -25,6 +25,8 @@ import kotlin.system.exitProcess
  *   --write-icon <ico>     genera el ícono
  */
 fun main(args: Array<String>) {
+    // Vosk devuelve UTF-8: sin esto, en Windows «música» llega como «mÃºsica» y no se entiende.
+    System.setProperty("jna.encoding", "UTF-8")
     fun arg(name: String) = args.indexOf(name).takeIf { it >= 0 && it + 1 < args.size }?.let { args[it + 1] }
     arg("--write-icon")?.let { writeIcon(File(it)); return }
     arg("--launcher")?.let { LucyLocation.portableExe = File(it) }

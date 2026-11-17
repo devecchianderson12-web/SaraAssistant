@@ -112,6 +112,7 @@ class SelfTest(private val dir: File) {
             val chunks = pcm.toList().chunked(Microphone.CHUNK_BYTES).map { it.toByteArray() }.takeLast(24)
             val woke = app.wake.verify(model, chunks, WakeWordTuning.DEFAULT_SENSITIVITY, requirePrefix = false)
             info("oído «$phrase»", "entendió «$heard»; activación: $woke (voz ${spanish ?: "en inglés: sólo orientativo"})")
+            if ('Ã' in heard) fail("acentos de Vosk", "llegan mal: $heard")
         }
         runCatching { app.voiceBridge.call("speak", mapOf("text" to "Hola, soy Lucy.", "rate" to 0, "volume" to 100), timeoutMillis = 30_000) }
             .fold({ ok("hablar", it.toString()) }, { info("hablar", "sin salida de audio: ${it.message}") })
