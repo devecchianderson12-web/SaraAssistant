@@ -29,7 +29,8 @@ class CompositeCommandInterpreter(
         val routine = memory?.get(MemoryKeys.routineKey(text.trim().removePrefix("Sara").removePrefix("sara").trim(' ', ',')))
         if (routine != null) return rules.interpret(routine).copy(ruleId = "routine")
         val local = rules.interpret(text)
-        if (local.intent is CommandIntent.Unknown && aiAvailable()) {
+        // Preguntas («¿cómo está el clima?»): a la IA si hay; si no, Sara explica cómo activarla.
+        if (local.intent is CommandIntent.Unknown && (aiAvailable() || looksLikeQuestion(local.normalizedText))) {
             return InterpretationResult(CommandIntent.Chat(text), 0.7f, local.normalizedText, "ai-chat")
         }
         val ai = conversational
@@ -37,6 +38,18 @@ class CompositeCommandInterpreter(
         val remote = runCatching { ai.interpret(text) }.getOrNull() ?: return local
         return if (remote.intent is CommandIntent.Unknown) local else remote
     }
+}
+
+private val QUESTION_START = setOf(
+    "que", "como", "cual", "cuales", "cuando", "donde", "quien", "quienes", "cuanto", "cuanta", "cuantos", "cuantas", "por", "sabes", "sabias",
+)
+private val QUESTION_WORDS = setOf("clima", "tiempo", "temperatura", "llueve", "lluvia", "noticias", "partido", "dolar", "pronostico")
+
+/** Pregunta (no orden): «¿cómo está el clima?», «¿quién ganó?», «¿cuánto está el dólar?». */
+fun looksLikeQuestion(normalized: String): Boolean {
+    val tokens = normalized.split(' ').filter { it.isNotBlank() }.dropWhile { it == "y" || it == "sara" }
+    if (tokens.isEmpty()) return false
+    return tokens.first() in QUESTION_START || tokens.any { it in QUESTION_WORDS }
 }
 
 /** Intérprete local por reglas: intenciones, entidades (porcentaje, búsqueda) y expresiones equivalentes. */

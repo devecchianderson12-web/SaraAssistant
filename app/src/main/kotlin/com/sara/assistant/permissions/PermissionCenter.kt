@@ -45,6 +45,10 @@ object PermissionCenter {
         PermissionKind.CONTACTS -> Info("Contactos", "Para mandar WhatsApp a tus contactos por nombre.")
         PermissionKind.BATTERY -> Info("Batería sin restricciones", "Para que Sara siga escuchando con la pantalla bloqueada.")
         PermissionKind.DEFAULT_ASSISTANT -> Info("Asistente predeterminado", "Para que Sara arranque sola al reiniciar el teléfono.")
+        PermissionKind.AI_KEY -> Info(
+            "Preguntas con Google",
+            "Para responder el clima, noticias y cualquier pregunta. La clave de Google es gratis: tocá Activar y seguí los pasos.",
+        )
     }
 
     /** Permisos que se piden con el diálogo del sistema (un toque en «Permitir»). */
@@ -62,6 +66,7 @@ object PermissionCenter {
         PermissionKind.OVERLAY -> Settings.canDrawOverlays(context)
         PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isWorking(context)
         PermissionKind.BATTERY -> context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
+        PermissionKind.AI_KEY -> com.sara.assistant.SaraApp.containerOrNull(context)?.ai?.isAvailable() == true
         PermissionKind.DEFAULT_ASSISTANT -> runCatching {
             context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
         }.getOrDefault(false)
@@ -74,6 +79,8 @@ object PermissionCenter {
 
     /** Pantallas de Ajustes, de la más directa a la más general. */
     fun settingsIntents(context: Context, kind: PermissionKind): List<Intent> {
+        // La clave de la IA se carga en Sara (no en Ajustes del sistema).
+        if (kind == PermissionKind.AI_KEY) return emptyList()
         val pkg = Uri.parse("package:" + context.packageName)
         val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
         return when (kind) {
@@ -103,7 +110,7 @@ object PermissionCenter {
                 Intent(Settings.ACTION_VOICE_INPUT_SETTINGS),
                 Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
             )
-            PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.NOTIFICATIONS -> emptyList()
+            PermissionKind.MICROPHONE, PermissionKind.CONTACTS, PermissionKind.NOTIFICATIONS, PermissionKind.AI_KEY -> emptyList()
         } + appDetails
     }
 

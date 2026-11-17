@@ -356,29 +356,45 @@ class AssistantOrchestrator(
         if (intent !is CommandIntent.Unknown && intent !is CommandIntent.Cancel) {
             machine.moveTo(AssistantState.Executing(intent))
         }
-        val execution = executor.execute(intent)
-        val confirmation = execution.confirmation
-        if (confirmation == null) {
-            finish(text, intent, execution, cfg)
-            return
-        }
-        // «¿Le mando a Mi Amor: …?» -> escucha sí / no.
-        _events.emit(AssistantEvent.Responded(confirmation.question, true, intent))
-        speak(confirmation.question, cfg)
-        machine.moveTo(AssistantState.Listening())
-        val answer = listen(cfg)
-        val accepted = (answer as? RecognitionResult.Success)?.text?.trim()?.let { reply ->
-            _events.emit(AssistantEvent.Heard(reply, answer.engineId))
-            ConfirmationParser.parse(reply)
-        }
-        logger.d(TAG, "Confirmación: $accepted")
-        val result = if (accepted == true) {
-            machine.moveTo(AssistantState.Executing(intent))
-            confirmation.onConfirm()
-        } else {
-            ExecutionResult(true, confirmation.declined)
+        var result = executor.execute(intent)
+        // Preguntas de seguimiento: «¿Qué le digo?» y «¿Le mando a Mi Amor: …?».
+        repeat(MAX_FOLLOW_UPS) {
+            val followUp = result.followUp
+            val confirmation = result.confirmation
+            result = when {
+                followUp != null -> {
+                    val reply = ask(followUp.question, intent, cfg)
+                    if (reply.isNullOrBlank()) ExecutionResult(false, responses.didNotHear(), ErrorKind.NO_SPEECH)
+                    else {
+                        machine.moveTo(AssistantState.Executing(intent))
+                        followUp.onAnswer(reply)
+                    }
+                }
+                confirmation != null -> {
+                    val accepted = ask(confirmation.question, intent, cfg)?.let(ConfirmationParser::parse)
+                    logger.d(TAG, "Confirmación: $accepted")
+                    if (accepted == true) {
+                        machine.moveTo(AssistantState.Executing(intent))
+                        confirmation.onConfirm()
+                    } else {
+                        ExecutionResult(true, confirmation.declined)
+                    }
+                }
+                else -> return finish(text, intent, result, cfg)
+            }
         }
         finish(text, intent, result, cfg)
+    }
+
+    /** Sara pregunta algo y escucha la respuesta (null si no escuchó nada). */
+    private suspend fun ask(question: String, intent: CommandIntent, cfg: AssistantConfig): String? {
+        _events.emit(AssistantEvent.Responded(question, true, intent))
+        speak(question, cfg)
+        machine.moveTo(AssistantState.Listening())
+        val answer = listen(cfg) as? RecognitionResult.Success ?: return null
+        val reply = answer.text.trim()
+        _events.emit(AssistantEvent.Heard(reply, answer.engineId))
+        return reply
     }
 
     private suspend fun finish(text: String, intent: CommandIntent, execution: ExecutionResult, cfg: AssistantConfig) {
@@ -434,6 +450,7 @@ class AssistantOrchestrator(
 
     private companion object {
         const val TAG = "Orchestrator"
+        const val MAX_FOLLOW_UPS = 3
         val FATAL_WAKE_ERRORS = setOf(EngineErrorType.PERMISSION, EngineErrorType.NOT_AVAILABLE, EngineErrorType.CREDENTIALS)
     }
 }

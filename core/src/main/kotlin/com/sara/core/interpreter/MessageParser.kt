@@ -10,11 +10,15 @@ import com.sara.core.model.CommandIntent
 object MessageParser {
     private const val WA = "(?:whatsapp|whats app|wasap|guasap|wsp|wpp|whatsap)"
     private const val VIA = "(?:por|en|de)\\s+$WA"
-    private val LEAD = Regex("^\\s*(?:sara\\s*[,.]?\\s+)?(?:(?:por\\s+favor|porfa)\\s*,?\\s+)?")
+    private val LEAD = Regex(
+        "^\\s*(?:sara\\s*[,.]?\\s+)?(?:(?:por\\s+favor|porfa)\\s*,?\\s+)?" +
+            "(?:(?:me\\s+)?(?:pod[eé]s|puedes|podr[ií]as|quiero\\s+que|necesito\\s+que)\\s+)?",
+    )
+    private const val WHAT = "(?:(?:un|una|los|las|el|este|estos|unos)\\s+)?(?:mensajes?|mensajito|msj|$WA)?"
 
     /** Verbo + (un mensaje) + (por WhatsApp) + a CONTACTO + (por WhatsApp) + que diga MENSAJE. */
     private val SEND = Regex(
-        "^(?:mand|env[ií]|escrib)[a-záéíóú]*\\s+(?:un\\s+|una\\s+)?(?:mensaje|mensajito|msj|$WA)?\\s*,?\\s*(?:$VIA\\s+)?" +
+        "^(?:mand|env[ií]|escrib)[a-záéíóú]*\\s+$WHAT\\s*,?\\s*(?:$VIA\\s+)?" +
             "(?:a|al|para)\\s+(.+)\\s*,?\\s*(?:$VIA\\s*,?\\s*)?" +
             "(?:que\\s+(?:diga|dice|le\\s+diga)|diciendo(?:le)?|diciéndole|con\\s+el\\s+(?:texto|mensaje)|:)\\s*[:,]?\\s*(.+)$",
     )
@@ -24,13 +28,25 @@ object MessageParser {
         "^(?:dec[ií]le|dile|escrib[ií]le|mand[aá]le|env[ií]ale)\\s+(?:$VIA\\s+)?(?:a|al)\\s+(.+?)\\s*,?\\s*(?:$VIA\\s*,?\\s*)?que\\s+(.+)$",
     )
 
+    /** Pedido sin el texto: «mandá un mensaje al grupo Notas» -> Sara pregunta qué decir. */
+    private val SEND_NO_TEXT = Regex(
+        "^(?:mand|env[ií]|escrib)[a-záéíóú]*\\s+$WHAT\\s*,?\\s*(?:$VIA\\s+)?(?:a|al|para)\\s+(.+)$",
+    )
+
     fun parse(text: String): CommandIntent.SendMessage? {
         val original = text.trim()
         val lower = original.lowercase()
         if (lower.length != original.length) return null
         val lead = LEAD.find(lower)?.value?.length ?: 0
         val body = lower.substring(lead)
-        val match = SEND.find(body) ?: TELL.find(body) ?: return null
+        val match = SEND.find(body) ?: TELL.find(body)
+        if (match == null) {
+            val partial = SEND_NO_TEXT.find(body) ?: return null
+            val r = partial.groups[1]!!.range
+            val target = cleanContact(original.substring(lead + r.first, lead + r.last + 1).trimEnd('?', '.', '!'))
+            if (target.first.isEmpty()) return null
+            return CommandIntent.SendMessage(target.first, "", group = target.second)
+        }
         val target = cleanContact(original.substring(lead + match.groups[1]!!.range.first, lead + match.groups[1]!!.range.last + 1))
         val contact = target.first
         val range = match.groups[2]!!.range

@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,8 +93,16 @@ fun SettingsScreen(
     actions: SettingsActions,
     updateState: UpdateState = UpdateState.Idle,
     memories: Map<String, String> = emptyMap(),
+    aiDialogRequested: Boolean = false,
+    onAiDialogShown: () -> Unit = {},
 ) {
     var aiDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(aiDialogRequested) {
+        if (aiDialogRequested) {
+            aiDialog = true
+            onAiDialogShown()
+        }
+    }
     var voicePicker by remember { mutableStateOf<Boolean?>(null) }
     var azureDialog by remember { mutableStateOf(false) }
     var porcupineDialog by remember { mutableStateOf(false) }

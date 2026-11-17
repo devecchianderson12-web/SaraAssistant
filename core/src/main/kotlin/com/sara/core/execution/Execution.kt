@@ -156,9 +156,16 @@ data class ExecutionResult(
     val needsPermission: PermissionKind? = null,
     /** Si no es nulo, Sara pregunta [Confirmation.question] y sólo ejecuta si le dicen que sí. */
     val confirmation: Confirmation? = null,
+    /** Si no es nulo, Sara pregunta [FollowUp.question] y le pasa la respuesta a [FollowUp.onAnswer]. */
+    val followUp: FollowUp? = null,
 ) {
     val needsNotificationAccess: Boolean get() = needsPermission == PermissionKind.NOTIFICATION_ACCESS
 }
+
+class FollowUp(
+    val question: String,
+    val onAnswer: suspend (String) -> ExecutionResult,
+)
 
 class Confirmation(
     val question: String,
@@ -276,13 +283,18 @@ class DefaultCommandExecutor(
     private suspend fun chat(text: String): ExecutionResult {
         SmallTalk.answer(text)?.let { return ExecutionResult(true, it) }
         val ai = assistant?.takeIf { it.isAvailable() }
-            ?: return ExecutionResult(false, responses.needsAi(), ErrorKind.EXECUTION_FAILED)
+            ?: return ExecutionResult(false, responses.needsAi(), ErrorKind.EXECUTION_FAILED, needsPermission = PermissionKind.AI_KEY)
         return runCatching { ExecutionResult(true, ai.reply(text)) }
             .getOrElse { ExecutionResult(false, it.message ?: responses.aiFailed(), ErrorKind.EXECUTION_FAILED) }
     }
 
     private suspend fun sendMessage(intent: CommandIntent.SendMessage): ExecutionResult {
         val m = messenger ?: return ExecutionResult(false, responses.cannotSendMessages(), ErrorKind.EXECUTION_FAILED)
+        if (intent.message.isBlank()) {
+            return ExecutionResult(true, "", followUp = FollowUp(responses.whatToSay()) { answer ->
+                sendMessage(intent.copy(message = answer.trim().trim('"', '«', '»').replaceFirstChar { it.uppercase() }))
+            })
+        }
         return when (val prepared = runCatching { m.prepare(intent.contact, intent.group) }.getOrElse { return ExecutionResult(false, responses.failed(it.message ?: "error"), ErrorKind.EXECUTION_FAILED) }) {
             is MessagePrepareResult.Found -> {
                 val contact = prepared.contact
@@ -460,7 +472,8 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun nothingToForget() = "No tenía eso guardado."
     fun nothingRemembered() = "Todavía no recuerdo nada."
     fun recall(items: List<String>) = "Recuerdo que " + items.joinToString("; ") + "."
-    fun needsAi() = "Para eso activá la IA en Ajustes."
+    fun needsAi() = "Para preguntas cargá la clave de Google. Te dejé el botón."
+    fun whatToSay() = "¿Qué le digo?"
     fun aiFailed() = "No pude responder ahora."
     fun confirmMessage(name: String, message: String) = "¿Le mando a $name: $message?"
     fun messageNotSent() = "Listo, no lo mando."

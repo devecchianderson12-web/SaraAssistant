@@ -127,4 +127,40 @@ class MemoryTest {
         assertFalse(noAi.execute(CommandIntent.Chat("¿qué tiempo hace?")).success)
         assertEquals("Muy bien, ¿y vos?", noAi.execute(CommandIntent.Chat("¿cómo estás?")).response)
     }
+
+    @Test
+    fun `casos del telefono`() = runBlocking {
+        // «Qué puedes hacer» (el reconocedor escribe con «tú»).
+        assertEquals("Música, volumen, apps, WhatsApp y preguntas.", SmallTalk.answer("y Qué puedes hacer"))
+        // Pedido sin texto: Sara pregunta qué decir.
+        assertEquals(
+            CommandIntent.SendMessage("notas", "", group = true),
+            intentOf("puedes enviar los mensajes al grupo de notas de WhatsApp"),
+        )
+        // Pregunta sin IA configurada: no es «no te entendí», es «falta la clave».
+        val noAi = CompositeCommandInterpreter(RuleBasedCommandInterpreter(), aiAvailable = { false })
+        assertEquals(CommandIntent.Chat("cómo está el clima"), noAi.interpret("cómo está el clima").intent)
+        assertTrue(noAi.interpret("blablá").intent is CommandIntent.Unknown)
+        val result = DefaultCommandExecutor(FakeMedia(), NoVolume, assistant = FakeAi(false)).execute(CommandIntent.Chat("cómo está el clima"))
+        assertEquals(com.sara.core.model.PermissionKind.AI_KEY, result.needsPermission)
+    }
+
+    @Test
+    fun `pregunta que decir y despues manda`() = runBlocking {
+        val messenger = object : com.sara.core.execution.Messenger {
+            var sent: String? = null
+            override suspend fun prepare(contact: String, group: Boolean) =
+                com.sara.core.execution.MessagePrepareResult.Found(com.sara.core.execution.MessageContact("Notas", "buscar"))
+            override suspend fun send(contact: com.sara.core.execution.MessageContact, message: String): com.sara.core.execution.MessageSendResult {
+                sent = message
+                return com.sara.core.execution.MessageSendResult.Sent
+            }
+        }
+        val executor = DefaultCommandExecutor(FakeMedia(), NoVolume, messenger = messenger, confirmMessages = { false })
+        val first = executor.execute(CommandIntent.SendMessage("notas", "", group = true))
+        assertEquals("¿Qué le digo?", first.followUp?.question)
+        val done = first.followUp!!.onAnswer("hola")
+        assertEquals("Hola", messenger.sent)
+        assertTrue(done.success)
+    }
 }

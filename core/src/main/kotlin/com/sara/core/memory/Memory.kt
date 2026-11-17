@@ -120,11 +120,14 @@ object SmallTalk {
                 val month = now.month.getDisplayName(TextStyle.FULL, LOCALE)
                 "Hoy es $day ${now.dayOfMonth} de $month."
             }
-            has("como estas", "como andas", "como te va", "que tal", "todo bien") -> "Muy bien, ¿y vos?"
-            has("que podes hacer", "que sabes hacer", "que haces", "en que me ayudas", "que podes hacer por mi") ->
+            has("como estas", "como andas", "como te va", "que tal", "todo bien", "como te encuentras") -> "Muy bien, ¿y vos?"
+            has(
+                "que podes hacer", "que sabes hacer", "que haces", "en que me ayudas", "que podes hacer por mi",
+                "que puedes hacer", "que sabes", "que haces tu", "en que me puedes ayudar", "en que me podes ayudar", "para que servis", "para que sirves",
+            ) ->
                 "Música, volumen, apps, WhatsApp y preguntas."
             has("que te gusta", "te gusta") -> "Me encanta la música."
-            has("quien sos", "como te llamas", "cual es tu nombre") -> "Soy Sara, tu asistente."
+            has("quien sos", "quien eres", "como te llamas", "cual es tu nombre") -> "Soy Sara, tu asistente."
             has("te quiero", "sos genial", "sos la mejor") -> "¡Gracias! Yo también."
             else -> null
         }

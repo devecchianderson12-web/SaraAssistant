@@ -138,6 +138,8 @@ sealed interface AssistantEvent {
 /** Permisos o ajustes que alguna función de Sara necesita. */
 enum class PermissionKind {
     MICROPHONE, NOTIFICATIONS, NOTIFICATION_ACCESS, OVERLAY, ACCESSIBILITY, CONTACTS, BATTERY, DEFAULT_ASSISTANT,
+    /** Clave de la IA (Google o Claude) para responder preguntas. */
+    AI_KEY,
 }
 
 data class HistoryEntry(

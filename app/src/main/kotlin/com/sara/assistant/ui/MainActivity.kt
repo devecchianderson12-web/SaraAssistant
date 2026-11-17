@@ -75,9 +75,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Lleva directo a conceder [kind]: diálogo del sistema o la pantalla exacta de Ajustes. */
+    /** «Activar» de la clave de IA: abre Ajustes con el cuadro para cargarla. */
+    private val aiDialogRequested = androidx.compose.runtime.mutableStateOf(false)
+
     private fun grant(kind: com.sara.core.model.PermissionKind) {
         val runtime = com.sara.assistant.permissions.PermissionCenter.runtimePermission(kind)
-        if (runtime != null) {
+        if (kind == com.sara.core.model.PermissionKind.AI_KEY) {
+            aiDialogRequested.value = true
+        } else if (runtime != null) {
             grantLauncher.launch(runtime)
         } else {
             openSafely(*com.sara.assistant.permissions.PermissionCenter.settingsIntents(this, kind).toTypedArray())
@@ -198,6 +203,8 @@ class MainActivity : ComponentActivity() {
         val updateState by viewModel.updateState.collectAsStateWithLifecycle()
         val memories by viewModel.memories.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+        val aiRequested by aiDialogRequested
+        LaunchedEffect(aiRequested) { if (aiRequested) tab = Tab.SETTINGS }
         val snackbar = remember { SnackbarHostState() }
 
         LaunchedEffect(message) {
@@ -267,6 +274,7 @@ class MainActivity : ComponentActivity() {
                         Tab.SETTINGS -> SettingsScreen(
                             settings = settings, system = system, modelState = modelState, serviceRunning = running,
                             micActive = micActive, voices = voices, diagnostics = diagnostics, memories = memories,
+                            aiDialogRequested = aiRequested, onAiDialogShown = { aiDialogRequested.value = false },
                             actions = SettingsActions(
                                 update = { viewModel.update(it) },
                                 onWakeToggle = wakeToggle,
