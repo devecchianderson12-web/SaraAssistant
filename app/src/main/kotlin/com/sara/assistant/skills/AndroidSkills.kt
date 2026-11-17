@@ -134,33 +134,35 @@ class ReminderSkill(private val scheduler: Scheduler) : Skill {
         SkillAction("borrar", "Borra un recordatorio (o el próximo).", listOf(Param("texto", ParamType.STRING, "Cuál.", required = false)), Risk.CHANGE),
     )
 
-    override suspend fun run(action: String, args: Map<String, String>): SkillResult = when (action) {
-        "crear" -> {
-            val at = runCatching { LocalDateTime.parse(args.getValue("cuando")) }.getOrNull()
-                ?: return SkillResult.Failed("No entendí cuándo.")
-            if (!at.isAfter(LocalDateTime.now())) return SkillResult.Failed("Esa hora ya pasó.")
-            val r = scheduler.addReminder(args.getValue("texto"), at)
-            if (scheduler.reminders().any { it.id == r.id }) {
-                SkillResult.Done("Listo, te lo recuerdo ${TimeParser.describe(at, LocalDateTime.now())}." +
-                    if (scheduler.exactAlarmsAllowed()) "" else " Puede demorar unos minutos.")
-            } else {
-                SkillResult.Failed("No pude guardarlo.")
+    override suspend fun run(action: String, args: Map<String, String>): SkillResult {
+        return when (action) {
+            "crear" -> {
+                val at = runCatching { LocalDateTime.parse(args.getValue("cuando")) }.getOrNull()
+                    ?: return SkillResult.Failed("No entendí cuándo.")
+                if (!at.isAfter(LocalDateTime.now())) return SkillResult.Failed("Esa hora ya pasó.")
+                val r = scheduler.addReminder(args.getValue("texto"), at)
+                if (scheduler.reminders().any { it.id == r.id }) {
+                    SkillResult.Done("Listo, te lo recuerdo ${TimeParser.describe(at, LocalDateTime.now())}." +
+                        if (scheduler.exactAlarmsAllowed()) "" else " Puede demorar unos minutos.")
+                } else {
+                    SkillResult.Failed("No pude guardarlo.")
+                }
             }
-        }
-        "ver" -> {
-            val list = scheduler.reminders().sortedBy { it.at }
-            if (list.isEmpty()) SkillResult.Done("No tenés recordatorios.")
-            else SkillResult.Done(list.take(5).joinToString("; ", "Tenés: ", ".") { "${it.text}, ${Scheduler.describeTime(it.at)}" })
-        }
-        else -> {
-            val list = scheduler.reminders().sortedBy { it.at }
-            val query = args["texto"].orEmpty()
-            val target = if (query.isBlank()) list.firstOrNull()
-            else AppMatcher.best(query, list.map { InstalledApp(it.text, it.id.toString()) }, threshold = 0.5)?.let { m -> list.first { it.id.toString() == m.id } }
-            if (target == null) SkillResult.Failed("No encontré ese recordatorio.")
-            else {
-                scheduler.removeReminder(target.id)
-                SkillResult.Done("Borré «${target.text}».")
+            "ver" -> {
+                val list = scheduler.reminders().sortedBy { it.at }
+                if (list.isEmpty()) SkillResult.Done("No tenés recordatorios.")
+                else SkillResult.Done(list.take(5).joinToString("; ", "Tenés: ", ".") { "${it.text}, ${Scheduler.describeTime(it.at)}" })
+            }
+            else -> {
+                val list = scheduler.reminders().sortedBy { it.at }
+                val query = args["texto"].orEmpty()
+                val target = if (query.isBlank()) list.firstOrNull()
+                else AppMatcher.best(query, list.map { InstalledApp(it.text, it.id.toString()) }, threshold = 0.5)?.let { m -> list.first { it.id.toString() == m.id } }
+                if (target == null) SkillResult.Failed("No encontré ese recordatorio.")
+                else {
+                    scheduler.removeReminder(target.id)
+                    SkillResult.Done("Borré «${target.text}».")
+                }
             }
         }
     }
@@ -528,33 +530,35 @@ class CalendarSkill(private val context: Context, private val starter: ActivityS
         ),
     )
 
-    override suspend fun run(action: String, args: Map<String, String>): SkillResult = if (action == "ver") withContext(Dispatchers.IO) {
-        val day = if (args["dia"] == "manana") LocalDate.now().plusDays(1) else LocalDate.now()
-        val zone = ZoneId.systemDefault()
-        val begin = day.atStartOfDay(zone).toInstant().toEpochMilli()
-        val end = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val events = mutableListOf<Pair<Long, String>>()
-        CalendarContract.Instances.query(
-            context.contentResolver, arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY), begin, end,
-        )?.use { c ->
-            while (c.moveToNext()) {
-                val title = c.getString(0) ?: continue
-                val start = c.getLong(1)
-                val allDay = c.getInt(2) == 1
-                events += start to if (allDay) "$title (todo el día)" else "$title a las ${java.time.Instant.ofEpochMilli(start).atZone(zone).toLocalTime().let { "${it.hour}:${it.minute.toString().padStart(2, '0')}" }}"
+    override suspend fun run(action: String, args: Map<String, String>): SkillResult {
+        return if (action == "ver") withContext(Dispatchers.IO) {
+            val day = if (args["dia"] == "manana") LocalDate.now().plusDays(1) else LocalDate.now()
+            val zone = ZoneId.systemDefault()
+            val begin = day.atStartOfDay(zone).toInstant().toEpochMilli()
+            val end = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val events = mutableListOf<Pair<Long, String>>()
+            CalendarContract.Instances.query(
+                context.contentResolver, arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.ALL_DAY), begin, end,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val title = c.getString(0) ?: continue
+                    val start = c.getLong(1)
+                    val allDay = c.getInt(2) == 1
+                    events += start to if (allDay) "$title (todo el día)" else "$title a las ${java.time.Instant.ofEpochMilli(start).atZone(zone).toLocalTime().let { "${it.hour}:${it.minute.toString().padStart(2, '0')}" }}"
+                }
             }
+            val label = if (args["dia"] == "manana") "Mañana" else "Hoy"
+            if (events.isEmpty()) SkillResult.Done("$label no tenés eventos.")
+            else SkillResult.Done("$label tenés ${events.size}: " + events.sortedBy { it.first }.take(6).joinToString("; ") { it.second } + ".")
+        } else {
+            val at = runCatching { LocalDateTime.parse(args.getValue("cuando")) }.getOrNull() ?: return SkillResult.Failed("No entendí cuándo.")
+            val start = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            val intent = Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
+                .putExtra(CalendarContract.Events.TITLE, args.getValue("titulo"))
+                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, start)
+                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, start + 3_600_000)
+            open(starter, intent, "el calendario", "Te abrí el calendario con «${args.getValue("titulo")}» ${TimeParser.describe(at, LocalDateTime.now())}: tocá guardar.", "Tocá la notificación para guardar el evento.")
         }
-        val label = if (args["dia"] == "manana") "Mañana" else "Hoy"
-        if (events.isEmpty()) SkillResult.Done("$label no tenés eventos.")
-        else SkillResult.Done("$label tenés ${events.size}: " + events.sortedBy { it.first }.take(6).joinToString("; ") { it.second } + ".")
-    } else {
-        val at = runCatching { LocalDateTime.parse(args.getValue("cuando")) }.getOrNull() ?: return SkillResult.Failed("No entendí cuándo.")
-        val start = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val intent = Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
-            .putExtra(CalendarContract.Events.TITLE, args.getValue("titulo"))
-            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, start)
-            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, start + 3_600_000)
-        open(starter, intent, "el calendario", "Te abrí el calendario con «${args.getValue("titulo")}» ${TimeParser.describe(at, LocalDateTime.now())}: tocá guardar.", "Tocá la notificación para guardar el evento.")
     }
 }
 
@@ -571,20 +575,22 @@ class MapsSkill(private val starter: ActivityStarter, private val location: Loca
         SkillAction("ubicacion", "Dice dónde estás.", permissions = setOf(PermissionKind.LOCATION)),
     )
 
-    override suspend fun run(action: String, args: Map<String, String>): SkillResult = when (action) {
-        "navegar" -> {
-            val dest = args.getValue("destino")
-            open(starter, Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(dest))), "el mapa", "Vamos a $dest.", "Tocá la notificación para ir a $dest.")
-                .let { if (it is SkillResult.Failed) open(starter, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(dest))), "el mapa", "Te abrí $dest en el mapa.", "Tocá la notificación para ver $dest.") else it }
-        }
-        "cerca" -> {
-            val what = args.getValue("lugar")
-            open(starter, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(what))), "el mapa", "Te muestro $what cerca.", "Tocá la notificación para ver $what cerca.")
-        }
-        else -> {
-            val loc = location.current() ?: return SkillResult.Failed("No pude obtener tu ubicación. Revisá que esté activada.")
-            val name = location.placeName(loc)
-            if (name != null) SkillResult.Done("Estás en $name.") else SkillResult.Done("Estás en ${"%.4f".format(loc.latitude)}, ${"%.4f".format(loc.longitude)}.")
+    override suspend fun run(action: String, args: Map<String, String>): SkillResult {
+        return when (action) {
+            "navegar" -> {
+                val dest = args.getValue("destino")
+                open(starter, Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(dest))), "el mapa", "Vamos a $dest.", "Tocá la notificación para ir a $dest.")
+                    .let { if (it is SkillResult.Failed) open(starter, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(dest))), "el mapa", "Te abrí $dest en el mapa.", "Tocá la notificación para ver $dest.") else it }
+            }
+            "cerca" -> {
+                val what = args.getValue("lugar")
+                open(starter, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(what))), "el mapa", "Te muestro $what cerca.", "Tocá la notificación para ver $what cerca.")
+            }
+            else -> {
+                val loc = location.current() ?: return SkillResult.Failed("No pude obtener tu ubicación. Revisá que esté activada.")
+                val name = location.placeName(loc)
+                if (name != null) SkillResult.Done("Estás en $name.") else SkillResult.Done("Estás en ${"%.4f".format(loc.latitude)}, ${"%.4f".format(loc.longitude)}.")
+            }
         }
     }
 }
