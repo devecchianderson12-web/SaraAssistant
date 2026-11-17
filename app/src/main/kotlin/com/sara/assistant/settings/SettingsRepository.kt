@@ -64,6 +64,15 @@ data class SaraSettings(
     val listenOnlyWithScreenOn: Boolean = false,
     /** Mostrar la esfera a pantalla completa al llamarla fuera de la app (también bloqueado). */
     val sphereOverlay: Boolean = true,
+    // Micrófono y Bluetooth (auto, auriculares)
+    /** Micrófono para las órdenes con un Bluetooth conectado. */
+    val micChoice: com.sara.assistant.audio.MicChoice = com.sara.assistant.audio.MicChoice.AUTO,
+    /** Amplificar la voz baja al reconocer la orden. */
+    val voiceBoost: Boolean = true,
+    /** Música mientras Sara escucha: bajarla, o pausarla (con Bluetooth o siempre). */
+    val musicWhileListening: com.sara.assistant.audio.MusicWhileListening = com.sara.assistant.audio.MusicWhileListening.PAUSE_BLUETOOTH,
+    /** Con Bluetooth conectado, entender las órdenes con Google aunque el modo sea Offline. */
+    val onlineInCar: Boolean = false,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -116,6 +125,10 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val heySara = booleanPreferencesKey("hey_sara_v2")
         val listenOnlyWithScreenOn = booleanPreferencesKey("listen_only_screen_on_v2")
         val sphereOverlay = booleanPreferencesKey("sphere_overlay")
+        val micChoice = stringPreferencesKey("mic_choice")
+        val voiceBoost = booleanPreferencesKey("voice_boost")
+        val musicWhileListening = stringPreferencesKey("music_while_listening")
+        val onlineInCar = booleanPreferencesKey("online_in_car")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -151,6 +164,10 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             heySara = this[Keys.heySara] ?: d.heySara,
             listenOnlyWithScreenOn = this[Keys.listenOnlyWithScreenOn] ?: d.listenOnlyWithScreenOn,
             sphereOverlay = this[Keys.sphereOverlay] ?: d.sphereOverlay,
+            micChoice = this[Keys.micChoice].toEnum(d.micChoice),
+            voiceBoost = this[Keys.voiceBoost] ?: d.voiceBoost,
+            musicWhileListening = this[Keys.musicWhileListening].toEnum(d.musicWhileListening),
+            onlineInCar = this[Keys.onlineInCar] ?: d.onlineInCar,
         )
     }
 
@@ -182,5 +199,9 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.heySara] = s.heySara
         this[Keys.listenOnlyWithScreenOn] = s.listenOnlyWithScreenOn
         this[Keys.sphereOverlay] = s.sphereOverlay
+        this[Keys.micChoice] = s.micChoice.name
+        this[Keys.voiceBoost] = s.voiceBoost
+        this[Keys.musicWhileListening] = s.musicWhileListening.name
+        this[Keys.onlineInCar] = s.onlineInCar
     }
 }

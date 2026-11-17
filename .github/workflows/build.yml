@@ -113,10 +113,13 @@ jobs:
             sleep 3
             adb shell input tap 900 2300 || true
             sleep 3
+            adb exec-out screencap -p > ajustes1.png || true
             adb shell input swipe 540 1800 540 300 300 || true
             sleep 2
+            adb exec-out screencap -p > ajustes2.png || true
             adb shell input swipe 540 1800 540 300 300 || true
             sleep 3
+            adb exec-out screencap -p > ajustes3.png || true
             # Esfera sobre otra pantalla: se va al inicio y se llama a Sara.
             adb shell appops set com.sara.assistant SYSTEM_ALERT_WINDOW allow || true
             adb shell input keyevent KEYCODE_HOME
@@ -133,9 +136,9 @@ jobs:
       - name: Publicar captura (manual)
         if: github.event_name == 'workflow_dispatch' && hashFiles('esfera.png') != ''
         run: |
-          mkdir capturas && cp esfera.png capturas/ && cd capturas
+          mkdir capturas && cp esfera.png capturas/ && cp ajustes*.png capturas/ 2>/dev/null; cd capturas
           git init -q && git checkout -q -b capturas
-          git -c user.name=ci -c user.email=ci@example.invalid add esfera.png
+          git -c user.name=ci -c user.email=ci@example.invalid add .
           git -c user.name=ci -c user.email=ci@example.invalid commit -qm "Captura de la esfera ${{ github.sha }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" capturas
       - name: Guardar logcat
@@ -146,6 +149,7 @@ jobs:
           path: |
             logcat.txt
             esfera.png
+            ajustes*.png
           if-no-files-found: ignore
 
   windows:

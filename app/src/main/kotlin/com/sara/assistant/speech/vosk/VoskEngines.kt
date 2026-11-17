@@ -178,6 +178,8 @@ class VoskWakeWordEngine(
 class VoskSpeechRecognitionEngine(
     private val models: VoskModelManager,
     private val microphone: MicrophoneSource,
+    /** Ajuste «Subir el volumen de tu voz»: amplifica la voz baja (micrófonos malos o lejanos). */
+    private val boostVoice: () -> Boolean = { false },
 ) : SpeechRecognitionEngine {
     override val id = "vosk-offline"
     override val displayName = "Vosk (offline)"
@@ -206,10 +208,17 @@ class VoskSpeechRecognitionEngine(
         var heardSpeech = false
         var lastPartial = ""
         var lastChange = start
+        val boost = boostVoice()
+        // Pico de la orden hasta ahora (la ganancia no sube y baja a cada rato); arranca en un nivel medio.
+        var peak = 2_500
         try {
             val outcome = microphone.capture { buffer, length ->
                 val elapsed = System.currentTimeMillis() - start
-                if (recognizer.acceptWaveForm(buffer, length)) {
+                val chunk = if (boost) {
+                    peak = maxOf(peak, WakeWordTuning.peakOf(buffer, length))
+                    WakeWordTuning.applyGain(buffer, length, WakeWordTuning.gainFor(peak, maxGain = 4f))
+                } else buffer
+                if (recognizer.acceptWaveForm(chunk, if (boost) chunk.size else length)) {
                     val t = JSONObject(recognizer.result).optString("text").trim()
                     if (t.isNotEmpty()) {
                         text = t

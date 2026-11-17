@@ -51,6 +51,10 @@ data class SystemStatus(
     val aiConfigured: Boolean = false,
     val googleKey: Boolean = false,
     val claudeKey: Boolean = false,
+    /** Micrófono de las órdenes ahora y cómo escucha cada uno. */
+    val micCurrent: String = "",
+    val micQuality: String = "",
+    val bluetoothMic: Boolean = false,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -175,6 +179,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun checkUpdates() = viewModelScope.launch { c.updates.check(force = true) }
+
+    private val _micCompare = MutableStateFlow<String?>(null)
+    /** Resultado de «Comparar micrófonos» (null = no se está mostrando). */
+    val micCompare: StateFlow<String?> = _micCompare.asStateFlow()
+
+    fun compareMicrophones() = viewModelScope.launch {
+        _micCompare.value = "Hablá sin parar unos 6 segundos (por ejemplo, contá del 1 al 20)…"
+        _micCompare.value = runCatching { c.compareMicrophones() }.getOrElse { "No pude comparar: ${it.message}" }
+        refreshSystem()
+    }
+
+    fun dismissMicCompare() { _micCompare.value = null }
     fun dismissUpdate() = c.updates.dismiss()
     fun installUpdate(release: com.sara.assistant.update.ReleaseInfo) = viewModelScope.launch { c.updates.downloadAndInstall(release) }
 
@@ -292,6 +308,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             googleKey = c.secrets.has(SecretStore.GEMINI_KEY),
             claudeKey = c.secrets.has(SecretStore.ANTHROPIC_KEY),
             musicApp = runCatching { c.mediaControl.preferredMusicApp()?.label }.getOrNull(),
+            micCurrent = c.micRouter.currentLabel(),
+            micQuality = c.micRouter.describeQuality(),
+            bluetoothMic = c.micRouter.bluetoothMic() != null,
         )
     }
 }

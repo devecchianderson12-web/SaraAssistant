@@ -253,6 +253,7 @@ class MainActivity : ComponentActivity() {
         val memories by viewModel.memories.collectAsStateWithLifecycle()
         val routines by viewModel.routines.collectAsStateWithLifecycle()
         val reminders by viewModel.reminders.collectAsStateWithLifecycle()
+        val micCompare by viewModel.micCompare.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         val aiRequested by aiDialogRequested
         LaunchedEffect(aiRequested) { if (aiRequested) tab = Tab.SETTINGS }
@@ -362,8 +363,12 @@ class MainActivity : ComponentActivity() {
                                     openSafely(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)))
                                 },
                                 openAccessibilitySettings = { openSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                                compareMicrophones = { withMicPermission { viewModel.compareMicrophones() } },
+                                dismissMicCompare = viewModel::dismissMicCompare,
+                                installUpdate = { viewModel.installUpdate(it) },
                             ),
                             updateState = updateState,
+                            micCompare = micCompare,
                         )
                     }
                 }

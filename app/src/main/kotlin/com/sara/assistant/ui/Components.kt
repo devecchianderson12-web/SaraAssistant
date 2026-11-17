@@ -18,6 +18,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -210,20 +216,60 @@ private const val PARTICLES = 70
 private const val BARS = 64
 private fun frac(x: Float) = x - floor(x)
 
+/**
+ * Bloque de ajustes: una «burbuja» con su título, una línea que explica qué hay adentro y una barra
+ * de color a la izquierda, para saber siempre en qué apartado estás leyendo.
+ */
 @Composable
-fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun SectionCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    accent: Color = SaraColors.Violet,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(SaraColors.Surface)
-            .border(1.dp, SaraColors.Outline.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .drawBehind { drawRect(Brush.verticalGradient(listOf(accent, accent.copy(alpha = 0.3f))), size = Size(5.dp.toPx(), size.height)) }
+            .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
+            .padding(start = 21.dp, end = 18.dp, top = 16.dp, bottom = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, color = SaraColors.Violet)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, color = SaraColors.Text)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = accent.copy(alpha = 0.9f)) }
+        }
+        HorizontalDivider(color = SaraColors.Outline)
         content()
     }
+}
+
+/** Subtítulo dentro de una burbuja, para separar grupos de opciones. */
+@Composable
+fun SubHeader(text: String) {
+    Text(text.uppercase(), style = MaterialTheme.typography.labelMedium, color = SaraColors.Cyan, modifier = Modifier.padding(top = 4.dp))
+}
+
+/** Botón de verdad (con fondo y borde), no un texto suelto. */
+@Composable
+fun ActionButton(text: String, modifier: Modifier = Modifier, color: Color = SaraColors.Cyan, enabled: Boolean = true, onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.55f)),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = color.copy(alpha = 0.16f),
+            contentColor = color,
+            disabledContainerColor = SaraColors.SurfaceHigh,
+            disabledContentColor = SaraColors.Muted,
+        ),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+    ) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 
 @Composable
@@ -297,7 +343,10 @@ fun StatusLine(title: String, detail: String, ok: Boolean, action: String? = nul
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(detail, style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
         }
-        if (action != null && onAction != null) TextButton(onClick = onAction) { Text(action, color = SaraColors.Cyan) }
+        if (action != null && onAction != null) {
+            Spacer(Modifier.width(8.dp))
+            ActionButton(action, onClick = onAction)
+        }
     }
 }
 

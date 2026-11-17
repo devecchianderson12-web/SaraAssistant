@@ -36,6 +36,8 @@ class MicrophoneSource(
     private val levels: AudioLevelMeter,
     /** Ajuste del usuario: usar cancelación de eco cuando hay música sonando. */
     private val echoCancellationEnabled: () -> Boolean = { true },
+    /** Micrófono a usar (del teléfono o del Bluetooth); null = el que elija Android. */
+    private val preferredDevice: suspend () -> android.media.AudioDeviceInfo? = { null },
 ) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
 
@@ -86,6 +88,7 @@ class MicrophoneSource(
             record.release()
             return@withContext CaptureOutcome.Failed(EngineError(EngineErrorType.AUDIO_INPUT, "No se pudo abrir el micrófono."))
         }
+        preferredDevice()?.let { runCatching { record.setPreferredDevice(it) } }
         val effects = if (echoCancellation) attachEchoEffects(record.audioSessionId) else emptyList()
         var allSilent = true
         var silentChunks = 0

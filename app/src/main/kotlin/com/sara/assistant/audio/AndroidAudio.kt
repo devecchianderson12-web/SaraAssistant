@@ -29,8 +29,14 @@ class AudioFocusHelper(context: Context) {
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
-    fun requestSpeech(): AudioFocusRequest {
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+    /**
+     * [pauseMusic] = la música se pausa (y sigue sola al terminar) en lugar de bajar: en el auto,
+     * con el volumen alto, bajarla no alcanza para que se te escuche.
+     */
+    fun requestSpeech(pauseMusic: Boolean = false): AudioFocusRequest {
+        val request = AudioFocusRequest.Builder(
+            if (pauseMusic) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+        )
             .setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener { }
             .build()
@@ -101,6 +107,9 @@ class AndroidActivationFeedback(
     private val chime: ChimePlayer,
     private val focus: AudioFocusHelper,
     private val logger: SaraLogger,
+    private val router: MicRouter? = null,
+    /** Ajuste «Música mientras te escucho». */
+    private val musicMode: () -> MusicWhileListening = { MusicWhileListening.DUCK },
 ) : ActivationFeedback {
     @Volatile private var request: AudioFocusRequest? = null
 
@@ -109,10 +118,17 @@ class AndroidActivationFeedback(
     }
 
     override fun interactionStarted() {
-        if (request == null) request = focus.requestSpeech()
+        val pause = when (musicMode()) {
+            MusicWhileListening.DUCK -> false
+            MusicWhileListening.PAUSE -> true
+            MusicWhileListening.PAUSE_BLUETOOTH -> router?.bluetoothAudioConnected() == true
+        }
+        if (request == null) request = focus.requestSpeech(pause)
+        router?.beginInteraction()
     }
 
     override fun interactionEnded() {
+        router?.endInteraction()
         focus.abandon(request)
         request = null
     }

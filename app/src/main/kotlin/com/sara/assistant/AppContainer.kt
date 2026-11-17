@@ -64,7 +64,9 @@ class AppContainer(private val app: Application) {
     val settings = SettingsRepository(app, scope)
     val secrets = SecretStore(app)
     val connectivity = ConnectivityMonitor(app)
-    val microphone = MicrophoneSource(app, levels) { settings.settings.value.echoCancellation }
+    /** Micrófono de las órdenes con Bluetooth conectado (auto, auriculares). */
+    val micRouter = com.sara.assistant.audio.MicRouter(app, { settings.settings.value.micChoice }, logger)
+    val microphone = MicrophoneSource(app, levels, { settings.settings.value.echoCancellation }) { micRouter.captureDevice() }
     private val phraseCache = com.sara.assistant.voice.PhraseCache(app)
     val voskModels = VoskModelManager(app, logger)
     val porcupineFiles = PorcupineFiles(app)
@@ -147,7 +149,7 @@ class AppContainer(private val app: Application) {
     // Motores (instancias reutilizables; la selección depende de los ajustes vigentes).
     val voskWake = VoskWakeWordEngine(voskModels, microphone, logger)
     private val porcupineWake = PorcupineWakeWordEngine(app, secrets, porcupineFiles, microphone)
-    val voskRecognizer = VoskSpeechRecognitionEngine(voskModels, microphone)
+    val voskRecognizer = VoskSpeechRecognitionEngine(voskModels, microphone) { settings.settings.value.voiceBoost }
     private val onDeviceRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = true, levels)
     private val systemRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = false, levels)
     private val azureRecognizer = AzureSpeechRecognitionEngine(azure, microphone)
@@ -190,7 +192,7 @@ class AppContainer(private val app: Application) {
         executor = executor,
         connectivity = connectivity,
         configProvider = { settings.current().toAssistantConfig() },
-        feedback = AndroidActivationFeedback(ChimePlayer(), focus, logger),
+        feedback = AndroidActivationFeedback(ChimePlayer(), focus, logger, micRouter) { settings.settings.value.musicWhileListening },
         history = history,
         logger = logger,
     )
@@ -202,6 +204,23 @@ class AppContainer(private val app: Application) {
         scope.launch { runCatching { scheduler.rescheduleAll() } }
         // Si una orden necesita un permiso y Sara está en segundo plano, deja una notificación con
         // el botón que lleva directo a activarlo (en primer plano lo muestra la pantalla de inicio).
+        // Calidad de cada micrófono: cuánto se destaca la voz en cada orden (para el modo Automático).
+        scope.launch {
+            val samples = ArrayList<Float>()
+            var listening = false
+            var bluetooth = false
+            launch { levels.level.collect { if (listening) synchronized(samples) { samples += it } } }
+            orchestrator.state.collect { state ->
+                val now = state is com.sara.core.model.AssistantState.Listening
+                if (now && !listening) {
+                    synchronized(samples) { samples.clear() }
+                    bluetooth = micRouter.bluetoothActive
+                } else if (!now && listening && micRouter.bluetoothMic() != null) {
+                    micRouter.contrastOf(synchronized(samples) { samples.toList() })?.let { micRouter.record(bluetooth, it) }
+                }
+                listening = now
+            }
+        }
         scope.launch {
             orchestrator.events.collect { event ->
                 if (event is com.sara.core.model.AssistantEvent.PermissionNeeded && !isAppInForeground()) {
@@ -220,7 +239,8 @@ class AppContainer(private val app: Application) {
     fun SaraSettings.toAssistantConfig() = AssistantConfig(
         wakeWordSensitivity = sensitivity,
         acknowledgement = acknowledgement,
-        recognitionMode = recognitionMode,
+        // En el auto (Bluetooth conectado) se puede pedir Google aunque el modo sea Offline.
+        recognitionMode = if (onlineInCar && recognitionMode == com.sara.core.engine.EngineMode.OFFLINE && micRouter.bluetoothAudioConnected()) com.sara.core.engine.EngineMode.AUTOMATIC else recognitionMode,
         allowRecognitionFallback = allowRecognitionFallback,
         voiceMode = voiceMode,
         languageTag = language,
@@ -230,6 +250,35 @@ class AppContainer(private val app: Application) {
         onlineVoice = VoiceParams(onlineVoiceId, speechRate, voiceVolume, language),
         offlineVoice = VoiceParams(offlineVoiceId, speechRate, voiceVolume, language),
     )
+
+    /**
+     * «Comparar micrófonos»: graba 3 s con el del teléfono y 3 s con el del Bluetooth mientras
+     * hablás, mide en cuál se destaca más tu voz y lo anota para el modo Automático.
+     */
+    suspend fun compareMicrophones(): String = orchestrator.withMicrophoneReleased {
+        if (micRouter.bluetoothMic() == null) return@withMicrophoneReleased "No hay un Bluetooth con micrófono conectado."
+        suspend fun measure(): Float? {
+            val values = ArrayList<Float>()
+            val start = System.currentTimeMillis()
+            microphone.capture(echoCancellation = false) { buf, len ->
+                values += com.sara.core.util.AudioLevelMeter.levelOfPcm16(buf, len)
+                System.currentTimeMillis() - start < 3_000
+            }
+            return micRouter.contrastOf(values)
+        }
+        val phone = measure()
+        micRouter.beginInteraction(force = true)
+        val bt = try { if (micRouter.bluetoothActive) measure() else null } finally { micRouter.endInteraction() }
+        phone?.let { micRouter.record(false, it) }
+        bt?.let { micRouter.record(true, it) }
+        fun pct(v: Float?) = v?.let { "${(it * 100).toInt()}/100" } ?: "no se pudo medir"
+        val better = when {
+            phone == null || bt == null -> null
+            bt > phone + 0.03f -> "el del Bluetooth"
+            else -> "el del teléfono"
+        }
+        "Teléfono: ${pct(phone)} · Bluetooth: ${pct(bt)}." + (better?.let { " Te escucha mejor $it; en Automático uso ese." } ?: "")
+    }
 
     fun isAppInForeground(): Boolean =
         ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
