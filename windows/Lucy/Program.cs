@@ -52,6 +52,18 @@ public static class Program
             }
         }
         else failures.Add("modelo");
+        // ¿Qué formas de «Lucy» conoce el modelo? (las demás se ignoran en la gramática)
+        try
+        {
+            var words = Directory.GetFiles(ModelStore.Folder, "words.txt", SearchOption.AllDirectories).FirstOrDefault();
+            if (words != null)
+            {
+                var vocab = File.ReadLines(words).Select(l => l.Split(' ')[0]).ToHashSet();
+                log.AppendLine("Vocabulario: " + string.Join(", ", Interpreter.WakeAliases.Concat(new[] { "luz", "si", "lucía" }).Select(w => w + (vocab.Contains(w) ? " sí" : " no"))));
+            }
+            else log.AppendLine("Vocabulario: sin words.txt (" + string.Join(", ", Directory.GetFiles(ModelStore.Folder, "*", SearchOption.AllDirectories).Select(Path.GetFileName)) + ")");
+        }
+        catch (Exception e) { log.AppendLine("Vocabulario: " + e.Message); }
         try { log.AppendLine("Voz: " + new Speaker().VoiceName); } catch (Exception e) { log.AppendLine("Voz: " + e.Message); }
         try { log.AppendLine("Volumen: " + new Media().VolumePercent + " %"); } catch (Exception e) { log.AppendLine("Volumen: sin dispositivo (" + e.GetType().Name + ")"); }
         File.WriteAllText("selftest.txt", log + (failures.Count == 0 ? "RESULTADO: OK" : "RESULTADO: FALLÓ " + string.Join("; ", failures)));
