@@ -58,7 +58,7 @@ public static class Program
             try
             {
                 using var model = new Vosk.Model(ModelStore.Folder);
-                foreach (var phrase in new[] { "Lucy", "Lucy, pone musica", "hola Lucy", "pone musica de Soda Stereo" })
+                foreach (var phrase in new[] { "Lucy", "Lucy, pone musica", "hola Lucy", "pone musica de Soda Stereo", "luces del cuarto", "lunes que viene" })
                 {
                     var wav = Path.Combine(Path.GetTempPath(), "lucy-test.wav");
                     using (var synth = new System.Speech.Synthesis.SpeechSynthesizer())
@@ -67,14 +67,11 @@ public static class Program
                         synth.Speak(phrase);
                     }
                     var pcm = File.ReadAllBytes(wav).Skip(44).ToArray();
-                    using var free = new Vosk.VoskRecognizer(model, 16000);
-                    free.AcceptWaveform(pcm, pcm.Length);
-                    var grammar = System.Text.Json.JsonSerializer.Serialize(Interpreter.WakeAliases.Concat(new[] { "luz si", "[unk]" }).ToArray());
-                    using var gr = new Vosk.VoskRecognizer(model, 16000, grammar);
+                    using var gr = new Vosk.VoskRecognizer(model, 16000, "[\"luci\", \"[unk]\"]");
                     gr.AcceptWaveform(pcm, pcm.Length);
-                    var f = free.FinalResult().Replace("\n", " ");
-                    var g = gr.FinalResult().Replace("\n", " ");
-                    log.AppendLine($"Oído «{phrase}»: libre={f} | gramática={g} | activa={Interpreter.ContainsWakeWord(System.Text.Json.JsonDocument.Parse(f).RootElement.GetProperty("text").GetString() ?? "")}");
+                    var stage1 = Listener.TextOf(gr.FinalResult(), "text");
+                    var verified = Listener.VerifyAudio(model, pcm);
+                    log.AppendLine($"Oído «{phrase}»: etapa 1={stage1} | verificación={verified}");
                 }
             }
             catch (Exception e) { log.AppendLine("Oído: " + e.Message); }

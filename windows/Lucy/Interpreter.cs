@@ -155,7 +155,18 @@ public static class Interpreter
     // ------------------------------------------------------------------ Palabra de activación
 
     /// <summary>Cómo puede transcribir el modelo «Lucy».</summary>
-    public static readonly HashSet<string> WakeAliases = new() { "lucy", "luci", "lucia", "lusi", "lucie", "luchi", "lucio" };
+    public static readonly HashSet<string> WakeAliases = new() { "lucy", "luci", "lusi", "lucie", "luchi" };
+
+    /**
+     * Palabras parecidas o comunes que compiten con «luci» en la verificación: si dijiste otra cosa,
+     * el modelo elige una de estas en vez de «luci» (así no se activa con cualquier palabra).
+     */
+    public static readonly string[] Competitors =
+    {
+        "luci", "lucio", "lucía", "luz", "luces", "lucha", "lunes", "lucas", "luis", "luisa", "lupe", "susi", "rosi",
+        "dulce", "usted", "juicio", "lo", "hice", "dice", "si", "que", "de", "pone", "música", "musica", "este", "eso",
+        "cuando", "bueno", "vamos", "todo", "algo", "pasa", "casa", "sí", "no", "hola", "oye", "luego", "lugar", "[unk]",
+    };
 
     public static bool ContainsWakeWord(string transcript)
     {

@@ -115,8 +115,7 @@ public sealed class Listener : IDisposable
 
     private VoskRecognizer NewWakeRecognizer()
     {
-        var aliases = Interpreter.WakeAliases.Concat(new[] { "luz si", "[unk]" });
-        var grammar = JsonSerializer.Serialize(aliases.ToArray());
+        var grammar = JsonSerializer.Serialize(new[] { "luci", "[unk]" });
         var r = new VoskRecognizer(model, SampleRate, grammar);
         r.SetWords(true);
         return r;
@@ -188,16 +187,20 @@ public sealed class Listener : IDisposable
         WakeDetected?.Invoke();
     }
 
-    /// <summary>Segunda etapa: los últimos 2,4 s con vocabulario libre tienen que contener «Lucy».</summary>
+    /// <summary>Segunda etapa sobre los últimos 2,4 s.</summary>
     private bool Verify()
     {
-        var audio = window.SelectMany(b => b).ToArray();
-        using var free = new VoskRecognizer(model, SampleRate);
-        free.AcceptWaveform(audio, audio.Length);
-        var text = TextOf(free.FinalResult(), "text");
-        if (Interpreter.ContainsWakeWord(text)) return true;
         // Muy sensible: alcanza con la primera etapa.
-        return Sensitivity() >= 0.85;
+        if (Sensitivity() >= 0.85) return true;
+        return VerifyAudio(model, window.SelectMany(b => b).ToArray());
+    }
+
+    /// <summary>«Luci» tiene que ganarle a palabras parecidas y comunes (el modelo chico no la escribe en texto libre).</summary>
+    public static bool VerifyAudio(Model model, byte[] audio)
+    {
+        using var rec = new VoskRecognizer(model, SampleRate, JsonSerializer.Serialize(Interpreter.Competitors));
+        rec.AcceptWaveform(audio, audio.Length);
+        return TextOf(rec.FinalResult(), "text").Split(' ').Contains("luci");
     }
 
     private void FeedCommand(byte[] buffer)
@@ -234,7 +237,7 @@ public sealed class Listener : IDisposable
         ThreadPool.QueueUserWorkItem(_ => CommandHeard?.Invoke(heard));
     }
 
-    private static string TextOf(string json, string field)
+    internal static string TextOf(string json, string field)
     {
         try
         {
