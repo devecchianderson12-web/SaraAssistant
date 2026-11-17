@@ -75,6 +75,8 @@ jobs:
     name: Arranque en emulador
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 30
     steps:
       - name: Descargar APK
@@ -122,11 +124,19 @@ jobs:
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué hora es'" || true
             sleep 0.6
             adb exec-out screencap -p > esfera.png || true
-            echo "ESFERA_B64:$(base64 -w0 esfera.png)" || true
             sleep 6
             adb logcat -d > logcat.txt
             if grep -q "FATAL EXCEPTION" logcat.txt; then grep -A30 "FATAL EXCEPTION" logcat.txt | head -60; exit 1; fi
             adb shell pidof com.sara.assistant
+      # En ejecuciones manuales, la captura de la esfera se guarda en la rama «capturas» para revisarla.
+      - name: Publicar captura (manual)
+        if: github.event_name == 'workflow_dispatch' && hashFiles('esfera.png') != ''
+        run: |
+          mkdir capturas && cp esfera.png capturas/ && cd capturas
+          git init -q && git checkout -q -b capturas
+          git -c user.name=ci -c user.email=ci@example.invalid add esfera.png
+          git -c user.name=ci -c user.email=ci@example.invalid commit -qm "Captura de la esfera ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" capturas
       - name: Guardar logcat
         if: always()
         uses: actions/upload-artifact@v4
