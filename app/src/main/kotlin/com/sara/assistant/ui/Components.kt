@@ -261,7 +261,7 @@ fun ActionButton(text: String, modifier: Modifier = Modifier, color: Color = Sar
         enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.55f)),
+        border = BorderStroke(1.dp, (if (enabled) color else SaraColors.Muted).copy(alpha = 0.55f)),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = color.copy(alpha = 0.16f),
             contentColor = color,
