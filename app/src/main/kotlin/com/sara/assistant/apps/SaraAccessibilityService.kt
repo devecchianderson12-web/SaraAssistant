@@ -101,37 +101,52 @@ class SaraAccessibilityService : AccessibilityService() {
      */
     private suspend fun sendBySearch(pkg: String, chat: String, message: String): ChatSendResult = withContext(Dispatchers.Main) {
         // 1. Abrir la búsqueda (si WhatsApp quedó dentro de un chat, se vuelve atrás).
-        var field: AccessibilityNodeInfo? = null
+        var typed = false
+        var clickedSearch = false
         for (attempt in 0 until 16) {
-            delay(if (attempt == 0) 1_000 else 350)
+            delay(if (attempt == 0) 1_000 else 400)
             val nodes = pkgNodes(pkg)
             if (nodes.isEmpty()) continue
-            field = nodes.firstOrNull { it.isEditable && it.viewIdResourceName != "$pkg:id/entry" && it.isSearchLike() }
-            if (field != null) break
-            val button = nodes.firstOrNull { it.viewIdResourceName in setOf("$pkg:id/menuitem_search", "$pkg:id/my_search_bar", "$pkg:id/search_bar") }
-                ?: nodes.firstOrNull { n -> !n.isEditable && n.labels().any { SEARCH_LABEL.containsMatchIn(it) } }
-            when {
-                button != null -> button.click()
-                attempt % 3 == 2 -> performGlobalAction(GLOBAL_ACTION_BACK)
+            // Dentro de un chat (hay caja para escribir): volver a la lista.
+            if (nodes.any { it.viewIdResourceName == "$pkg:id/entry" }) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                continue
+            }
+            // Después de tocar la búsqueda, el único campo de texto es el de buscar.
+            val field = if (clickedSearch) nodes.firstOrNull { it.isEditable } else null
+            if (field != null && field.type(chat)) {
+                typed = true
+                break
+            }
+            // Barra «Preguntar a Meta AI o buscar» o la lupa.
+            val button = nodes.firstOrNull { it.viewIdResourceName in SEARCH_IDS.map { id -> "$pkg:id/$id" } }
+                ?: nodes.firstOrNull { it.isSearchLike() }
+            if (button != null) {
+                // Si la barra ya es un campo de texto, alcanza con enfocarla.
+                clickedSearch = button.click() || button.performAction(AccessibilityNodeInfo.ACTION_FOCUS) || clickedSearch
             }
         }
-        val search = field ?: return@withContext ChatSendResult.Failed("No encontré la búsqueda de WhatsApp").also { log(it.message) }
-        search.type(chat)
+        if (!typed) {
+            log("No encontré la búsqueda de WhatsApp. En pantalla: ${pkgNodes(pkg).flatMap { it.labels() + listOfNotNull(it.viewIdResourceName) }.distinct().take(40)}")
+            return@withContext ChatSendResult.Failed("No encontré la búsqueda de WhatsApp")
+        }
 
         // 2. Elegir el chat que mejor coincide con el nombre.
         var opened = false
         for (attempt in 0 until 8) {
             delay(500)
-            val rows = pkgNodes(pkg).filter { n ->
-                !n.isEditable && n.text != null &&
-                    (n.viewIdResourceName?.contains("contact_name") == true || n.viewIdResourceName?.contains("conversations_row") == true)
-            }
+            val texts = pkgNodes(pkg).filter { !it.isEditable && !it.text.isNullOrBlank() }
+            // Primero las filas de chats; si WhatsApp cambió los nombres internos, cualquier texto visible.
+            val rows = texts.filter { n ->
+                n.viewIdResourceName?.let { id -> "contact_name" in id || "conversations_row" in id || "contact_row" in id } == true
+            }.ifEmpty { texts.filterNot { it.isSearchLike() } }
             val candidates = rows.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) }
             val best = com.sara.core.apps.AppMatcher.best(chat, candidates) ?: continue
             opened = rows[best.id.toInt()].click()
             if (opened) break
         }
         if (!opened) {
+            log("No apareció «$chat». Resultados: ${pkgNodes(pkg).mapNotNull { it.text?.toString() }.distinct().take(30)}")
             performGlobalAction(GLOBAL_ACTION_BACK)
             return@withContext ChatSendResult.ChatNotFound
         }
@@ -174,7 +189,8 @@ class SaraAccessibilityService : AccessibilityService() {
         .flatMap { n -> n.labels() + listOfNotNull(n.viewIdResourceName) }.distinct()
 
     private fun AccessibilityNodeInfo.labels(): List<String> =
-        listOfNotNull(text?.toString(), contentDescription?.toString()).map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        listOfNotNull(text?.toString(), contentDescription?.toString(), hintText?.toString())
+            .map { it.trim().lowercase() }.filter { it.isNotEmpty() }
 
     private fun AccessibilityNodeInfo.descendants(): List<AccessibilityNodeInfo> {
         val out = mutableListOf<AccessibilityNodeInfo>()
@@ -237,7 +253,8 @@ class SaraAccessibilityService : AccessibilityService() {
             return instance
         }
 
-        private val SEARCH_LABEL = Regex("busc|search|pregunt[aá] a meta")
+        private val SEARCH_LABEL = Regex("busc|search|pregunt[aá]r? a meta")
+        private val SEARCH_IDS = listOf("menuitem_search", "my_search_bar", "search_bar", "search_bar_inner", "search_input", "search_src_text")
 
         suspend fun sendToChat(context: Context, pkg: String, chat: String, message: String): ChatSendResult {
             val service = awaitInstance(context) ?: return ChatSendResult.Failed("Accesibilidad detenida")

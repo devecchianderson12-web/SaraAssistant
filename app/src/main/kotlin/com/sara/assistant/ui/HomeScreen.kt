@@ -66,6 +66,8 @@ fun HomeScreen(
                 Text("SaraAssistant", style = MaterialTheme.typography.headlineMedium)
                 Text("Tu asistente de voz", style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
             }
+            // Con el reconocedor de Google el micrófono lo usa el sistema, no Sara: igual está escuchando.
+            val micActive = micActive || state is AssistantState.Listening
             Pill(
                 text = when {
                     micSilenced && micActive -> "Micrófono sin audio"
