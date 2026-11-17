@@ -71,7 +71,7 @@ class FakeVolume(var state: VolumeState, private val limitTo: Int? = null, priva
 
 class FakeMedia(private val result: MediaActionResult) : MediaControl {
     val calls = mutableListOf<Pair<MediaAction, String?>>()
-    override suspend fun perform(action: MediaAction, query: String?): MediaActionResult {
+    override suspend fun perform(action: MediaAction, query: String?, app: String?): MediaActionResult {
         calls += action to query
         return result
     }
@@ -144,7 +144,7 @@ class DefaultCommandExecutorTest {
             .execute(CommandIntent.PlayMusic())
         assertEquals("Perfecto, voy a reproducir música.", play.response)
 
-        val noApp = DefaultCommandExecutor(FakeMedia(MediaActionResult.NoMediaApp), FakeVolume(VolumeState(1, 0, 15)), responses) { false }
+        val noApp = DefaultCommandExecutor(FakeMedia(MediaActionResult.NoMediaApp), FakeVolume(VolumeState(1, 0, 15)), responses, hasMediaSessionAccess = { false })
             .execute(CommandIntent.PlayMusic())
         assertTrue(noApp.needsNotificationAccess)
     }
@@ -152,7 +152,7 @@ class DefaultCommandExecutorTest {
     @Test
     fun `excepciones del reproductor se convierten en error`() = runTest {
         val media = object : MediaControl {
-            override suspend fun perform(action: MediaAction, query: String?): MediaActionResult = throw IllegalStateException("sesión caída")
+            override suspend fun perform(action: MediaAction, query: String?, app: String?): MediaActionResult = throw IllegalStateException("sesión caída")
         }
         val result = DefaultCommandExecutor(media, FakeVolume(VolumeState(1, 0, 15)), responses).execute(CommandIntent.Pause)
         assertFalse(result.success)

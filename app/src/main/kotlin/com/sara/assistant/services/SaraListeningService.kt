@@ -108,12 +108,24 @@ class SaraListeningService : LifecycleService() {
                 c.orchestrator.activate(Trigger.NOTIFICATION)
             }
             else -> {
+                // intent == null: el sistema relanzó el servicio tras cerrarlo (START_STICKY).
+                if (intent == null && !c.settings.settings.value.wakeWordEnabled) {
+                    stopSelfSafely()
+                    return START_NOT_STICKY
+                }
                 if (!enterForeground()) return START_NOT_STICKY
                 getSystemService(NotificationManager::class.java).cancel(SaraNotifications.ID_RESUME)
                 c.orchestrator.setWakeWordEnabled(true)
             }
         }
-        return START_NOT_STICKY
+        // Si el sistema o el fabricante mata el proceso, Android vuelve a crear el servicio.
+        return START_STICKY
+    }
+
+    /** Cerrar Sara desde «Recientes» sólo cierra la ventana: la escucha sigue en este servicio. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        container.logger.d(TAG, "App quitada de recientes; la escucha sigue activa")
     }
 
     private var observing = false

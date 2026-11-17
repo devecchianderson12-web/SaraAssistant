@@ -13,6 +13,8 @@ import com.sara.core.engine.WakeWordConfig
 import com.sara.core.engine.WakeWordEngine
 import com.sara.core.engine.WakeWordResult
 import com.sara.core.util.SaraLogger
+import com.sara.core.util.AudioLevelMeter
+import com.sara.core.util.EnergyGate
 import com.sara.core.util.WakeWordGate
 import com.sara.core.util.WakeWordTuning
 import org.json.JSONObject
@@ -52,6 +54,7 @@ class VoskWakeWordEngine(
             val echoCancellation = microphone.echoCancellationWanted()
             val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), GRAMMAR).apply { setWords(true) }
             val gate = WakeWordGate(config.sensitivity)
+            val energy = EnergyGate()
             // Últimos ~2,4 s de audio, sólo en memoria.
             val window = ArrayDeque<ByteArray>()
             var detected = false
@@ -61,6 +64,16 @@ class VoskWakeWordEngine(
                 val outcome = microphone.capture(echoCancellation) { buffer, length ->
                     window.addLast(buffer.copyOf(length))
                     while (window.size > WINDOW_CHUNKS) window.removeFirst()
+                    val decision = energy.feed(AudioLevelMeter.rmsOfPcm16(buffer, length))
+                    if (!decision.process) {
+                        chunks++
+                        if (chunks % MUSIC_CHECK_CHUNKS == 0 && microphone.echoCancellationWanted() != echoCancellation) restart = true
+                        return@capture !restart
+                    }
+                    if (decision.wokeUp) {
+                        // Pre-roll: los bloques anteriores para no perder el comienzo de «Sara».
+                        window.toList().dropLast(1).takeLast(PREROLL_CHUNKS).forEach { recognizer.acceptWaveForm(it, it.size) }
+                    }
                     val candidate = if (recognizer.acceptWaveForm(buffer, length)) {
                         gate.onFinal(parseWords(recognizer.result))
                     } else {
@@ -131,6 +144,7 @@ class VoskWakeWordEngine(
         const val TAG = "VoskWake"
         const val GRAMMAR = "[\"sara\", \"[unk]\"]"
         const val WINDOW_CHUNKS = 24 // 2,4 s
+        const val PREROLL_CHUNKS = 3
         const val MUSIC_CHECK_CHUNKS = 20 // cada 2 s
         val COMPETITORS: String = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
     }
@@ -155,6 +169,14 @@ class VoskSpeechRecognitionEngine(
         val model = models.model()
             ?: return RecognitionResult.Failure(EngineError(EngineErrorType.NOT_AVAILABLE, MISSING_MODEL), id)
         val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat())
+        // Respeta las pausas al hablar: no da la orden por terminada hasta este silencio.
+        runCatching {
+            recognizer.setEndpointerDelays(
+                request.noSpeechTimeoutMillis / 1000f,
+                request.endSilenceMillis / 1000f,
+                (request.noSpeechTimeoutMillis + request.maxSpeechMillis) / 1000f,
+            )
+        }
         val start = System.currentTimeMillis()
         var text: String? = null
         var heardSpeech = false
@@ -181,11 +203,11 @@ class VoskSpeechRecognitionEngine(
                 when {
                     !heardSpeech && elapsed > request.noSpeechTimeoutMillis -> false
                     // Con música de fondo nunca hay silencio: si la transcripción dejó de cambiar, la orden terminó.
-                    heardSpeech && System.currentTimeMillis() - lastChange > STABLE_PARTIAL_MS -> {
+                    heardSpeech && System.currentTimeMillis() - lastChange > request.endSilenceMillis + STABLE_MARGIN_MS -> {
                         text = JSONObject(recognizer.finalResult).optString("text").trim()
                         false
                     }
-                    elapsed > request.maxSpeechMillis -> {
+                    elapsed > request.noSpeechTimeoutMillis + request.maxSpeechMillis -> {
                         text = JSONObject(recognizer.finalResult).optString("text").trim()
                         false
                     }
@@ -207,6 +229,6 @@ class VoskSpeechRecognitionEngine(
     }
 
     private companion object {
-        const val STABLE_PARTIAL_MS = 1_100L
+        const val STABLE_MARGIN_MS = 300L
     }
 }

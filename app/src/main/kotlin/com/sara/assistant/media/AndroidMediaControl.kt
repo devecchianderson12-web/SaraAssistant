@@ -1,6 +1,10 @@
 package com.sara.assistant.media
 
+import android.app.SearchManager
 import android.content.ComponentName
+import com.sara.assistant.apps.ActivityStarter
+import com.sara.assistant.apps.AndroidAppLauncher
+import com.sara.assistant.apps.StartOutcome
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -36,7 +40,8 @@ class SaraNotificationListener : NotificationListenerService()
  */
 class AndroidMediaControl(
     private val context: Context,
-    private val isAppInForeground: () -> Boolean,
+    private val starter: ActivityStarter,
+    private val apps: AndroidAppLauncher,
     private val logger: SaraLogger,
 ) : MediaControl {
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -45,22 +50,64 @@ class AndroidMediaControl(
     fun hasNotificationAccess(): Boolean =
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
 
-    override suspend fun perform(action: MediaAction, query: String?): MediaActionResult = withContext(Dispatchers.Main) {
+    override suspend fun perform(action: MediaAction, query: String?, app: String?): MediaActionResult {
+        if ((action == MediaAction.PLAY || action == MediaAction.RESUME) && (query != null || app != null)) {
+            return playSearch(query, app)
+        }
+        return performOnSessions(action)
+    }
+
+    /**
+     * «Buscá X», «poné X en Spotify»: primero por la sesión multimedia (funciona en segundo plano);
+     * si no, abriendo la búsqueda de la app pedida.
+     */
+    private suspend fun playSearch(query: String?, appName: String?): MediaActionResult {
+        val target = appName?.let { apps.find(it) }
+        if (appName != null && target == null) return MediaActionResult.Failed("No encontré la app $appName.")
+        val result = withContext(Dispatchers.Main) {
+            val session = activeControllers()?.firstOrNull { target == null || it.packageName == target.id }
+            if (session != null && query != null && session.supports(PlaybackState.ACTION_PLAY_FROM_SEARCH)) {
+                session.transportControls.playFromSearch(query, Bundle())
+                return@withContext confirm(session, appName(session)) { it.isPlaying() }
+            }
+            if (session != null && query == null) {
+                session.transportControls.play()
+                return@withContext confirm(session, appName(session)) { it.isPlaying() }
+            }
+            null
+        }
+        if (result != null) return result
+        val pm = context.packageManager
+        val candidates = buildList {
+            if (query != null) {
+                add(Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).putExtra(SearchManager.QUERY, query)
+                    .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*"))
+                add(Intent(Intent.ACTION_SEARCH).putExtra(SearchManager.QUERY, query))
+            }
+        }.map { intent -> target?.let { intent.setPackage(it.id) } ?: intent }
+        val intent = candidates.firstOrNull { it.resolveActivity(pm) != null }
+            ?: target?.let { pm.getLaunchIntentForPackage(it.id) }
+            ?: return MediaActionResult.NoMediaApp
+        val label = target?.label ?: appName
+        return when (withContext(Dispatchers.Main) { starter.start(intent, label ?: "la música") }) {
+            is StartOutcome.Started -> MediaActionResult.Done(label)
+            StartOutcome.NeedsTap -> MediaActionResult.NeedsTap(label)
+            is StartOutcome.Failed -> MediaActionResult.Failed("No pude abrir ${label ?: "la app de música"}.")
+        }
+    }
+
+    private suspend fun performOnSessions(action: MediaAction): MediaActionResult = withContext(Dispatchers.Main) {
         val controllers = activeControllers()
         if (controllers == null) {
-            return@withContext performWithoutAccess(action, query)
+            return@withContext performWithoutAccess(action)
         }
         val playing = controllers.firstOrNull { it.isPlaying() }
         val target = playing ?: controllers.firstOrNull()
 
         when (action) {
             MediaAction.PLAY, MediaAction.RESUME -> {
-                if (target == null) return@withContext startFromNothing(query)
+                if (target == null) return@withContext startFromNothing()
                 val app = appName(target)
-                if (query != null && target.supports(PlaybackState.ACTION_PLAY_FROM_SEARCH)) {
-                    target.transportControls.playFromSearch(query, Bundle())
-                    return@withContext confirm(target, app) { it.isPlaying() }
-                }
                 if (target.isPlaying()) return@withContext MediaActionResult.Done(app)
                 if (!target.supports(PlaybackState.ACTION_PLAY) && !target.supports(PlaybackState.ACTION_PLAY_PAUSE)) {
                     return@withContext MediaActionResult.Unsupported(app)
@@ -119,19 +166,18 @@ class AndroidMediaControl(
     }
 
     /** No hay sesiones: se intenta reanudar el último reproductor y, si Sara está visible, abrir una app de música. */
-    private suspend fun startFromNothing(query: String?): MediaActionResult {
+    private suspend fun startFromNothing(): MediaActionResult {
         dispatchKey(KeyEvent.KEYCODE_MEDIA_PLAY)
         repeat(10) {
             delay(150)
             activeControllers()?.firstOrNull { it.isPlaying() }?.let { return MediaActionResult.Done(appName(it)) }
         }
-        if (isAppInForeground() && openMusicApp(query)) return MediaActionResult.Done(null)
+        if (openMusicApp()) return MediaActionResult.Done(null)
         return MediaActionResult.NoMediaApp
     }
 
-    private fun performWithoutAccess(action: MediaAction, query: String?): MediaActionResult {
-        if (query != null && isAppInForeground() && openMusicApp(query)) return MediaActionResult.Done(null)
-        val key = when (action) {
+    private fun performWithoutAccess(action: MediaAction): MediaActionResult {
+                val key = when (action) {
             MediaAction.PLAY, MediaAction.RESUME -> KeyEvent.KEYCODE_MEDIA_PLAY
             MediaAction.PAUSE -> KeyEvent.KEYCODE_MEDIA_PAUSE
             MediaAction.STOP -> KeyEvent.KEYCODE_MEDIA_STOP
@@ -151,14 +197,11 @@ class AndroidMediaControl(
         audioManager.dispatchMediaKeyEvent(KeyEvent(time, time, KeyEvent.ACTION_UP, code, 0))
     }
 
-    /** Sólo se abre una actividad cuando Sara está visible (Android bloquea hacerlo desde segundo plano). */
-    private fun openMusicApp(query: String?): Boolean {
-        val intent = if (query != null) {
-            Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).putExtra(android.app.SearchManager.QUERY, query)
-        } else {
-            Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
-        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { context.startActivity(intent) }.isSuccess
+    /** Abre la app de música predeterminada si Android lo permite en este momento. */
+    private fun openMusicApp(): Boolean {
+        if (!starter.canStartDirectly()) return false
+        val intent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
+        return starter.start(intent, "la música") is StartOutcome.Started
     }
 
     private suspend fun confirm(controller: MediaController, app: String?, condition: (MediaController) -> Boolean): MediaActionResult {

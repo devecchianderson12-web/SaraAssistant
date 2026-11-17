@@ -99,12 +99,27 @@ sealed interface MediaActionResult {
     data object SentWithoutVerification : MediaActionResult
     data object NothingPlaying : MediaActionResult
     data object NoMediaApp : MediaActionResult
+
+    /** Android no deja abrir apps desde segundo plano: se dejó una notificación para tocar. */
+    data class NeedsTap(val appName: String?) : MediaActionResult
     data class Unsupported(val appName: String?) : MediaActionResult
     data class Failed(val message: String) : MediaActionResult
 }
 
 interface MediaControl {
-    suspend fun perform(action: MediaAction, query: String? = null): MediaActionResult
+    /** [app]: app de música pedida («en Spotify»), o `null` para la que esté sonando. */
+    suspend fun perform(action: MediaAction, query: String? = null, app: String? = null): MediaActionResult
+}
+
+sealed interface AppLaunchResult {
+    data class Opened(val label: String, val deviceLocked: Boolean) : AppLaunchResult
+    data class NeedsTap(val label: String) : AppLaunchResult
+    data class NotFound(val query: String) : AppLaunchResult
+    data class Failed(val message: String) : AppLaunchResult
+}
+
+interface AppLauncher {
+    suspend fun open(name: String): AppLaunchResult
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -129,10 +144,12 @@ class DefaultCommandExecutor(
     private val responses: ResponseCatalog = ResponseCatalog(),
     /** Indica si hay acceso a sesiones multimedia (Notification Listener). */
     private val hasMediaSessionAccess: () -> Boolean = { true },
+    private val apps: AppLauncher? = null,
 ) : CommandExecutor {
 
     override suspend fun execute(intent: CommandIntent): ExecutionResult = when (intent) {
-        is CommandIntent.PlayMusic -> media(MediaAction.PLAY, intent.query)
+        is CommandIntent.PlayMusic -> media(MediaAction.PLAY, intent.query, intent.app)
+        is CommandIntent.OpenApp -> openApp(intent.name)
         CommandIntent.Pause -> media(MediaAction.PAUSE)
         CommandIntent.Resume -> media(MediaAction.RESUME)
         CommandIntent.Next -> media(MediaAction.NEXT)
@@ -143,15 +160,26 @@ class DefaultCommandExecutor(
         is CommandIntent.Unknown -> ExecutionResult(false, responses.notUnderstood(), ErrorKind.RECOGNITION_FAILED)
     }
 
-    private suspend fun media(action: MediaAction, query: String? = null): ExecutionResult {
+    private suspend fun openApp(name: String): ExecutionResult {
+        val launcher = apps ?: return ExecutionResult(false, responses.cannotOpenApps(), ErrorKind.EXECUTION_FAILED)
+        return when (val result = runCatching { launcher.open(name) }.getOrElse { AppLaunchResult.Failed(it.message ?: "error") }) {
+            is AppLaunchResult.Opened -> ExecutionResult(true, responses.appOpened(result.label, result.deviceLocked))
+            is AppLaunchResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.label))
+            is AppLaunchResult.NotFound -> ExecutionResult(false, responses.appNotFound(result.query), ErrorKind.EXECUTION_FAILED)
+            is AppLaunchResult.Failed -> ExecutionResult(false, responses.failed(result.message), ErrorKind.EXECUTION_FAILED)
+        }
+    }
+
+    private suspend fun media(action: MediaAction, query: String? = null, app: String? = null): ExecutionResult {
         val result = try {
-            media.perform(action, query)
+            media.perform(action, query, app)
         } catch (e: Exception) {
             MediaActionResult.Failed(e.message ?: e.javaClass.simpleName)
         }
         val noAccess = !hasMediaSessionAccess()
         return when (result) {
-            is MediaActionResult.Done -> ExecutionResult(true, responses.mediaDone(action, result.appName, query))
+            is MediaActionResult.Done -> ExecutionResult(true, responses.mediaDone(action, result.appName ?: app, query))
+            is MediaActionResult.NeedsTap -> ExecutionResult(true, responses.tapToOpen(result.appName ?: app ?: "la música"))
             is MediaActionResult.PausedInstead -> ExecutionResult(true, responses.pausedInsteadOfStop(result.appName))
             is MediaActionResult.NotConfirmed -> ExecutionResult(false, responses.notConfirmed(action, result.appName), ErrorKind.EXECUTION_FAILED)
             MediaActionResult.SentWithoutVerification -> ExecutionResult(true, responses.sentBlind(action), needsNotificationAccess = noAccess)
@@ -211,6 +239,11 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     /** Frases de confirmación: son fijas para poder tenerlas pregrabadas y responder al instante. */
     val listeningPhrases = listOf("Te escucho.", "Decime.", "Te escucho, decime.")
     fun listening() = listeningPhrases[random.nextInt(listeningPhrases.size)]
+
+    /** Cuando no escuchó o no entendió: vuelve a preguntar una vez (también pregrabadas). */
+    val retryPhrases = listOf("¿Qué dijiste?", "No te entendí, decímelo de nuevo.")
+    fun askAgain() = retryPhrases[0]
+    fun didNotUnderstandRetry() = retryPhrases[1]
     fun cancelled() = pick("Listo.", "Dale, cancelado.")
     fun notUnderstood() = "No te entendí bien. Podés pedirme, por ejemplo, que ponga música o que suba el volumen."
     fun didNotHear() = "No te escuché bien. Probá de nuevo."
@@ -218,6 +251,7 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun mediaDone(action: MediaAction, app: String?, query: String?) = when (action) {
         MediaAction.PLAY -> when {
             query != null && app != null -> "Perfecto, busco $query en $app."
+            query != null -> "Perfecto, busco $query."
             app != null -> "Perfecto, voy a reproducir música en $app."
             else -> "Perfecto, voy a reproducir música."
         }
@@ -248,6 +282,13 @@ class ResponseCatalog(private val random: Random = Random.Default) {
         return "${app ?: "Esa app"} no permite $what."
     }
     fun failed(detail: String) = "No pude hacerlo. $detail"
+
+    fun appOpened(label: String, locked: Boolean) =
+        if (locked) "Abro $label. Desbloqueá el teléfono para verla." else "Abro $label."
+    fun tapToOpen(label: String) =
+        "Te dejé una notificación para abrir $label. Para que la abra directo, activá «Mostrar sobre otras apps» para Sara."
+    fun appNotFound(query: String) = "No encontré ninguna app que se llame $query."
+    fun cannotOpenApps() = "Todavía no puedo abrir apps en este dispositivo."
 
     fun volumeUp(percent: Int) = "Listo, subí el volumen al $percent por ciento."
     fun volumeDown(percent: Int) = "Listo, bajé el volumen al $percent por ciento."

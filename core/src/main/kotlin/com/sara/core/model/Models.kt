@@ -19,7 +19,10 @@ sealed interface VolumeChange {
 /** Intención reconocida en una orden de voz. */
 sealed interface CommandIntent {
     /** Reproducir música. [query] es una búsqueda opcional ("música de Soda Stereo" -> "soda stereo"). */
-    data class PlayMusic(val query: String? = null) : CommandIntent
+    data class PlayMusic(val query: String? = null, val app: String? = null) : CommandIntent
+
+    /** Abrir una app instalada por su nombre (o uno muy parecido). */
+    data class OpenApp(val name: String) : CommandIntent
     data object Pause : CommandIntent
     data object Resume : CommandIntent
     data object Next : CommandIntent
@@ -31,7 +34,8 @@ sealed interface CommandIntent {
 }
 
 fun CommandIntent.label(): String = when (this) {
-    is CommandIntent.PlayMusic -> if (query.isNullOrBlank()) "Reproducir música" else "Reproducir: $query"
+    is CommandIntent.PlayMusic -> (if (query.isNullOrBlank()) "Reproducir música" else "Reproducir: $query") + (app?.let { " en $it" } ?: "")
+    is CommandIntent.OpenApp -> "Abrir $name"
     CommandIntent.Pause -> "Pausar"
     CommandIntent.Resume -> "Continuar"
     CommandIntent.Next -> "Siguiente canción"

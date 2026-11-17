@@ -37,6 +37,7 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         if (tokens.isEmpty()) return InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "empty")
         val ctx = Context(normalized, tokens)
         return detectCancel(ctx)
+            ?: detectOpenApp(ctx)
             ?: detectVolume(ctx)
             ?: detectMedia(ctx)
             ?: InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "no-match")
@@ -73,6 +74,14 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         if (ctx.tokens.size > 3 || SpanishNumbers.findAll(ctx.tokens).isNotEmpty()) return null
         val cancel = ctx.any(CANCEL) || ctx.text in setOf("dejalo", "deja", "no importa", "nada mas", "listo gracias", "gracias")
         return if (cancel) ctx.result(CommandIntent.Cancel, 0.9f, "cancel") else null
+    }
+
+    private fun detectOpenApp(ctx: Context): InterpretationResult? {
+        val match = OPEN_APP.find(ctx.text) ?: return null
+        var name = match.groupValues[1].trim()
+        repeat(3) { name = name.replace(OPEN_APP_FILLER, "").trim() }
+        if (name.isEmpty()) return ctx.result(CommandIntent.Unknown(ctx.text), 0.3f, "open-app-incomplete")
+        return ctx.result(CommandIntent.OpenApp(name), 0.9f, "open-app")
     }
 
     private fun detectVolume(ctx: Context): InterpretationResult? {
@@ -138,18 +147,31 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
 
         val musicNoun = ctx.any(MUSIC_NOUN)
         val playVerb = ctx.any(PLAY_VERB)
+        val (query, app) = extractPlayTarget(ctx.text)
         if (ctx.phrase(*PLAY_PHRASES) || (playVerb && (musicNoun || ctx.phrase("algo")))) {
-            return ctx.result(CommandIntent.PlayMusic(extractQuery(ctx.text)), 0.9f, "play")
+            return ctx.result(CommandIntent.PlayMusic(query, app), 0.9f, "play")
         }
-        if (musicNoun) return ctx.result(CommandIntent.PlayMusic(extractQuery(ctx.text)), 0.6f, "play-noun")
+        // «Buscá Despacito», «poné Soda Stereo en Spotify»: verbo de reproducción + lo que se busca.
+        if (ctx.tokens.first().matches(SEARCH_VERB) && (query != null || app != null)) {
+            return ctx.result(CommandIntent.PlayMusic(query, app), 0.8f, "play-search")
+        }
+        if (musicNoun) return ctx.result(CommandIntent.PlayMusic(query, app), 0.6f, "play-noun")
         return null
     }
 
-    private fun extractQuery(text: String): String? {
-        val match = QUERY.find(text) ?: return null
-        val query = match.groupValues[1].trim()
-        if (query.isEmpty() || query.split(' ').first() in QUERY_STOPWORDS) return null
-        return query
+    /** Separa qué buscar y en qué app: «poné música de Soda Stereo en Spotify» -> ("soda stereo", "spotify"). */
+    private fun extractPlayTarget(text: String): Pair<String?, String?> {
+        var rest = text
+        var app: String? = null
+        MUSIC_APP_SUFFIX.find(rest)?.let {
+            app = it.groupValues[1]
+            rest = rest.substring(0, it.range.first).trim()
+        }
+        rest = rest.replace(PLAY_PREFIX, "").trim()
+        repeat(3) { rest = rest.replace(PLAY_FILLER, "").trim() }
+        if (rest in MUSIC_APPS && app == null) return null to rest
+        if (rest.isEmpty() || rest in GENERIC_MUSIC || rest.split(' ').first() in QUERY_STOPWORDS) return null to app
+        return rest to app
     }
 
     private companion object {
@@ -175,12 +197,16 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         val NEXT_PHRASES = arrayOf(
             "pasa de tema", "pasa de cancion", "pasa el tema", "pasa la cancion", "pasa a la otra",
             "cambia de tema", "cambia el tema", "cambia de cancion", "cambia la cancion", "otra cancion", "otro tema",
+            "cambia de musica", "cambia la musica", "cambiala", "pone otra", "otra musica",
         )
         val PREVIOUS = Regex("anterior|previa|previo|retroced[a-z]*")
         val PREVIOUS_PHRASES = arrayOf("la de antes", "el de antes", "tema de antes", "cancion de antes", "para atras", "volve atras", "volver atras")
         val PAUSE = Regex("paus[a-z]*|fren[a-z]*")
         val STOP = Regex("deten[a-z]*|stop|parala|paralo|apag[a-z]*|cort[a-z]*|termin[a-z]*")
-        val STOP_PHRASES = arrayOf("quita la musica", "saca la musica", "basta de musica", "no quiero mas musica")
+        val STOP_PHRASES = arrayOf(
+            "quita la musica", "saca la musica", "sacala", "basta de musica", "no quiero mas musica", "cerra la musica",
+            "cerra la cancion", "terminala", "por completo", "del todo",
+        )
         val RESUME = Regex("continu[a-z]*|segui[a-z]*|sigue|sigan|reanud[a-z]*|despaus[a-z]*|retom[a-z]*|play")
         val RESUME_PHRASES = arrayOf("que siga", "volve a reproducir", "dale play", "dale que siga")
         val MUSIC_NOUN = Regex("musica|musiquita|cancion|canciones|cancioncita|tema|temas|temazo|temita|playlist|album|disco|radio")
@@ -189,7 +215,24 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
             "quiero escuchar", "me gustaria escuchar", "tengo ganas de escuchar", "quisiera escuchar",
             "quiero musica", "algo de musica", "un poco de musica",
         )
-        val QUERY = Regex("(?:musica|canciones|cancion|temas|tema|algo|album|disco) de (.+)$")
-        val QUERY_STOPWORDS = setOf("musica", "fondo", "nuevo", "antes", "volumen")
+        val QUERY_STOPWORDS = setOf("fondo", "volumen", "pausa", "la de antes", "antes")
+        val MUSIC_APPS = setOf(
+            "spotify", "youtube music", "youtube", "yt music", "deezer", "apple music", "amazon music",
+            "soundcloud", "tidal", "napster", "audiomack", "boomplay", "radio",
+        )
+        val MUSIC_APP_SUFFIX = Regex(" (?:en|por|con|desde) (?:la app |la aplicacion |el )?(${MUSIC_APPS.joinToString("|")})$")
+        val SEARCH_VERB = Regex("pon|pone|poneme|ponme|poner|reproduc[a-z]*|busc[a-z]*|toca|tocame|escuch[a-z]*|tirame|mandame")
+        val PLAY_PREFIX = Regex(
+            "^(?:(?:quiero|quisiera|me gustaria|tengo ganas de|podes|podrias) )?" +
+                "(?:pon|pone|poneme|ponme|poner|reproduci|reproducime|reproduce|reproducir|busca|buscame|buscar|toca|tocame|" +
+                "tirame|tira|mandame|manda|larga|meteme|mete|escuchar|escucha)\\b",
+        )
+        val PLAY_FILLER = Regex(
+            "^(?:la cancion de|una cancion de|un tema de|canciones de|temas de|musica de|algo de|la musica|la cancion|el tema|" +
+                "el album|el disco|la playlist|la lista|musica|algo|una cancion|un tema|canciones|temas|un poco de|de|la|el)\\b",
+        )
+        val GENERIC_MUSIC = setOf("", "musica", "algo", "algo lindo", "cualquier cosa", "lo que sea", "algo para escuchar", "otra", "otra cosa")
+        val OPEN_APP = Regex("^(?:abri|abre|abrime|abrir|abrila|abrilo|ejecuta|ejecutame|lanza|entra a|entra en|anda a|abri la app|abri la aplicacion)\\s+(.+)$")
+        val OPEN_APP_FILLER = Regex("^(?:la app de|la aplicacion de|la app|la aplicacion|app|aplicacion|el|la|los|las|a|de)\\b")
     }
 }

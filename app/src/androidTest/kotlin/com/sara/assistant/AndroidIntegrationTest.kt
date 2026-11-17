@@ -117,6 +117,6 @@ class AndroidIntegrationTest {
     }
 
     private object NoMedia : com.sara.core.execution.MediaControl {
-        override suspend fun perform(action: MediaAction, query: String?) = MediaActionResult.NothingPlaying
+        override suspend fun perform(action: MediaAction, query: String?, app: String?) = MediaActionResult.NothingPlaying
     }
 }

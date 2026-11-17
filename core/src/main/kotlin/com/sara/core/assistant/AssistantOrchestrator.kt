@@ -57,8 +57,12 @@ data class AssistantConfig(
     val languageTag: String = "es-AR",
     val onlineVoice: VoiceParams = VoiceParams(),
     val offlineVoice: VoiceParams = VoiceParams(),
-    val noSpeechTimeoutMillis: Long = 6_000,
-    val maxSpeechMillis: Long = 10_000,
+    val noSpeechTimeoutMillis: Long = 7_000,
+    val maxSpeechMillis: Long = 12_000,
+    /** Pausa permitida al hablar antes de cortar la escucha. */
+    val endSilenceMillis: Long = 1_700,
+    /** Si no entendió, vuelve a preguntar una vez en lugar de salir. */
+    val retryOnce: Boolean = true,
 )
 
 /** Señales no verbales y manejo de foco de audio, implementadas por la plataforma. */
@@ -190,7 +194,7 @@ class AssistantOrchestrator(
         }
         for ((engine, params) in targets) {
             if (engine.availability() !is Availability.Available) continue
-            for (phrase in responses.listeningPhrases) {
+            for (phrase in responses.listeningPhrases + responses.retryPhrases) {
                 runCatching { engine.prepare(phrase, params.copy(cacheable = true)) }
                     .onFailure { logger.w(TAG, "No se pudo pregrabar «$phrase»", it) }
             }
@@ -280,29 +284,54 @@ class AssistantOrchestrator(
             cfg.acknowledgement != Acknowledgement.NONE -> feedback.chime()
         }
 
-        machine.moveTo(AssistantState.Listening())
-        val result = recognitionRouter.recognize(
-            mode = cfg.recognitionMode,
-            online = engines.onlineRecognizer(),
-            offline = engines.offlineRecognizer(),
-            request = RecognitionRequest(cfg.languageTag, cfg.maxSpeechMillis, cfg.noSpeechTimeoutMillis),
-            allowOfflineFallback = cfg.allowRecognitionFallback,
-            onPartial = { partial -> machine.moveTo(AssistantState.Listening(partial)) },
-            onSwitch = { notice ->
-                _events.emit(AssistantEvent.Notice(notice.message))
-                if (notice.requiresRepeat) {
-                    speak(notice.message, cfg)
-                    machine.moveTo(AssistantState.Listening())
-                    feedback.chime()
+        var retried = false
+        while (true) {
+            machine.moveTo(AssistantState.Listening())
+            val result = listen(cfg)
+            when (result) {
+                is RecognitionResult.Failure -> {
+                    val userSilent = result.error.type == EngineErrorType.NO_SPEECH || result.error.type == EngineErrorType.NO_MATCH
+                    if (userSilent && cfg.retryOnce && !retried) {
+                        retried = true
+                        speak(responses.askAgain(), cfg, cacheable = true)
+                        continue
+                    }
+                    handleRecognitionFailure(result.error, cfg)
                 }
-            },
-        )
-
-        when (result) {
-            is RecognitionResult.Failure -> handleRecognitionFailure(result.error, cfg)
-            is RecognitionResult.Success -> processText(result.text.trim(), result.engineId, cfg)
+                is RecognitionResult.Success -> {
+                    val text = result.text.trim()
+                    _events.emit(AssistantEvent.Heard(text, result.engineId))
+                    machine.moveTo(AssistantState.Processing(text))
+                    val interpretation = interpreter.interpret(text)
+                    if (interpretation.intent is CommandIntent.Unknown && cfg.retryOnce && !retried) {
+                        retried = true
+                        logger.d(TAG, "\"$text\" no se entendió; pregunto de nuevo")
+                        speak(responses.didNotUnderstandRetry(), cfg, cacheable = true)
+                        continue
+                    }
+                    execute(text, interpretation, cfg)
+                }
+            }
+            return
         }
     }
+
+    private suspend fun listen(cfg: AssistantConfig): RecognitionResult = recognitionRouter.recognize(
+        mode = cfg.recognitionMode,
+        online = engines.onlineRecognizer(),
+        offline = engines.offlineRecognizer(),
+        request = RecognitionRequest(cfg.languageTag, cfg.maxSpeechMillis, cfg.noSpeechTimeoutMillis, cfg.endSilenceMillis),
+        allowOfflineFallback = cfg.allowRecognitionFallback,
+        onPartial = { partial -> machine.moveTo(AssistantState.Listening(partial)) },
+        onSwitch = { notice ->
+            _events.emit(AssistantEvent.Notice(notice.message))
+            if (notice.requiresRepeat) {
+                speak(notice.message, cfg)
+                machine.moveTo(AssistantState.Listening())
+                feedback.chime()
+            }
+        },
+    )
 
     private suspend fun runTextInteraction(text: String) {
         val cfg = configProvider()
@@ -316,7 +345,10 @@ class AssistantOrchestrator(
     private suspend fun processText(text: String, engineId: String, cfg: AssistantConfig) {
         _events.emit(AssistantEvent.Heard(text, engineId))
         machine.moveTo(AssistantState.Processing(text))
-        val interpretation = interpreter.interpret(text)
+        execute(text, interpreter.interpret(text), cfg)
+    }
+
+    private suspend fun execute(text: String, interpretation: com.sara.core.model.InterpretationResult, cfg: AssistantConfig) {
         val intent = interpretation.intent
         logger.d(TAG, "\"$text\" -> ${intent.label()} (${interpretation.ruleId}, ${interpretation.confidence})")
         if (intent !is CommandIntent.Unknown && intent !is CommandIntent.Cancel) {

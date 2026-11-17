@@ -32,6 +32,8 @@ data class SaraSettings(
     val acknowledgement: Acknowledgement = Acknowledgement.VOICE,
     val autostart: Boolean = false,
     val echoCancellation: Boolean = true,
+    /** Silencio tolerado dentro de una orden (pausas al hablar). */
+    val speechPauseMillis: Int = 1_700,
     // Voz
     val voiceMode: EngineMode = EngineMode.AUTOMATIC,
     val onlineVoice: OnlineVoiceType = OnlineVoiceType.AZURE,
@@ -80,6 +82,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val acknowledgement = stringPreferencesKey("ack")
         val autostart = booleanPreferencesKey("autostart")
         val echoCancellation = booleanPreferencesKey("echo_cancellation")
+        val speechPause = androidx.datastore.preferences.core.intPreferencesKey("speech_pause_ms")
         val voiceMode = stringPreferencesKey("voice_mode")
         val onlineVoice = stringPreferencesKey("online_voice")
         val onlineVoiceId = stringPreferencesKey("online_voice_id")
@@ -108,6 +111,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             acknowledgement = this[Keys.acknowledgement].toEnum(d.acknowledgement),
             autostart = this[Keys.autostart] ?: d.autostart,
             echoCancellation = this[Keys.echoCancellation] ?: d.echoCancellation,
+            speechPauseMillis = this[Keys.speechPause] ?: d.speechPauseMillis,
             voiceMode = this[Keys.voiceMode].toEnum(d.voiceMode),
             onlineVoice = this[Keys.onlineVoice].toEnum(d.onlineVoice),
             onlineVoiceId = this[Keys.onlineVoiceId],
@@ -132,6 +136,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.acknowledgement] = s.acknowledgement.name
         this[Keys.autostart] = s.autostart
         this[Keys.echoCancellation] = s.echoCancellation
+        this[Keys.speechPause] = s.speechPauseMillis
         this[Keys.voiceMode] = s.voiceMode.name
         this[Keys.onlineVoice] = s.onlineVoice.name
         if (s.onlineVoiceId != null) this[Keys.onlineVoiceId] = s.onlineVoiceId else remove(Keys.onlineVoiceId)

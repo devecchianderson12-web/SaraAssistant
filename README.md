@@ -72,6 +72,12 @@ Cada push a `main` publica un release **SaraAssistantV&lt;n&gt;** en GitHub. Al 
 | «Canción anterior» / «la de antes» | «Silenciá la música» / «quitá el silencio» |
 | «Detené la música» / «pará la música» | «Subí un poco» (+5 %) / «bajá bastante» (−25 %) |
 
+**Apps y búsqueda:** «Sara, abrí YouTube» abre la app instalada cuyo nombre coincide o se parece (por ejemplo «Morphe YouTube»). «Buscá Despacito en Spotify» / «poné Soda Stereo» buscan y reproducen. Con Sara en segundo plano, Android sólo deja abrir apps si activás *«Mostrar sobre otras apps»* (Ajustes › Sistema); si no, Sara deja una notificación para tocar.
+
+**Pausas al hablar:** en *Ajustes › Reconocimiento › Pausa permitida al hablar* (1,7 s por defecto). Si no te entiende, te pregunta de nuevo una vez antes de salir.
+
+**Segundo plano:** cerrar Sara desde *Recientes* no la detiene; el servicio sigue y, si el sistema lo mata, Android lo vuelve a crear. En silencio el reconocedor se pausa para gastar menos batería.
+
 - **Relativo vs. absoluto:** «subí **un** 30 %» suma 30 puntos porcentuales; «poné el volumen **al** 30 %» fija el 30 % del rango.
 - Sólo se toca el **volumen multimedia**: alarmas, llamadas y notificaciones no se modifican.
 - Si una app no admite una acción, Sara lo dice («Radio X no permite pasar a la siguiente canción»). Si no puede confirmar el cambio, también lo dice.

@@ -129,6 +129,17 @@ class WakeWordAndAudioTest {
     }
 
     @Test
+    fun `compuerta de energia duerme en silencio y despierta con voz`() {
+        val gate = com.sara.core.util.EnergyGate(idleAfterChunks = 3)
+        repeat(3) { assertTrue(gate.feed(50.0).process) }
+        assertFalse(gate.feed(50.0).process)
+        assertTrue(gate.idle)
+        val wake = gate.feed(3000.0)
+        assertTrue(wake.process && wake.wokeUp)
+        assertFalse(gate.idle)
+    }
+
+    @Test
     fun `nivel de audio`() {
         assertEquals(0f, AudioLevelMeter.levelOfPcm16(ByteArray(320), 320))
         val loud = ByteArray(320) { i -> if (i % 2 == 0) 0xFF.toByte() else 0x7F }

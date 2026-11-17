@@ -70,6 +70,7 @@ class SettingsActions(
     val clearDiagnostics: () -> Unit,
     val refresh: () -> Unit,
     val checkUpdates: () -> Unit,
+    val openOverlaySettings: () -> Unit,
 )
 
 private val modeOptions = listOf(EngineMode.AUTOMATIC to "Automático", EngineMode.ONLINE to "Online", EngineMode.OFFLINE to "Offline")
@@ -189,6 +190,10 @@ fun SettingsScreen(
                 listOf(OfflineRecognizerType.AUTO to "Automático", OfflineRecognizerType.VOSK to "Vosk", OfflineRecognizerType.ANDROID_ON_DEVICE to "Android (12+)"),
                 settings.offlineRecognizer,
             ) { v -> actions.update { it.copy(offlineRecognizer = v) } }
+            SliderRow("Pausa permitida al hablar", settings.speechPauseMillis / 1000f, 0.8f..3.5f, { "%.1f s".format(it) }) { v ->
+                actions.update { it.copy(speechPauseMillis = (v * 10).roundToInt() * 100) }
+            }
+            Text("Si Sara te corta cuando hacés una pausa, subí este valor. Si no entiende, te pregunta de nuevo una vez.", style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
             SwitchRow("Respaldo offline en modo Online", "Si se corta la conexión, usar el motor local", settings.allowRecognitionFallback) { v ->
                 actions.update { it.copy(allowRecognitionFallback = v) }
             }
@@ -230,6 +235,12 @@ fun SettingsScreen(
                 "Asistente predeterminado",
                 if (system.defaultAssistant) "Sara es el asistente digital" else "Necesario para abrir Sara con el gesto de asistente y reactivarla sola tras reiniciar",
                 system.defaultAssistant, "Cambiar", actions.openAssistantSettings,
+            )
+            StatusLine(
+                "Abrir apps con la pantalla en otra app",
+                if (system.canOpenAppsFromBackground) "Permitido: «Sara, abrí YouTube» abre la app directo"
+                else "Sin permiso: Sara deja una notificación para tocar. Activá «Mostrar sobre otras apps»",
+                system.canOpenAppsFromBackground, "Permitir", actions.openOverlaySettings,
             )
             StatusLine(
                 "Batería",

@@ -160,7 +160,7 @@ class AssistantOrchestratorTest {
         val h = Harness(this, FakeEngineProvider(offline = offline, offlineVoiceEngine = voice), AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE))
         h.orchestrator.activate()
         advanceUntilIdle()
-        assertEquals(listOf("No te escuché bien. Probá de nuevo."), voice.spoken)
+        assertEquals(listOf("¿Qué dijiste?", "No te escuché bien. Probá de nuevo."), voice.spoken)
         assertFalse(h.visited.contains(StateKind.ERROR))
     }
 
@@ -206,5 +206,17 @@ class AssistantOrchestratorTest {
         assertEquals(8, h.volume.lastSet)
         assertEquals(listOf("Puse el volumen al 53 por ciento."), voice.spoken)
         assertEquals("poné el volumen al 50%", h.history.single().heard)
+    }
+
+    @Test
+    fun `si no entiende pregunta de nuevo una vez y ejecuta la segunda orden`() = runTest {
+        val offline = FakeRecognizer("vosk", false).willReturn("eh bueno este").willReturn("pausá la música")
+        val voice = FakeVoice("tts", false)
+        val h = Harness(this, FakeEngineProvider(offline = offline, offlineVoiceEngine = voice), AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE, acknowledgement = Acknowledgement.NONE))
+        h.orchestrator.activate()
+        advanceUntilIdle()
+        assertEquals("No te entendí, decímelo de nuevo.", voice.spoken.first())
+        assertEquals(listOf(MediaAction.PAUSE to null), h.media.calls)
+        assertEquals(2, offline.calls)
     }
 }

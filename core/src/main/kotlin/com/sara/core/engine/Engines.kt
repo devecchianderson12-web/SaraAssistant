@@ -63,6 +63,8 @@ data class RecognitionRequest(
     val languageTag: String,
     val maxSpeechMillis: Long = 10_000,
     val noSpeechTimeoutMillis: Long = 6_000,
+    /** Silencio que se tolera dentro de la orden antes de darla por terminada (pausas al hablar). */
+    val endSilenceMillis: Long = 1_700,
 )
 
 sealed interface RecognitionResult {

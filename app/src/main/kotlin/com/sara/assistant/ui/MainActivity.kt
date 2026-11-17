@@ -260,6 +260,9 @@ class MainActivity : ComponentActivity() {
                                 clearDiagnostics = viewModel::clearDiagnostics,
                                 refresh = { viewModel.refreshSystem() },
                                 checkUpdates = { viewModel.checkUpdates() },
+                                openOverlaySettings = {
+                                    openSafely(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)))
+                                },
                             ),
                             updateState = updateState,
                         )

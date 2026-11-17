@@ -277,7 +277,7 @@ class AzureSpeechRecognitionEngine(
         val region = credentials.region() ?: return RecognitionResult.Failure(EngineError(EngineErrorType.CREDENTIALS, "Falta la región de Azure."), id)
 
         val pcm = ByteArrayOutputStream()
-        val detector = SpeechEndpointDetector(request.noSpeechTimeoutMillis, request.maxSpeechMillis)
+        val detector = SpeechEndpointDetector(request.noSpeechTimeoutMillis, request.maxSpeechMillis, trailingSilenceMillis = request.endSilenceMillis)
         val outcome = microphone.capture { buffer, length ->
             pcm.write(buffer, 0, length)
             detector.feed(buffer, length)

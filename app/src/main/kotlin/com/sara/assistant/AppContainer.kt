@@ -73,7 +73,9 @@ class AppContainer(private val app: Application) {
     private val tts = SharedTextToSpeech(app)
     private val azure = AzureCredentials(secrets) { settings.settings.value.azureRegion }
 
-    val mediaControl = AndroidMediaControl(app, ::isAppInForeground, logger)
+    val activityStarter = com.sara.assistant.apps.ActivityStarter(app, ::isAppInForeground)
+    val appLauncher = com.sara.assistant.apps.AndroidAppLauncher(app, activityStarter, logger)
+    val mediaControl = AndroidMediaControl(app, activityStarter, appLauncher, logger)
     val updates = com.sara.assistant.update.UpdateManager(app, logger)
 
     // Motores (instancias reutilizables; la selección depende de los ajustes vigentes).
@@ -119,7 +121,7 @@ class AppContainer(private val app: Application) {
         scope = scope,
         engines = engines,
         interpreter = CompositeCommandInterpreter(RuleBasedCommandInterpreter(), conversational = null),
-        executor = DefaultCommandExecutor(mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess),
+        executor = DefaultCommandExecutor(mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher),
         connectivity = connectivity,
         configProvider = { settings.current().toAssistantConfig() },
         feedback = AndroidActivationFeedback(ChimePlayer(), focus, logger),
@@ -138,6 +140,7 @@ class AppContainer(private val app: Application) {
         allowRecognitionFallback = allowRecognitionFallback,
         voiceMode = voiceMode,
         languageTag = language,
+        endSilenceMillis = speechPauseMillis.toLong(),
         onlineVoice = VoiceParams(onlineVoiceId, speechRate, voiceVolume, language),
         offlineVoice = VoiceParams(offlineVoiceId, speechRate, voiceVolume, language),
     )

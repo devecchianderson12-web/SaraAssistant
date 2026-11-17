@@ -35,6 +35,7 @@ data class SystemStatus(
     val porcupineKey: Boolean = false,
     val porcupineKeyword: Boolean = false,
     val porcupineModel: Boolean = false,
+    val canOpenAppsFromBackground: Boolean = false,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -217,6 +218,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             porcupineKey = c.secrets.has(SecretStore.PORCUPINE_ACCESS_KEY),
             porcupineKeyword = c.porcupineFiles.keyword.isFile,
             porcupineModel = c.porcupineFiles.model.isFile,
+            canOpenAppsFromBackground = android.provider.Settings.canDrawOverlays(getApplication()),
         )
     }
 }

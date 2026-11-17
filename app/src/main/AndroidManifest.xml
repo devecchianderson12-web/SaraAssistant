@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Actualizador interno: instalar la nueva versión descargada de GitHub Releases. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Opcional: abrir apps pedidas por voz cuando Sara está en segundo plano. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Visibilidad de paquetes (Android 11+) para los servicios que usa Sara. -->
     <queries>
@@ -34,6 +36,14 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
+        <!-- Apps del lanzador, para «abrí YouTube». -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEARCH" />
         </intent>
     </queries>
 
@@ -70,6 +80,7 @@
         <service
             android:name=".services.SaraListeningService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="microphone" />
 
         <service

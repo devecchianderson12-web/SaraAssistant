@@ -113,6 +113,40 @@ object WakeWordTuning {
 }
 
 /**
+ * Compuerta de energía para ahorrar batería: en silencio el reconocedor no procesa audio.
+ * Cuando vuelve a haber sonido se le entregan los bloques previos para no perder el comienzo.
+ */
+class EnergyGate(private val idleAfterChunks: Int = 8, private val minRms: Double = 120.0) {
+    private var noiseFloor = -1.0
+    private var quietChunks = 0
+    var idle = false
+        private set
+
+    /** Devuelve `true` si este bloque debe procesarse; [wokeUp] indica que conviene entregar el pre-roll. */
+    fun feed(rms: Double): Decision {
+        noiseFloor = when {
+            noiseFloor < 0 -> rms
+            rms < noiseFloor -> rms
+            else -> noiseFloor * 0.995 + rms * 0.005
+        }
+        val loud = rms > maxOf(noiseFloor * 2.5, minRms)
+        if (loud) {
+            quietChunks = 0
+            if (idle) {
+                idle = false
+                return Decision(process = true, wokeUp = true)
+            }
+            return Decision(process = true, wokeUp = false)
+        }
+        quietChunks++
+        if (quietChunks > idleAfterChunks) idle = true
+        return Decision(process = !idle, wokeUp = false)
+    }
+
+    data class Decision(val process: Boolean, val wokeUp: Boolean)
+}
+
+/**
  * Primera etapa del detector, sin esperar a que termine la frase: reacciona a los resultados
  * parciales (unos 100-300 ms después de decir «Sara»), lo que además funciona con música de fondo,
  * donde nunca hay silencio para cerrar una frase.
