@@ -141,7 +141,7 @@ jobs:
             adb logcat -d | grep -iE "SphereActivity|Background activity|BAL_|Abort background" | tail -15 || true
             sleep 6
             adb logcat -d > logcat.txt
-            grep -E "Fatal signal|Abort message|lowmemorykiller|lmkd|has died|Process com.sara.assistant|#0[0-9] pc" logcat.txt | head -30 || true
+            grep -E "Fatal signal|Abort message|JNI DETECTED|lowmemorykiller|com.sara.assistant.*has died|F .sara.assistant|F DEBUG" logcat.txt | grep -v "native: #\|  at \|^.*runtime.cc:[0-9]*\]   " | head -40 || true
             if grep -q "FATAL EXCEPTION" logcat.txt; then grep -A30 "FATAL EXCEPTION" logcat.txt | head -60; exit 1; fi
             adb shell pidof com.sara.assistant
       # En ejecuciones manuales, la captura de la esfera se guarda en la rama «capturas» para revisarla.
