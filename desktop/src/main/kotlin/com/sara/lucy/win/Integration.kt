@@ -114,7 +114,7 @@ class Updater(private val logger: SaraLogger) {
      * no actualiza el teléfono y viceversa): se busca la release más nueva que traiga el .exe.
      */
     fun latest(): Release? = runCatching {
-        val conn = URL("https://api.github.com/repos/$REPO/releases?per_page=30").openConnection() as HttpURLConnection
+        val conn = URL("https://api.github.com/repos/$REPO/releases?per_page=100").openConnection() as HttpURLConnection
         conn.connectTimeout = 6_000
         conn.readTimeout = 8_000
         conn.setRequestProperty("Accept", "application/vnd.github+json")
