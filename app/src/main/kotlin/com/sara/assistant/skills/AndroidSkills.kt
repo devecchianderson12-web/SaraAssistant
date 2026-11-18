@@ -499,7 +499,12 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
                     if (!ok && cont.isActive) cont.resume(null)
                 }
             } ?: continue
-            runCatching { proxy.connectedDevices.mapNotNullTo(names) { it.name } }
+            runCatching {
+                proxy.connectedDevices.forEach { d ->
+                    if (Build.VERSION.SDK_INT >= 30) runCatching { d.alias }.getOrNull()?.ifBlank { null }?.let(names::add)
+                    runCatching { d.name }.getOrNull()?.ifBlank { null }?.let(names::add)
+                }
+            }
             runCatching { adapter.closeProfileProxy(profile, proxy) }
         }
         return names
@@ -520,29 +525,42 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
         }.getOrNull()
     }
 
-    @Suppress("MissingPermission")
-    private fun bonded(): List<android.bluetooth.BluetoothDevice> =
-        if (!btPermission()) emptyList() else runCatching { btAdapter?.bondedDevices?.toList() }.getOrNull().orEmpty().filter { !it.name.isNullOrBlank() }
-
-    @Suppress("MissingPermission")
-    private fun bondedNames(): List<String> = bonded().mapNotNull { it.name }
+    /** Un dispositivo vinculado con el nombre que le pusiste en Ajustes › Bluetooth y el de fábrica. */
+    private data class Paired(val shown: String, val factory: String?, val deviceClass: Int?)
 
     /**
-     * El dispositivo vinculado que nombraste, aunque lo digas distinto de como se llama:
-     * «gol g3» / «gol ge tres» / «golg3» → «GOL G3»; «el auto» / «la radio» → el que Android marca como
-     * equipo de auto; «los auriculares» / «el parlante» → el de ese tipo (si hay uno solo).
+     * Android deja renombrar los dispositivos vinculados («KP-1234-ABCD» → «Gol G3»): ese nombre
+     * (alias) es el que se ve en Ajustes y el que usás vos; el de fábrica sirve de respaldo.
      */
     @Suppress("MissingPermission")
+    private fun bonded(): List<Paired> {
+        if (!btPermission()) return emptyList()
+        return runCatching { btAdapter?.bondedDevices?.toList() }.getOrNull().orEmpty().mapNotNull { d ->
+            val factory = runCatching { d.name }.getOrNull()?.ifBlank { null }
+            val alias = if (Build.VERSION.SDK_INT >= 30) runCatching { d.alias }.getOrNull()?.ifBlank { null } else null
+            val shown = alias ?: factory ?: return@mapNotNull null
+            Paired(shown, factory, runCatching { d.bluetoothClass?.deviceClass }.getOrNull())
+        }
+    }
+
+    private fun bondedNames(): List<String> = bonded().map { it.shown }
+
+    /**
+     * El dispositivo vinculado que nombraste, con el nombre que le pusiste o el de fábrica, aunque lo
+     * digas distinto: «gol g3» / «gol ge tres» / «golg3» → «Gol G3»; «el auto» / «la radio» → el que
+     * Android marca como equipo de auto; «los auriculares» / «el parlante» → el de ese tipo (si hay
+     * uno solo). Devuelve el nombre que se ve en Ajustes › Bluetooth (el que hay que tocar).
+     */
     private fun bondedName(query: String): String? {
         val devices = bonded()
         if (devices.isEmpty()) return null
         val wanted = spokenCompact(query)
-        devices.firstOrNull { spokenCompact(it.name) == wanted }?.let { return it.name }
-        if (wanted.length >= 3) devices.firstOrNull {
-            val have = spokenCompact(it.name)
-            have.length >= 3 && (have.contains(wanted) || wanted.contains(have))
-        }?.let { return it.name }
-        AppMatcher.best(query, devices.map { InstalledApp(it.name, it.name) })?.let { return it.label }
+        fun names(p: Paired) = listOfNotNull(p.shown, p.factory)
+        devices.firstOrNull { p -> names(p).any { spokenCompact(it) == wanted } }?.let { return it.shown }
+        if (wanted.length >= 3) devices.firstOrNull { p ->
+            names(p).any { val have = spokenCompact(it); have.length >= 3 && (have.contains(wanted) || wanted.contains(have)) }
+        }?.let { return it.shown }
+        AppMatcher.best(query, devices.flatMap { p -> names(p).map { InstalledApp(it, p.shown) } })?.let { return it.id }
         val n = AppMatcher.normalize(query)
         val classes = when {
             Regex("\\b(auto|coche|carro|radio|estereo|stereo|camioneta)\\b").containsMatchIn(n) ->
@@ -553,7 +571,7 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
                 setOf(android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER, android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO)
             else -> return null
         }
-        return devices.filter { runCatching { it.bluetoothClass?.deviceClass in classes }.getOrDefault(false) }.singleOrNull()?.name
+        return devices.filter { it.deviceClass in classes }.singleOrNull()?.shown
     }
 
     /** «Gol ge tres» → «golg3»: números y letras dichas en palabras, sin espacios ni acentos. */

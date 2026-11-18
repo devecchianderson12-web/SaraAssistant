@@ -39,9 +39,6 @@ class MicRouter(
     fun bluetoothMic(): AudioDeviceInfo? =
         audio.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
 
-    private fun phoneMic(): AudioDeviceInfo? =
-        audio.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
-
     /** Hay audio Bluetooth conectado (auto, parlante, auriculares). */
     fun bluetoothAudioConnected(): Boolean = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
         it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
@@ -100,17 +97,17 @@ class MicRouter(
         else @Suppress("DEPRECATION") audio.isBluetoothScoOn
 
     /**
-     * Micrófono preferido para grabar ahora: el del Bluetooth si su canal está abierto (espera hasta
-     * 2,5 s a que conecte); si hay un Bluetooth pero no se usa, el del teléfono (para que Android no
-     * agarre el del auto por su cuenta); si no hay Bluetooth, el que diga el sistema.
+     * Micrófono preferido para grabar ahora: el del Bluetooth sólo si su canal está abierto para esta
+     * orden (espera hasta 2,5 s a que conecte). En cualquier otro caso (la espera de «Sara», órdenes con
+     * el del teléfono) no se fuerza nada: Android usa el del teléfono con su cancelación de eco, que es
+     * lo que permite escucharte con música (forzar el micrófono la desactivaba en algunos teléfonos).
      */
     suspend fun captureDevice(): AudioDeviceInfo? {
-        if (bluetoothActive) {
-            withTimeoutOrNull(2_500) { while (!scoReady()) delay(100) }
-            if (scoReady()) return bluetoothMic()
-            logger.w(TAG, "El Bluetooth no abrió su micrófono a tiempo; uso el del teléfono")
-        }
-        return if (bluetoothMic() != null) phoneMic() else null
+        if (!bluetoothActive) return null
+        withTimeoutOrNull(2_500) { while (!scoReady()) delay(100) }
+        if (scoReady()) return bluetoothMic()
+        logger.w(TAG, "El Bluetooth no abrió su micrófono a tiempo; uso el del teléfono")
+        return null
     }
 
     /** Qué micrófono se usa ahora para las órdenes (para la pantalla). */
