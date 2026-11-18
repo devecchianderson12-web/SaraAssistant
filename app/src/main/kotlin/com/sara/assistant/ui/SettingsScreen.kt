@@ -340,7 +340,7 @@ fun SettingsScreen(
         // ---------------------------------------------------------------- Voz
         SectionCard("Voz", Modifier.anchor("Voz"), "Cómo te habla Sara", SaraColors.Pink) {
             SubHeader("Voz de Sara")
-            val azureReady = system.azureConfigured && settings.azureRegion.isNotBlank()
+            val azureReady = system.azureConfigured
             val current = if (settings.onlineVoice == OnlineVoiceType.AZURE) settings.onlineVoiceId ?: NATURAL_VOICES.first().first else null
             OptionChips(
                 "Voces naturales (las mismas de «Leer en voz alta» de Edge)",
@@ -364,8 +364,8 @@ fun SettingsScreen(
             if (settings.onlineVoice == OnlineVoiceType.AZURE) {
                 StatusLine(
                     "Azure Speech",
-                    if (system.azureConfigured && settings.azureRegion.isNotBlank()) "Configurado · región ${settings.azureRegion}" else "Falta la clave y la región",
-                    system.azureConfigured && settings.azureRegion.isNotBlank(),
+                    if (system.azureConfigured) "Listo" + (settings.azureRegion.takeIf { it.isNotBlank() }?.let { " · tu clave, región $it" } ?: "") else "Falta la clave y la región",
+                    system.azureConfigured,
                     "Configurar",
                 ) { azureDialog = true }
             }

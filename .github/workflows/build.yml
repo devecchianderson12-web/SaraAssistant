@@ -45,6 +45,9 @@ jobs:
         run: ./gradlew --no-daemon test
 
       - name: Compilar APK debug
+        env:
+          SARA_AZURE_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          SARA_AZURE_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
         run: ./gradlew --no-daemon assembleDebug
 
       - name: Renombrar APK

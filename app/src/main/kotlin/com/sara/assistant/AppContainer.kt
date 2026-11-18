@@ -73,7 +73,7 @@ class AppContainer(private val app: Application) {
     val history = FileCommandHistory(app) { settings.settings.value.saveHistory }
     val focus = AudioFocusHelper(app)
     private val tts = SharedTextToSpeech(app)
-    private val azure = AzureCredentials(secrets) { settings.settings.value.azureRegion }
+    val azure = AzureCredentials(secrets) { settings.settings.value.azureRegion }
 
     val activityStarter = com.sara.assistant.apps.ActivityStarter(app, ::isAppInForeground)
     val appLauncher = com.sara.assistant.apps.AndroidAppLauncher(app, activityStarter, logger)

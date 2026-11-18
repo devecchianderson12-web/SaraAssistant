@@ -18,6 +18,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Repositorio donde se publican las versiones (GitHub Releases) para el actualizador interno.
         buildConfigField("String", "UPDATE_REPO", "\"devecchianderson12-web/SaraAssistant\"")
+        // Voces naturales sin que el usuario configure nada: clave de Azure Speech (plan gratis F0) que
+        // pone la compilación en la nube desde los secretos del repositorio (nunca está en el código).
+        buildConfigField("String", "AZURE_KEY", "\"${System.getenv("SARA_AZURE_KEY").orEmpty().trim()}\"")
+        buildConfigField("String", "AZURE_REGION", "\"${System.getenv("SARA_AZURE_REGION").orEmpty().trim().lowercase()}\"")
         vectorDrawables.useSupportLibrary = true
         // Teléfonos ARM y emuladores x86_64 (x86 de 32 bits se omite para reducir el tamaño).
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }

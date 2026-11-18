@@ -297,7 +297,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             defaultAssistant = c.isDefaultAssistant(),
             batteryUnrestricted = c.isIgnoringBatteryOptimizations(),
             engines = list + EngineStatus("Conexión a Internet", if (c.connectivity.isOnline()) "Conectado" else "Sin conexión", c.connectivity.isOnline()),
-            azureConfigured = c.secrets.has(SecretStore.AZURE_KEY),
+            azureConfigured = c.azure.isConfigured(),
             porcupineKey = c.secrets.has(SecretStore.PORCUPINE_ACCESS_KEY),
             porcupineKeyword = c.porcupineFiles.keyword.isFile,
             porcupineModel = c.porcupineFiles.model.isFile,

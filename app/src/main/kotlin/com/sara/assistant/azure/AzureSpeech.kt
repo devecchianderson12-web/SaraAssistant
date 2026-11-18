@@ -40,8 +40,11 @@ import kotlin.coroutines.coroutineContext
 
 /** Credenciales de Azure AI Speech: clave cifrada en [SecretStore] + región en ajustes. */
 class AzureCredentials(private val secrets: SecretStore, private val regionSetting: () -> String) {
+    /** La clave propia del usuario si cargó una; si no, la que trae Sara (voces listas sin configurar nada). */
     fun key(): String? = secrets.get(SecretStore.AZURE_KEY)?.takeIf { it.isNotBlank() }
-    fun region(): String? = regionSetting().trim().lowercase().takeIf { REGION.matches(it) }
+        ?: com.sara.assistant.BuildConfig.AZURE_KEY.takeIf { it.isNotBlank() }
+    fun region(): String? = (regionSetting().trim().lowercase().takeIf { it.isNotEmpty() } ?: com.sara.assistant.BuildConfig.AZURE_REGION)
+        .takeIf { REGION.matches(it) }
     fun isConfigured() = key() != null && region() != null
 
     fun unavailable(): Availability.Unavailable? = when {
