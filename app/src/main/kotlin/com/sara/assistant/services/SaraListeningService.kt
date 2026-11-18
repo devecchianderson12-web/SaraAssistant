@@ -95,22 +95,69 @@ object SaraNotifications {
 class SaraListeningService : LifecycleService() {
 
     /**
-     * Ahorro de batería: con «sólo con la pantalla encendida», al apagar la pantalla se cierra el
-     * micrófono y al encenderla se vuelve a escuchar.
+     * Escucha inteligente: el servicio queda vivo (sin micrófono) y abre el micrófono sólo cuando
+     * corresponde: conectado al auto o a un Bluetooth, cargando, con la pantalla encendida o en el
+     * horario elegido. Se vuelve a evaluar ante cada cambio y una vez por minuto (horario).
      */
-    private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val c = container
-            if (!c.settings.settings.value.listenOnlyWithScreenOn || !c.settings.settings.value.wakeWordEnabled) return
-            when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> if (!c.orchestrator.isInteractionActive) c.orchestrator.setWakeWordEnabled(false)
-                Intent.ACTION_SCREEN_ON -> c.orchestrator.setWakeWordEnabled(true)
+    private val conditionsReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = evaluate()
+    }
+    private var receiverRegistered = false
+    private var watching = false
+    @Volatile private var listeningNow: Boolean? = null
+
+    private val audioDevices = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>?) = evaluate()
+        override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>?) = evaluate()
+    }
+
+    private fun screenOn() = getSystemService(android.os.PowerManager::class.java)?.isInteractive != false
+
+    private fun charging(): Boolean =
+        getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
+
+    private fun conditions() = com.sara.core.assistant.ListenConditions(
+        bluetoothAudio = container.micRouter.bluetoothAudioConnected(),
+        charging = charging(),
+        screenOn = screenOn(),
+        hour = java.time.LocalTime.now().hour,
+    )
+
+    /** Abre o cierra el micrófono de la espera según el modo y lo que pasa ahora. */
+    private fun evaluate() {
+        val c = container
+        val s = c.settings.settings.value
+        if (!s.wakeWordEnabled) return
+        val listen = com.sara.core.assistant.ListenPolicy.shouldListen(s.listenMode, s.smartListening, conditions())
+        if (listen == listeningNow) return
+        // Si está en plena charla u orden, no se corta: se vuelve a evaluar al terminar.
+        if (!listen && c.orchestrator.isInteractionActive) return
+        listeningNow = listen
+        c.logger.d(TAG, com.sara.core.assistant.ListenPolicy.describe(s.listenMode, s.smartListening, conditions()))
+        c.orchestrator.setWakeWordEnabled(listen)
+    }
+
+    private fun startWatching() {
+        if (watching) return
+        watching = true
+        registerReceiver(conditionsReceiver, android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+        })
+        receiverRegistered = true
+        getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(audioDevices, null)
+        // Cambios de ajustes, fin de cada interacción y el horario (cada minuto).
+        lifecycleScope.launch { container.settings.settings.collect { listeningNow = null; evaluate() } }
+        lifecycleScope.launch { container.orchestrator.state.collect { if (!container.orchestrator.isInteractionActive) evaluate() } }
+        lifecycleScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(60_000)
+                evaluate()
             }
         }
     }
-    private var screenReceiverRegistered = false
-
-    private fun screenOn() = getSystemService(android.os.PowerManager::class.java)?.isInteractive != false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
@@ -127,32 +174,37 @@ class SaraListeningService : LifecycleService() {
                 c.orchestrator.activate(Trigger.NOTIFICATION)
             }
             else -> {
-                // intent == null: el sistema relanzó el servicio tras cerrarlo (START_STICKY).
-                if (intent == null && !c.settings.settings.value.wakeWordEnabled) {
+                // intent == null: el sistema relanzó el servicio tras cerrarlo (START_STICKY). En el modo
+                // «sólo con la app abierta» no vuelve solo.
+                if (intent == null && (!c.settings.settings.value.wakeWordEnabled || c.settings.settings.value.listenMode == com.sara.core.assistant.ListenMode.APP_ONLY)) {
                     stopSelfSafely()
                     return START_NOT_STICKY
                 }
                 if (!enterForeground()) return START_NOT_STICKY
                 getSystemService(NotificationManager::class.java).cancel(SaraNotifications.ID_RESUME)
-                if (!screenReceiverRegistered) {
-                    registerReceiver(screenReceiver, android.content.IntentFilter().apply {
-                        addAction(Intent.ACTION_SCREEN_OFF)
-                        addAction(Intent.ACTION_SCREEN_ON)
-                    })
-                    screenReceiverRegistered = true
-                }
-                // Con la pantalla apagada (y el ahorro activado) no se abre el micrófono hasta encenderla.
-                c.orchestrator.setWakeWordEnabled(!(c.settings.settings.value.listenOnlyWithScreenOn && !screenOn()))
+                listeningNow = null
+                startWatching()
+                evaluate()
             }
         }
         // Si el sistema o el fabricante mata el proceso, Android vuelve a crear el servicio.
         return START_STICKY
     }
 
-    /** Cerrar Sara desde «Recientes» sólo cierra la ventana: la escucha sigue en este servicio. */
+    /**
+     * Cerrar Sara desde «Recientes»: en el modo «sólo con la app abierta» se apaga del todo; en los
+     * otros modos sólo se cierra la ventana y la escucha sigue en este servicio.
+     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        container.logger.d(TAG, "App quitada de recientes; la escucha sigue activa")
+        val c = container
+        if (c.settings.settings.value.listenMode == com.sara.core.assistant.ListenMode.APP_ONLY) {
+            c.logger.d(TAG, "App quitada de recientes: se apaga la escucha (modo sólo con la app abierta)")
+            c.orchestrator.setWakeWordEnabled(false)
+            stopSelfSafely()
+        } else {
+            c.logger.d(TAG, "App quitada de recientes; la escucha sigue activa")
+        }
     }
 
     private var observing = false
@@ -221,7 +273,9 @@ class SaraListeningService : LifecycleService() {
     }
 
     private fun statusText(state: AssistantState) = when (state) {
-        AssistantState.Inactive -> "En pausa · vuelve a escuchar al encender la pantalla"
+        AssistantState.Inactive -> com.sara.core.assistant.ListenPolicy.describe(
+            container.settings.settings.value.listenMode, container.settings.settings.value.smartListening, conditions(),
+        ) + " · tocá «Hablar» o usá el botón de asistente"
         AssistantState.WaitingForWakeWord -> "Esperando tu llamado · el audio se procesa en el teléfono"
         is AssistantState.Listening -> "Escuchando tu orden…"
         is AssistantState.Processing -> "Procesando…"
@@ -237,7 +291,8 @@ class SaraListeningService : LifecycleService() {
     }
 
     override fun onDestroy() {
-        if (screenReceiverRegistered) runCatching { unregisterReceiver(screenReceiver) }
+        if (receiverRegistered) runCatching { unregisterReceiver(conditionsReceiver) }
+        runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(audioDevices) }
         _running.value = false
         container.orchestrator.setWakeWordEnabled(false)
         super.onDestroy()
@@ -286,7 +341,7 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) SaraNotifications.postUpdated(context)
                 val settings = c.settings.current()
-                if (settings.wakeWordEnabled && settings.autostart) {
+                if (settings.wakeWordEnabled && settings.autostart && settings.listenMode != com.sara.core.assistant.ListenMode.APP_ONLY) {
                     SaraListeningService.start(context, StartContext.BOOT_COMPLETED)
                 }
             } finally {

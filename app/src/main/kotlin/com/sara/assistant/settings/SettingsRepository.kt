@@ -60,8 +60,9 @@ data class SaraSettings(
     val continuousConversation: Boolean = false,
     /** Activación con «Ey Sara» (true, menos falsas activaciones) o con «Sara» sola. */
     val heySara: Boolean = false,
-    /** Ahorro de batería: escuchar «Ey Sara» sólo con la pantalla encendida. */
-    val listenOnlyWithScreenOn: Boolean = false,
+    /** Cuándo escucha «Sara»: siempre, inteligente (auto, cargando…) o sólo con la app abierta. */
+    val listenMode: com.sara.core.assistant.ListenMode = com.sara.core.assistant.ListenMode.SMART,
+    val smartListening: com.sara.core.assistant.SmartListening = com.sara.core.assistant.SmartListening(),
     /** Mostrar la esfera a pantalla completa al llamarla fuera de la app (también bloqueado). */
     val sphereOverlay: Boolean = true,
     // Micrófono y Bluetooth (auto, auriculares)
@@ -129,7 +130,13 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val aiProvider = stringPreferencesKey("ai_provider")
         val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
         val heySara = booleanPreferencesKey("hey_sara_v2")
-        val listenOnlyWithScreenOn = booleanPreferencesKey("listen_only_screen_on_v2")
+        val listenMode = stringPreferencesKey("listen_mode")
+        val smartBluetooth = booleanPreferencesKey("smart_bluetooth")
+        val smartCharging = booleanPreferencesKey("smart_charging")
+        val smartScreenOn = booleanPreferencesKey("smart_screen_on")
+        val smartSchedule = booleanPreferencesKey("smart_schedule")
+        val smartFrom = androidx.datastore.preferences.core.intPreferencesKey("smart_from")
+        val smartTo = androidx.datastore.preferences.core.intPreferencesKey("smart_to")
         val sphereOverlay = booleanPreferencesKey("sphere_overlay")
         val micChoice = stringPreferencesKey("mic_choice")
         val voiceBoost = booleanPreferencesKey("voice_boost")
@@ -171,7 +178,15 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             aiProvider = this[Keys.aiProvider].toEnum(d.aiProvider),
             continuousConversation = this[Keys.continuousConversation] ?: d.continuousConversation,
             heySara = this[Keys.heySara] ?: d.heySara,
-            listenOnlyWithScreenOn = this[Keys.listenOnlyWithScreenOn] ?: d.listenOnlyWithScreenOn,
+            listenMode = this[Keys.listenMode].toEnum(d.listenMode),
+            smartListening = com.sara.core.assistant.SmartListening(
+                bluetooth = this[Keys.smartBluetooth] ?: d.smartListening.bluetooth,
+                charging = this[Keys.smartCharging] ?: d.smartListening.charging,
+                screenOn = this[Keys.smartScreenOn] ?: d.smartListening.screenOn,
+                schedule = this[Keys.smartSchedule] ?: d.smartListening.schedule,
+                fromHour = this[Keys.smartFrom] ?: d.smartListening.fromHour,
+                toHour = this[Keys.smartTo] ?: d.smartListening.toHour,
+            ),
             sphereOverlay = this[Keys.sphereOverlay] ?: d.sphereOverlay,
             micChoice = this[Keys.micChoice].toEnum(d.micChoice),
             voiceBoost = this[Keys.voiceBoost] ?: d.voiceBoost,
@@ -209,7 +224,13 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.aiProvider] = s.aiProvider.name
         this[Keys.continuousConversation] = s.continuousConversation
         this[Keys.heySara] = s.heySara
-        this[Keys.listenOnlyWithScreenOn] = s.listenOnlyWithScreenOn
+        this[Keys.listenMode] = s.listenMode.name
+        this[Keys.smartBluetooth] = s.smartListening.bluetooth
+        this[Keys.smartCharging] = s.smartListening.charging
+        this[Keys.smartScreenOn] = s.smartListening.screenOn
+        this[Keys.smartSchedule] = s.smartListening.schedule
+        this[Keys.smartFrom] = s.smartListening.fromHour
+        this[Keys.smartTo] = s.smartListening.toHour
         this[Keys.sphereOverlay] = s.sphereOverlay
         this[Keys.micChoice] = s.micChoice.name
         this[Keys.voiceBoost] = s.voiceBoost
