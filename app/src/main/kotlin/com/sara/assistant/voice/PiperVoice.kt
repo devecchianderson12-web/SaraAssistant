@@ -207,12 +207,17 @@ class PiperVoiceEngine(
                 } else {
                     // Va sonando a medida que se genera (frase por frase): empieza a hablar enseguida.
                     val job = coroutineContext
-                    engine.generateWithCallback(text, sid = 0, speed = speedOf(params)) { samples ->
-                        if (!job.isActive) 0 else {
-                            write(track, samples)
-                            1
-                        }
-                    }
+                    engine.generateWithCallback(
+                        text, sid = 0, speed = speedOf(params),
+                        callback = PiperChunkCallback { samples ->
+                            if (job.isActive) {
+                                write(track, samples)
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                    )
                 }
             }
             // Esperar a que termine de sonar lo que quedó en el búfer (máximo 3 s).
