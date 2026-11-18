@@ -34,7 +34,11 @@ interface AudioSource {
  * libera siempre al terminar o cancelar; nunca se guarda audio. Si la placa no da 16 kHz, graba a
  * 48 kHz y convierte.
  */
-class Microphone(private val levels: AudioLevelMeter) : AudioSource {
+class Microphone(
+    private val levels: AudioLevelMeter,
+    /** Micrófono elegido en Ajustes (nombre); vacío = el predeterminado de Windows. */
+    private val preferred: () -> String = { "" },
+) : AudioSource {
     private val busy = AtomicBoolean(false)
 
     /** `true` mientras Lucy tiene el micrófono abierto. */
@@ -78,12 +82,14 @@ class Microphone(private val levels: AudioLevelMeter) : AudioSource {
     }
 
     private fun open(): Pair<TargetDataLine, Int>? {
+        val wanted = preferred().trim()
+        val mixer = if (wanted.isEmpty()) null else AudioSystem.getMixerInfo().firstOrNull { it.name == wanted }?.let { AudioSystem.getMixer(it) }
         for (rate in listOf(SAMPLE_RATE, 48_000)) {
             val format = AudioFormat(rate.toFloat(), 16, 1, true, false)
             val info = DataLine.Info(TargetDataLine::class.java, format)
-            if (!AudioSystem.isLineSupported(info)) continue
+            if (if (mixer != null) !mixer.isLineSupported(info) else !AudioSystem.isLineSupported(info)) continue
             try {
-                val line = AudioSystem.getLine(info) as TargetDataLine
+                val line = (if (mixer != null) mixer.getLine(info) else AudioSystem.getLine(info)) as TargetDataLine
                 line.open(format, rate / 10 * 2 * 4)
                 return line to rate
             } catch (_: LineUnavailableException) {
@@ -121,6 +127,12 @@ class Microphone(private val levels: AudioLevelMeter) : AudioSource {
     }
 
     companion object {
+        /** Micrófonos conectados (para elegir en Ajustes). */
+        fun available(): List<String> = AudioSystem.getMixerInfo().filter { info ->
+            !info.name.startsWith("Port ") && !info.name.contains("Primary Sound Capture", ignoreCase = true) &&
+                runCatching { AudioSystem.getMixer(info).targetLineInfo.any { it.lineClass == TargetDataLine::class.java } }.getOrDefault(false)
+        }.map { it.name }.distinct()
+
         const val SAMPLE_RATE = 16_000
         const val CHUNK_BYTES = SAMPLE_RATE / 10 * 2
 

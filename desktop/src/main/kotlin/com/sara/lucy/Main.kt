@@ -1,5 +1,6 @@
 package com.sara.lucy
 
+import com.sara.lucy.ui.LucyTheme
 import com.sara.lucy.ui.MainWindow
 import com.sara.lucy.ui.SpherePainter
 import com.sara.lucy.win.Autostart
@@ -12,7 +13,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
-import javax.swing.UIManager
 import kotlin.system.exitProcess
 
 /**
@@ -43,7 +43,7 @@ fun main(args: Array<String>) {
     }
     if (!acquired) return
 
-    runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
+    LucyTheme.install()
     val app = LucyApp()
     replacing?.let { old -> Updater(app.logger).cleanup(File(old)) }
     if (firstRun) Autostart.set(true) else Autostart.refresh()

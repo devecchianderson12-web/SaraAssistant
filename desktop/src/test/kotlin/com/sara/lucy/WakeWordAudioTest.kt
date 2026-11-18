@@ -7,7 +7,6 @@ import com.sara.core.util.WakeWordTuning
 import com.sara.lucy.audio.AudioSource
 import com.sara.lucy.audio.CaptureOutcome
 import com.sara.lucy.audio.Microphone
-import com.sara.lucy.speech.SpeechHandoff
 import com.sara.lucy.speech.VoskModels
 import com.sara.lucy.speech.VoskWakeWordEngine
 import kotlinx.coroutines.runBlocking
@@ -46,11 +45,15 @@ class WakeWordAudioTest {
     private fun activations(name: String): Int {
         val wav = javaClass.getResourceAsStream("/voz/$name")!!.readBytes()
         val source = FileSource(wav.copyOfRange(44, wav.size))
-        val engine = VoskWakeWordEngine(VoskModels(SaraLogger.None).also { System.setProperty("lucy.model", modelDir!!) }, source, SaraLogger.None, SpeechHandoff())
+        val engine = VoskWakeWordEngine(VoskModels(SaraLogger.None).also { System.setProperty("lucy.model", modelDir!!) }, source, SaraLogger.None)
         var count = 0
         runBlocking {
             while (source.pos + Microphone.CHUNK_BYTES <= wav.size - 44) {
-                if (engine.awaitWakeWord(WakeWordConfig(WakeWordTuning.DEFAULT_SENSITIVITY, requirePrefix = false)) is WakeWordResult.Detected) count++ else break
+                if (engine.awaitWakeWord(WakeWordConfig(WakeWordTuning.DEFAULT_SENSITIVITY, requirePrefix = false)) is WakeWordResult.Detected) {
+                    count++
+                    // Como en la app: después de activarse atiende la orden y recién después vuelve a esperar.
+                    source.pos += Microphone.CHUNK_BYTES * 20
+                } else break
             }
         }
         return count

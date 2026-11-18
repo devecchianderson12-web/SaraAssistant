@@ -269,7 +269,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && hashFiles('autoprueba/lucy.png') != ''
         shell: bash
         run: |
-          mkdir capturas && cp autoprueba/lucy.png autoprueba/selftest.txt capturas/ && cd capturas
+          mkdir capturas && cp autoprueba/lucy.png autoprueba/selftest.txt capturas/ && cp autoprueba/ajustes.png capturas/ 2>/dev/null; cd capturas
           git init -q && git checkout -q -b capturas-lucy
           git -c user.name=ci -c user.email=ci@example.invalid add .
           git -c user.name=ci -c user.email=ci@example.invalid commit -qm "Captura de Lucy ${{ github.sha }}"

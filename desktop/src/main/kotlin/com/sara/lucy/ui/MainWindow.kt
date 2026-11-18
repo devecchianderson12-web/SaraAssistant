@@ -48,16 +48,14 @@ private val TEXT = Color(236, 232, 255)
 private val MUTED = Color(160, 150, 200)
 private val ACCENT = Color(150, 95, 255)
 
+/** Botón píldora violeta (bordes totalmente redondeados con FlatLaf). */
 internal fun darkButton(text: String, action: () -> Unit) = JButton(text).apply {
-    // El estilo de Windows ignora los colores (quedaban botones blancos con letra blanca).
-    setUI(javax.swing.plaf.basic.BasicButtonUI())
-    isOpaque = true
-    isContentAreaFilled = true
+    putClientProperty("JButton.buttonType", "roundRect")
     isFocusPainted = false
-    background = Color(40, 30, 70)
+    background = Color(46, 34, 88)
     foreground = TEXT
     font = Font("Segoe UI", Font.PLAIN, 13)
-    border = BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Color(90, 70, 150)), BorderFactory.createEmptyBorder(6, 14, 6, 14))
+    margin = java.awt.Insets(6, 16, 6, 16)
     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
     addActionListener { action() }
 }
@@ -74,7 +72,9 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
         background = Color(24, 18, 44)
         foreground = TEXT
         caretColor = TEXT
-        border = BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Color(90, 70, 150)), BorderFactory.createEmptyBorder(6, 8, 6, 8))
+        putClientProperty("JTextField.placeholderText", "Escribile a Lucy…")
+        putClientProperty("JComponent.roundRect", true)
+        margin = java.awt.Insets(6, 12, 6, 12)
         toolTipText = "Escribile a Lucy y apretá Enter"
         addActionListener { send() }
     }
@@ -113,9 +113,28 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
             add(Box.createVerticalStrut(6))
             add(status)
             add(Box.createVerticalStrut(10))
-            add(heard)
-            add(Box.createVerticalStrut(4))
-            add(answer)
+            // Lo que escuchó y lo que respondió, en una burbuja redondeada.
+            add(object : JPanel() {
+                init {
+                    isOpaque = false
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    border = BorderFactory.createEmptyBorder(10, 14, 12, 14)
+                    alignmentX = JComponent.CENTER_ALIGNMENT
+                    add(heard)
+                    add(Box.createVerticalStrut(4))
+                    add(answer)
+                }
+                override fun paintComponent(g: Graphics) {
+                    if (heard.text.isNullOrBlank() && answer.text.isNullOrBlank()) return
+                    val g2 = g.create() as Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = Color(28, 22, 52, 220)
+                    g2.fillRoundRect(0, 0, width - 1, height - 1, 26, 26)
+                    g2.color = Color(110, 90, 200, 120)
+                    g2.drawRoundRect(0, 0, width - 1, height - 1, 26, 26)
+                    g2.dispose()
+                }
+            })
         }
         add(center, BorderLayout.CENTER)
         val bottom = JPanel(BorderLayout(8, 8)).apply {

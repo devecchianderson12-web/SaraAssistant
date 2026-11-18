@@ -54,6 +54,9 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
     private val continuous = JCheckBox("Conversación continua (sigue escuchando unos segundos después de responder)", s.continuousConversation)
     private val autostart = JCheckBox("Iniciar con Windows", Autostart.isEnabled())
     private val hotkey = JCheckBox("Atajo Ctrl+Alt+L para hablarle (se aplica al reiniciar Lucy)", s.hotkey)
+    private val mic = JComboBox((listOf("Predeterminado de Windows") + com.sara.lucy.audio.Microphone.available()).toTypedArray()).apply {
+        selectedItem = s.microphone.ifBlank { "Predeterminado de Windows" }
+    }
     private val quick = JCheckBox("Respuesta rápida (hace la orden apenas la entiende, sin esperar la pausa)", s.quickResponse)
     private val chat = JCheckBox("Charlar después de una pregunta (sigue escuchando sin decir «Lucy»; después de una orden se calla)", s.chatFollowUp)
     private val duck = JCheckBox("Bajar la música de las otras apps mientras te escucho y hablo", s.duckMusic)
@@ -108,6 +111,8 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
             row(wake), row(hey),
             labeled("Sensibilidad (más = te escucha desde más lejos, pero se activa más por error)", sensitivity),
             labeled("Cuando la llamás", ack), row(quick), row(chat), row(continuous), row(duck), row(echo),
+            labeled("Micrófono", mic),
+            note("Con «Predeterminado» Lucy usa la cancelación de eco de Windows; con otro micrófono, lo usa directo."),
             row(JButton("Probar micrófono").apply { addActionListener { testMicrophone() } }), row(autostart), row(hotkey), row(minimized),
         ))
         tabs.addTab("Voz", form(
@@ -143,14 +148,14 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
 
         val buttons = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
             add(JButton("Cancelar").apply { addActionListener { dispose() } })
-            add(JButton("Guardar").apply { addActionListener { save() } }.also { rootPane.defaultButton = it })
+            add(JButton("Guardar").apply { addActionListener { save() } }.also { this@SettingsDialog.rootPane.defaultButton = it })
         }
         contentPane = JPanel(BorderLayout()).apply {
             border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
             add(tabs, BorderLayout.CENTER)
             add(buttons, BorderLayout.SOUTH)
         }
-        size = Dimension(640, 560)
+        size = Dimension(680, 600)
         setLocationRelativeTo(owner)
     }
 
@@ -163,14 +168,41 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         return JScrollPane(panel).apply { border = null }
     }
 
-    private fun row(component: JComponent) = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(component) }
+    /** Una fila; las casillas con texto largo se parten en varias líneas (no se cortan). */
+    private fun row(component: JComponent): JComponent {
+        if (component !is JCheckBox || component.text.isNullOrEmpty()) return JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(component) }
+        // La casilla sola y el texto al lado en una etiqueta que se parte en renglones (tocarla también marca).
+        val label = wrapped(component.text).apply {
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) { if (component.isEnabled) component.doClick() }
+            })
+        }
+        component.text = ""
+        return JPanel(BorderLayout(6, 0)).apply {
+            add(component, BorderLayout.WEST)
+            add(label, BorderLayout.CENTER)
+        }
+    }
 
     private fun labeled(text: String, component: JComponent) = JPanel(BorderLayout(0, 2)).apply {
         add(JLabel(text), BorderLayout.NORTH)
         add(row(component), BorderLayout.CENTER)
     }
 
-    private fun note(text: String) = JLabel("<html><div style='width:520px;color:#666666'>$text</div></html>")
+    private fun note(text: String) = wrapped(text, java.awt.Color(0x9A, 0x96, 0xB8))
+
+    /** Texto que se parte en renglones según el ancho (las etiquetas HTML no lo hacían bien). */
+    private fun wrapped(text: String, color: java.awt.Color? = null) = javax.swing.JTextArea(text, 0, 56).apply {
+        lineWrap = true
+        wrapStyleWord = true
+        isEditable = false
+        isFocusable = false
+        isOpaque = false
+        border = null
+        font = UIManagerFont
+        color?.let { foreground = it }
+    }
 
     private fun loadVoices() {
         app.scope.launch(Dispatchers.IO) {
@@ -190,6 +222,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         acknowledgement = Acknowledgement.entries[ack.selectedIndex.coerceAtLeast(0)],
         continuousConversation = continuous.isSelected,
         quickResponse = quick.isSelected,
+        microphone = (mic.selectedItem as? String)?.takeIf { mic.selectedIndex > 0 } ?: "",
         chatFollowUp = chat.isSelected,
         usePiper = voiceChoice.selectedIndex < com.sara.core.voice.PiperVoice.entries.size,
         piperVoice = com.sara.core.voice.PiperVoice.entries.getOrElse(voiceChoice.selectedIndex) { s.piperVoice },
@@ -293,6 +326,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
     }
 
     private companion object {
+        val UIManagerFont: java.awt.Font get() = javax.swing.UIManager.getFont("Label.font")
         /** Marca que muestra que ya hay una clave guardada (no se muestra la clave). */
         const val KEEP = "••••••••••••"
     }

@@ -166,6 +166,17 @@ class SelfTest(private val dir: File) {
         val screen = Rectangle(Toolkit.getDefaultToolkit().screenSize)
         ImageIO.write(Robot().createScreenCapture(screen), "png", File(dir, "lucy.png"))
         ok("ventana y esfera", "captura en lucy.png")
+        // Ajustes e historial tienen que abrir (antes Ajustes no abría).
+        SwingUtilities.invokeAndWait {
+            val settings = com.sara.lucy.ui.SettingsDialog(w!!, app, 0) {}
+            settings.isModal = false
+            settings.isVisible = true
+            val history = com.sara.lucy.ui.HistoryDialog(w!!, app)
+            history.dispose()
+        }
+        Thread.sleep(1_500)
+        ImageIO.write(Robot().createScreenCapture(screen), "png", File(dir, "ajustes.png"))
+        ok("ajustes e historial", "abren")
         SwingUtilities.invokeAndWait { w?.sphereWindow?.dispose(); w?.dispose() }
     }
 }

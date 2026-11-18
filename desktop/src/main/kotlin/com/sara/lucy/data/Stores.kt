@@ -156,6 +156,8 @@ data class LucySettings(
     val quickResponse: Boolean = true,
     /** Después de una pregunta sigue escuchando para charlar (después de una orden se calla). */
     val chatFollowUp: Boolean = true,
+    /** Micrófono que usa Lucy (nombre); vacío = el predeterminado de Windows. */
+    val microphone: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("wakeWordEnabled", wakeWordEnabled).put("sensitivity", sensitivity.toDouble()).put("heyPrefix", heyPrefix)
@@ -165,7 +167,7 @@ data class LucySettings(
         .put("sphereVisible", sphereVisible).put("sphereAlways", sphereAlways).put("sphereSize", sphereSize)
         .put("sphereX", sphereX ?: JSONObject.NULL).put("sphereY", sphereY ?: JSONObject.NULL).put("hotkey", hotkey)
         .put("saveHistory", saveHistory).put("city", city).put("checkUpdates", checkUpdates).put("startMinimized", startMinimized)
-        .put("usePiper", usePiper).put("piperVoice", piperVoice.name).put("quickResponse", quickResponse).put("chatFollowUp", chatFollowUp)
+        .put("usePiper", usePiper).put("piperVoice", piperVoice.name).put("quickResponse", quickResponse).put("chatFollowUp", chatFollowUp).put("microphone", microphone)
 
     companion object {
         fun fromJson(j: JSONObject): LucySettings {
@@ -198,6 +200,7 @@ data class LucySettings(
                 piperVoice = runCatching { com.sara.core.voice.PiperVoice.valueOf(j.optString("piperVoice")) }.getOrDefault(d.piperVoice),
                 quickResponse = j.optBoolean("quickResponse", d.quickResponse),
                 chatFollowUp = j.optBoolean("chatFollowUp", d.chatFollowUp),
+                microphone = j.optString("microphone", d.microphone),
             )
         }
     }

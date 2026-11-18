@@ -54,7 +54,6 @@ import com.sara.lucy.skills.WeatherSkill
 import com.sara.lucy.skills.phoneOnlySkills
 import com.sara.lucy.speech.GeminiTranscriber
 import com.sara.lucy.speech.SapiVoiceEngine
-import com.sara.lucy.speech.SpeechHandoff
 import com.sara.lucy.speech.VoskModels
 import com.sara.lucy.speech.VoskSpeechRecognitionEngine
 import com.sara.lucy.speech.VoskWakeWordEngine
@@ -98,7 +97,10 @@ class LucyApp {
     val voiceBridge = WinBridge("voice", logger)
     val secrets = SecretStore(File(LucyPaths.home, "keys.json"), system, logger)
     /** Micrófono con cancelación de eco de Windows (si no anda, el común). */
-    val microphone = AecMicrophone(levels, Microphone(levels), logger) { settings.current.echoCancellation }
+    // La cancelación de eco usa el micrófono predeterminado de Windows; si elegís otro, se usa ese directo.
+    val microphone = AecMicrophone(levels, Microphone(levels) { settings.current.microphone }, logger) {
+        settings.current.echoCancellation && settings.current.microphone.isBlank()
+    }
     val models = VoskModels(logger)
     val history = FileCommandHistory(File(LucyPaths.home, "history.json")) { settings.current.saveHistory }
     val memory = FileMemoryStore(File(LucyPaths.home, "memory.json"))
@@ -198,9 +200,8 @@ class LucyApp {
 
     // ---------------------------------------------------------------- Motores
     private val transcriber = GeminiTranscriber({ secrets.get(SecretStore.GEMINI_KEY) }, connectivity::isOnline)
-    private val handoff = SpeechHandoff()
-    val wake = VoskWakeWordEngine(models, microphone, logger, handoff)
-    private val recognizer = VoskSpeechRecognitionEngine(models, microphone, handoff) { pcm, draft ->
+    val wake = VoskWakeWordEngine(models, microphone, logger)
+    private val recognizer = VoskSpeechRecognitionEngine(models, microphone) { pcm, draft ->
         if (settings.current.preciseRecognition) transcriber.transcribe(pcm, draft) else null
     }
     private val sapi = SapiVoiceEngine(voiceBridge)

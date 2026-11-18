@@ -65,22 +65,6 @@ class VoskModels(private val logger: SaraLogger) {
     private companion object { const val TAG = "VoskModels" }
 }
 
-/**
- * Audio que el detector le pasa al reconocimiento cuando la orden vino pegada al nombre
- * («Lucy, poné música» de corrido): así no se pierde lo dicho mientras Lucy se activaba.
- */
-class SpeechHandoff {
-    private var chunks: List<ByteArray>? = null
-    private var at = 0L
-
-    @Synchronized fun put(audio: List<ByteArray>) {
-        chunks = audio
-        at = System.currentTimeMillis()
-    }
-
-    @Synchronized fun take(): List<ByteArray>? = chunks?.takeIf { System.currentTimeMillis() - at < 4_000 }.also { chunks = null }
-}
-
 private const val MISSING_MODEL = "Falta el modelo de voz. Volvé a descargar Lucy."
 
 private fun microphoneError() = EngineError(
@@ -99,7 +83,6 @@ class VoskWakeWordEngine(
     private val models: VoskModels,
     private val microphone: AudioSource,
     private val logger: SaraLogger,
-    private val handoff: SpeechHandoff,
 ) : WakeWordEngine {
     override val id = "vosk-wake"
     override val displayName = "Vosk (local)"
@@ -114,26 +97,14 @@ class VoskWakeWordEngine(
         val energy = EnergyGate()
         val window = ArrayDeque<ByteArray>()
         val peaks = ArrayDeque<Int>()
-        val levels = ArrayDeque<Double>()
         var detected = false
-        // Después del nombre se escucha medio segundo más: si sigue hablando, la orden vino pegada.
-        var tail = -1
-        var loudTail = 0
         try {
             val outcome = microphone.capture { buffer, length ->
                 val raw = buffer.copyOf(length)
                 window.addLast(raw)
                 peaks.addLast(WakeWordTuning.peakOf(raw, length))
-                val rms = AudioLevelMeter.rmsOfPcm16(buffer, length)
-                levels.addLast(rms)
                 while (window.size > WINDOW_CHUNKS) window.removeFirst()
                 while (peaks.size > WINDOW_CHUNKS) peaks.removeFirst()
-                while (levels.size > WINDOW_CHUNKS) levels.removeFirst()
-                if (tail >= 0) {
-                    if (rms > maxOf(levels.min() * 2.2, 60.0)) loudTail++
-                    tail++
-                    return@capture tail < TAIL_CHUNKS
-                }
                 // Voz baja o lejana: se amplifica según el pico de los últimos 2,4 s.
                 val gain = WakeWordTuning.gainFor(peaks.max())
                 val decision = energy.feed(AudioLevelMeter.rmsOfPcm16(buffer, length))
@@ -154,19 +125,16 @@ class VoskWakeWordEngine(
                 if (candidate) {
                     if (verify(model, window, config.sensitivity, config.requirePrefix)) {
                         detected = true
-                        tail = 0
                     } else {
                         gate.rejected()
                         logger.d(TAG, "Candidato rechazado en la verificación")
                     }
                 }
-                true
+                !detected
             }
             if (detected) {
-                val inline = loudTail >= TAIL_LOUD
-                if (inline) handoff.put(window.toList().takeLast(HANDOFF_CHUNKS + tail))
-                logger.d(TAG, "Activación" + if (inline) " con la orden pegada" else "")
-                return WakeWordResult.Detected(null, commandStarted = inline)
+                logger.d(TAG, "Activación")
+                return WakeWordResult.Detected(null)
             }
             return when (outcome) {
                 is CaptureOutcome.Failed -> WakeWordResult.Failed(outcome.error)
@@ -231,11 +199,7 @@ class VoskWakeWordEngine(
         const val TAG = "VoskWake"
         const val WINDOW_CHUNKS = 24 // 2,4 s
         const val PREROLL_CHUNKS = 5
-        const val TAIL_CHUNKS = 5
         const val MAX_FREE_WORDS = 5
-        const val TAIL_LOUD = 3
-        /** Audio previo a la activación que se pasa (incluye el nombre, que el intérprete ignora). */
-        const val HANDOFF_CHUNKS = 14
         fun list(words: List<String>) = words.joinToString(",", "[", "]") { "\"$it\"" }
         fun grammar() = list(listOf(WakeWordTuning.profile.keyword, "[unk]"))
         fun prefixedGrammar() = list(WakeWordTuning.PREFIXED_PHRASES + listOf(WakeWordTuning.profile.keyword, "[unk]"))
@@ -250,7 +214,6 @@ class VoskWakeWordEngine(
 class VoskSpeechRecognitionEngine(
     private val models: VoskModels,
     private val microphone: AudioSource,
-    private val handoff: SpeechHandoff,
     private val refine: (suspend (ByteArray, String) -> String?)? = null,
 ) : SpeechRecognitionEngine {
     override val id = "vosk-offline"
@@ -270,29 +233,28 @@ class VoskSpeechRecognitionEngine(
         var lastPartial = ""
         var lastChange = start
         val gain = RunningGain()
-        // La orden que vino pegada al nombre: se reconoce primero ese audio.
-        // Sólo si después del nombre hay más palabras (si no, era ruido: se escucha normal).
-        handoff.take()?.takeIf { hasWordsAfterName(model, it) }?.let { chunks ->
-            chunks.forEach {
-                audio.write(it)
-                val boosted = WakeWordTuning.applyGain(it, it.size, gain.next(it, it.size))
-                recognizer.acceptWaveForm(boosted, boosted.size)
-            }
-            heardSpeech = true
-            lastPartial = JSONObject(recognizer.partialResult).optString("partial").trim()
-            if (lastPartial.isNotEmpty()) onPartial(lastPartial)
-        }
         try {
+            var settle = SETTLE_CHUNKS
             val outcome = microphone.capture { buffer, length ->
                 val elapsed = System.currentTimeMillis() - start
+                // Un instante de espera: el eco del «¿Sí?» de Lucy y el final de «Lucy» no son la orden.
+                if (settle > 0) {
+                    settle--
+                    return@capture true
+                }
                 if (refine != null && audio.size() < MAX_AUDIO_BYTES) audio.write(buffer, 0, length)
                 // Micrófonos bajos (muy común en notebooks): se lleva la voz a un nivel que Vosk entienda.
                 val chunk = WakeWordTuning.applyGain(buffer, length, gain.next(buffer, length))
                 if (recognizer.acceptWaveForm(chunk, chunk.size)) {
                     val t = JSONObject(recognizer.result).optString("text").trim()
-                    if (t.isNotEmpty()) {
+                    if (t.isNotEmpty() && !onlyEcho(t)) {
                         text = t
                         return@capture false
+                    }
+                    // Era sólo el nombre o el eco del saludo: se sigue esperando la orden.
+                    if (t.isNotEmpty()) {
+                        heardSpeech = false
+                        lastPartial = ""
                     }
                 } else {
                     val partial = JSONObject(recognizer.partialResult).optString("partial").trim()
@@ -319,7 +281,7 @@ class VoskSpeechRecognitionEngine(
             }
             val recognized = text
             return when {
-                !recognized.isNullOrBlank() -> {
+                !recognized.isNullOrBlank() && !onlyEcho(recognized) -> {
                     val better = refine?.let { r -> runCatching { r(audio.toByteArray(), recognized) }.getOrNull() }?.trim()?.ifBlank { null }
                     RecognitionResult.Success(better ?: recognized, null, if (better != null) "$id+gemini" else id)
                 }
@@ -330,15 +292,6 @@ class VoskSpeechRecognitionEngine(
         } finally {
             recognizer.close()
         }
-    }
-
-    private fun hasWordsAfterName(model: Model, chunks: List<ByteArray>): Boolean {
-        val pcm = ByteArrayOutputStream().apply { chunks.forEach { write(it) } }.toByteArray()
-        val text = Recognizer(model, Microphone.SAMPLE_RATE.toFloat()).use { r ->
-            r.acceptWaveForm(pcm, pcm.size)
-            JSONObject(r.finalResult).optString("text")
-        }
-        return text.split(' ').filter { it.isNotBlank() && it !in WakeWordTuning.profile.aliases }.size >= 1
     }
 
     /** Ganancia según el pico más alto de la orden hasta ahora (no sube y baja a cada rato). */
@@ -352,6 +305,10 @@ class VoskSpeechRecognitionEngine(
 
     private companion object {
         const val STABLE_MARGIN_MS = 300L
+        const val SETTLE_CHUNKS = 3 // 0,3 s
+        /** Lo que no es una orden: el nombre o el eco del saludo de Lucy. */
+        val ECHO_WORDS = setOf("si", "sí", "decime", "dime", "luci", "lucy", "lusi", "lucie", "luchi", "luz", "y", "[unk]")
+        fun onlyEcho(text: String) = text.lowercase().split(' ').filter { it.isNotBlank() }.all { it in ECHO_WORDS }
         const val MAX_AUDIO_BYTES = 16_000 * 2 * 25
     }
 }

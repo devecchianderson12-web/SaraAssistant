@@ -31,6 +31,8 @@ dependencies {
     implementation(libs.jna.platform.jvm)
     // Voces de Piper (API de Java de sherpa-onnx en src/main/java; las DLL las agrega la compilación de Windows).
     implementation(libs.commons.compress)
+    // Estética moderna (oscura, bordes redondeados) para ventanas y ajustes.
+    implementation(libs.flatlaf)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
