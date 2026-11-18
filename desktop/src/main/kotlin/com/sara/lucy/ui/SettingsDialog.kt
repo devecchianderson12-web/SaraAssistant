@@ -54,10 +54,17 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
     private val continuous = JCheckBox("Conversación continua (sigue escuchando unos segundos después de responder)", s.continuousConversation)
     private val autostart = JCheckBox("Iniciar con Windows", Autostart.isEnabled())
     private val hotkey = JCheckBox("Atajo Ctrl+Alt+L para hablarle (se aplica al reiniciar Lucy)", s.hotkey)
+    private val quick = JCheckBox("Respuesta rápida (hace la orden apenas la entiende, sin esperar la pausa)", s.quickResponse)
+    private val chat = JCheckBox("Charlar después de una pregunta (sigue escuchando sin decir «Lucy»; después de una orden se calla)", s.chatFollowUp)
     private val duck = JCheckBox("Bajar la música de las otras apps mientras te escucho y hablo", s.duckMusic)
     private val echo = JCheckBox("Cancelación de eco (que la música de la compu no me active ni tape tu voz)", s.echoCancellation)
 
     // Voz
+    /** Voces de Piper (gratis, sin Internet, las mismas de Android) y la de Windows. */
+    private val voiceChoice = JComboBox(
+        (com.sara.core.voice.PiperVoice.entries.map { "${it.label} · ${it.country} (gratis, sin Internet)" } + "Voz de Windows").toTypedArray(),
+    )
+    private val piperStatus = JLabel(" ")
     private val voices = JComboBox<VoiceOption>()
     private val rate = JSlider(50, 200, (s.speechRate * 100).roundToInt())
     private val volume = JSlider(10, 100, (s.voiceVolume * 100).roundToInt())
@@ -82,6 +89,9 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
 
     init {
         ack.selectedIndex = Acknowledgement.entries.indexOf(s.acknowledgement)
+        voiceChoice.selectedIndex = if (s.usePiper) s.piperVoice.ordinal else com.sara.core.voice.PiperVoice.entries.size
+        showPiperStatus()
+        voiceChoice.addActionListener { showPiperStatus() }
         provider.selectedIndex = if (s.aiProvider == AiProvider.CLAUDE) 1 else 0
         geminiKey.text = if (app.secrets.get(SecretStore.GEMINI_KEY) != null) KEEP else ""
         claudeKey.text = if (app.secrets.get(SecretStore.ANTHROPIC_KEY) != null) KEEP else ""
@@ -97,11 +107,14 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         tabs.addTab("General", form(
             row(wake), row(hey),
             labeled("Sensibilidad (más = te escucha desde más lejos, pero se activa más por error)", sensitivity),
-            labeled("Cuando la llamás", ack), row(continuous), row(duck), row(echo),
+            labeled("Cuando la llamás", ack), row(quick), row(chat), row(continuous), row(duck), row(echo),
             row(JButton("Probar micrófono").apply { addActionListener { testMicrophone() } }), row(autostart), row(hotkey), row(minimized),
         ))
         tabs.addTab("Voz", form(
-            labeled("Voz", voices), labeled("Velocidad", rate), labeled("Volumen de la voz", volume),
+            labeled("Voz de Lucy", voiceChoice), row(piperStatus),
+            row(JButton("Bajar la voz ahora").apply { addActionListener { downloadVoice() } }),
+            note("Daniela (Argentina), Claude (México) y Sharvard (España): las mismas voces de Sara en Android. Se bajan una vez y después hablan sin Internet."),
+            labeled("Voz de Windows (si elegís «Voz de Windows» o mientras se baja la otra)", voices), labeled("Velocidad", rate), labeled("Volumen de la voz", volume),
             labeled("Pausa que te espera al hablar (ms)", pause),
             row(JButton("Probar voz").apply { addActionListener { testVoice() } }),
             note("Para más voces en español: Configuración de Windows › Hora e idioma › Voz › Agregar voces."),
@@ -161,7 +174,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
 
     private fun loadVoices() {
         app.scope.launch(Dispatchers.IO) {
-            val list = app.voice.voices("es-AR")
+            val list = app.windowsVoices.voices("es-AR")
             launch(Dispatchers.Swing) {
                 voices.addItem(null)
                 list.forEach { voices.addItem(it) }
@@ -176,6 +189,10 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         sensitivity = sensitivity.value / 100f,
         acknowledgement = Acknowledgement.entries[ack.selectedIndex.coerceAtLeast(0)],
         continuousConversation = continuous.isSelected,
+        quickResponse = quick.isSelected,
+        chatFollowUp = chat.isSelected,
+        usePiper = voiceChoice.selectedIndex < com.sara.core.voice.PiperVoice.entries.size,
+        piperVoice = com.sara.core.voice.PiperVoice.entries.getOrElse(voiceChoice.selectedIndex) { s.piperVoice },
         duckMusic = duck.isSelected,
         echoCancellation = echo.isSelected,
         hotkey = hotkey.isSelected,
@@ -194,6 +211,31 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         checkUpdates = updates.isSelected,
     )
 
+    private fun showPiperStatus() {
+        val voice = com.sara.core.voice.PiperVoice.entries.getOrNull(voiceChoice.selectedIndex)
+        piperStatus.text = when {
+            voice == null -> "Usa la voz de Windows."
+            app.piperModels.isInstalled(voice) -> "${voice.label} está lista."
+            else -> "${voice.label} se baja sola al guardar (${voice.megabytes} MB, una vez)."
+        }
+    }
+
+    private fun downloadVoice() {
+        app.settings.update { collect() }
+        app.ensurePiper()
+        app.scope.launch(Dispatchers.Swing) {
+            app.piperModels.state.collect { st ->
+                piperStatus.text = when (st) {
+                    is com.sara.lucy.speech.PiperState.Downloading -> "Bajando ${(st.progress * 100).roundToInt()} %…"
+                    com.sara.lucy.speech.PiperState.Installing -> "Instalando…"
+                    com.sara.lucy.speech.PiperState.Ready -> "Lista."
+                    is com.sara.lucy.speech.PiperState.Failed -> st.message
+                    com.sara.lucy.speech.PiperState.NotInstalled -> piperStatus.text
+                }
+            }
+        }
+    }
+
     private fun testVoice() {
         val preview = collect()
         app.settings.update { preview }
@@ -204,6 +246,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         val next = collect()
         val wakeChanged = next.wakeWordEnabled != s.wakeWordEnabled || next.heyPrefix != s.heyPrefix || next.sensitivity != s.sensitivity
         app.settings.update { next }
+        app.ensurePiper()
         runCatching {
             String(geminiKey.password).let { if (it != KEEP) app.secrets.put(SecretStore.GEMINI_KEY, it) }
             String(claudeKey.password).let { if (it != KEEP) app.secrets.put(SecretStore.ANTHROPIC_KEY, it) }

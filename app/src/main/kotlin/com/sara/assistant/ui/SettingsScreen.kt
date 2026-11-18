@@ -352,12 +352,12 @@ fun SettingsScreen(
             }
             OptionChips(
                 "Voces gratis y sin Internet (se bajan una vez)",
-                com.sara.assistant.voice.PiperVoice.entries.map { "piper:" + it.name to "${it.label} · ${it.country}" },
+                com.sara.core.voice.PiperVoice.entries.map { "piper:" + it.name to "${it.label} · ${it.country}" },
                 current,
                 subtitle = if (settings.usePiper) "Mujer, de ${settings.piperVoice.country}. Pesa ${settings.piperVoice.megabytes} MB y se baja sola por Wi-Fi. No hay voces gratis de Chile, Uruguay ni Colombia."
                 else "Daniela (Argentina), Claude (México) y Sharvard (España): todas las voces femeninas en español que hay gratis.",
             ) { id ->
-                val voice = com.sara.assistant.voice.PiperVoice.valueOf(id.removePrefix("piper:"))
+                val voice = com.sara.core.voice.PiperVoice.valueOf(id.removePrefix("piper:"))
                 actions.update { it.copy(usePiper = true, piperVoice = voice) }
                 actions.downloadPiper(false)
             }

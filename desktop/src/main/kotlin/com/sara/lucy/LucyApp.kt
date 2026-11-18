@@ -203,7 +203,20 @@ class LucyApp {
     private val recognizer = VoskSpeechRecognitionEngine(models, microphone, handoff) { pcm, draft ->
         if (settings.current.preciseRecognition) transcriber.transcribe(pcm, draft) else null
     }
-    val voice = SapiVoiceEngine(voiceBridge)
+    private val sapi = SapiVoiceEngine(voiceBridge)
+    /** Voces de Piper (Daniela, Claude, Sharvard): se bajan una vez; mientras tanto habla la voz de Windows. */
+    val piperModels = com.sara.lucy.speech.PiperModels(logger) { settings.current.piperVoice }
+    val piper = com.sara.lucy.speech.PiperVoiceEngine(piperModels, { settings.current.piperVoice }, sapi, levels, logger)
+    /** La voz que se usa ahora (para «Probar voz» y la lista de voces de Windows). */
+    val voice: VoiceEngine get() = if (settings.current.usePiper) piper else sapi
+    val windowsVoices: VoiceEngine get() = sapi
+
+    /** Baja la voz de Piper elegida si falta. */
+    fun ensurePiper() {
+        piperModels.refresh()
+        if (!settings.current.usePiper || piperModels.isInstalled() || piperModels.state.value is com.sara.lucy.speech.PiperState.Downloading) return
+        scope.launch { piperModels.download() }
+    }
 
     private val engines = object : EngineProvider {
         override fun wakeWordEngine(): WakeWordEngine = wake
@@ -248,6 +261,7 @@ class LucyApp {
     var notify: (title: String, text: String) -> Unit = { _, _ -> }
 
     fun start() {
+        ensurePiper()
         scheduler.onReminder = { r, late ->
             val said = when (r.kind) {
                 Reminder.KIND_ALARM -> "¡Alarma! Son las ${java.time.LocalTime.now().let { "${it.hour}:${it.minute.toString().padStart(2, '0')}" }}." + if (r.text != "Alarma") " ${r.text}." else ""
@@ -308,6 +322,8 @@ class LucyApp {
         languageTag = "es-AR",
         endSilenceMillis = speechPauseMillis.toLong(),
         continuousConversation = continuousConversation,
+        quickResponse = quickResponse,
+        chatFollowUp = chatFollowUp,
         wakeRequiresPrefix = heyPrefix,
         offlineVoice = VoiceParams(voiceId, speechRate, voiceVolume, "es-AR"),
     )

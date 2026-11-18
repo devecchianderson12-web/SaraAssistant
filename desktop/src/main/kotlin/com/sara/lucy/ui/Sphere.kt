@@ -2,7 +2,6 @@ package com.sara.lucy.ui
 
 import com.sara.lucy.data.SettingsRepository
 import java.awt.AlphaComposite
-import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Cursor
 import java.awt.Font
@@ -16,15 +15,11 @@ import java.awt.RenderingHints
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.Ellipse2D
-import java.awt.geom.Line2D
-import java.awt.geom.Path2D
 import java.awt.geom.Point2D
 import java.awt.image.BufferedImage
 import javax.swing.JComponent
 import javax.swing.JWindow
 import javax.swing.Timer
-import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -40,122 +35,76 @@ class SpherePainter {
     @Volatile var energy = 0.35f
     @Volatile var speaking = false
 
-    private val count = 260
-    private val px = DoubleArray(count)
-    private val py = DoubleArray(count)
-    private val pz = DoubleArray(count)
-    private val links: List<Pair<Int, Int>>
     private val start = System.nanoTime()
     private var smooth = 0.0
+    private val rows = 38
 
-    init {
-        val golden = PI * (3 - sqrt(5.0))
-        for (i in 0 until count) {
-            val y = 1 - i / (count - 1.0) * 2
-            val r = sqrt(1 - y * y)
-            px[i] = cos(golden * i) * r
-            py[i] = y
-            pz[i] = sin(golden * i) * r
-        }
-        val pairs = HashSet<Pair<Int, Int>>()
-        for (i in 0 until count) {
-            (0 until count).filter { it != i }
-                .sortedBy { j -> sq(px[i] - px[j]) + sq(py[i] - py[j]) + sq(pz[i] - pz[j]) }.take(2)
-                .forEach { j -> pairs += if (i < j) i to j else j to i }
-        }
-        links = pairs.toList()
+    /** Toda la esfera es de un solo color que recorre el espectro (una vuelta cada 10 s). */
+    private fun hue(t: Double, alpha: Double): Color {
+        val c = Color.getHSBColor(((t * 36) % 360 / 360).toFloat(), 0.85f, 1f)
+        return Color(c.red, c.green, c.blue, (alpha.coerceIn(0.0, 1.0) * 255).toInt())
     }
 
-    private fun sq(v: Double) = v * v
-
-    private fun hsv(h: Double, s: Double, v: Double, a: Double): Color {
-        val c = Color.getHSBColor((((h % 360) + 360) % 360 / 360).toFloat(), s.toFloat(), v.toFloat())
-        return Color(c.red, c.green, c.blue, (a.coerceIn(0.0, 1.0) * 255).toInt())
-    }
-
+    /**
+     * La misma esfera de Sara en Android: arte ASCII apretado (« .:-=+*#%@») que forma una esfera
+     * iluminada que gira, de un solo color RGB que va cambiando, y que late con la voz.
+     */
     fun paint(g: Graphics2D, w: Int, h: Int, time: Double = (System.nanoTime() - start) / 1e9) {
         if (w <= 0 || h <= 0) return
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
         val t = time
         val target = if (speaking) max(level.toDouble(), 0.35 + 0.25 * sin(t * 9) * sin(t * 3.3)) else level.toDouble()
         smooth += (target.coerceIn(0.0, 1.0) - smooth) * 0.25
         val pulse = (smooth * energy).coerceIn(0.0, 1.0)
         val cx = w / 2.0
         val cy = h / 2.0
-        val radius = min(w, h) * 0.30 * (1 + pulse * 0.18 + 0.015 * sin(t * 2))
-        val hue = t * 45
+        val r = min(w, h) * 0.36 * (1 + pulse * 0.14 + 0.012 * sin(t * 2))
 
-        // Resplandor.
-        val glowR = (radius * 1.6).toFloat()
+        val glowR = (r * 1.45).toFloat()
         g.paint = RadialGradientPaint(
             Point2D.Double(cx, cy), glowR, floatArrayOf(0f, 1f),
-            arrayOf(hsv(hue, 0.9, 1.0, 0.25 + 0.4 * pulse), Color(0, 0, 0, 0)), MultipleGradientPaint.CycleMethod.NO_CYCLE,
+            arrayOf(hue(t, (40 + 120 * pulse + 40 * energy) / 255), Color(0, 0, 0, 0)), MultipleGradientPaint.CycleMethod.NO_CYCLE,
         )
         g.fill(Ellipse2D.Double(cx - glowR, cy - glowR, glowR * 2.0, glowR * 2.0))
 
-        // Cáscara de partículas que gira.
-        val ay = t * (0.35 + 0.6 * pulse)
-        val ax = 0.35 * sin(t * 0.4)
-        val cosY = cos(ay); val sinY = sin(ay); val cosX = cos(ax); val sinX = sin(ax)
-        val sx = DoubleArray(count); val sy = DoubleArray(count); val sd = DoubleArray(count)
-        for (i in 0 until count) {
-            val wob = 1 + pulse * 0.10 * sin(t * 6 + i * 0.37)
-            val x1 = px[i] * cosY + pz[i] * sinY
-            val z1 = -px[i] * sinY + pz[i] * cosY
-            val y2 = py[i] * cosX - z1 * sinX
-            val z2 = py[i] * sinX + z1 * cosX
-            val persp = 1 / (1.9 - z2 * 0.6)
-            sx[i] = cx + x1 * radius * wob * persp * 1.3
-            sy[i] = cy + y2 * radius * wob * persp * 1.3
-            sd[i] = (z2 + 1) / 2
-        }
-        g.stroke = BasicStroke(0.8f)
-        val line = Line2D.Double()
-        for ((a, b) in links) {
-            val depth = (sd[a] + sd[b]) / 2
-            g.color = hsv(hue + 180 * depth, 0.75, 1.0, (0.08 + 0.35 * depth) * (0.6 + 0.4 * energy))
-            line.setLine(sx[a], sy[a], sx[b], sy[b])
-            g.draw(line)
-        }
-        val dot = Ellipse2D.Double()
-        for (i in 0 until count) {
-            val depth = sd[i]
-            g.color = hsv(hue + 180 * depth + i * 0.3, 0.6, 1.0, 0.25 + 0.75 * depth)
-            val size = (0.5 + 1.4 * depth) * (1 + pulse * 0.5) * max(1.0, min(w, h) / 170.0)
-            dot.setFrame(sx[i] - size, sy[i] - size, size * 2, size * 2)
-            g.fill(dot)
-        }
-
-        // Cintas de luz adentro.
-        val inner = radius * 0.78
-        g.stroke = BasicStroke(1.1f * max(1f, min(w, h) / 170f))
-        for (r in 0 until 3) {
-            val phase = t * (0.6 + r * 0.17) + r * 2.1
-            val tilt = r * 1.05 + t * 0.25
-            val cosT = cos(tilt); val sinT = sin(tilt)
-            val amp = 0.28 + 0.22 * pulse + 0.06 * sin(t + r)
-            for (strand in 0 until 8) {
-                val offset = (strand - 4) * (0.025 + 0.01 * pulse)
-                val path = Path2D.Double()
-                for (k in 0..40) {
-                    val th = k / 40.0 * 2 * PI
-                    val x = cos(th)
-                    val y = sin(th * 2 + phase) * amp + offset * cos(th * 3 + phase)
-                    val z = sin(th)
-                    val y1 = y * cosT - z * sinT
-                    val z1 = y * sinT + z * cosT
-                    val x2 = x * cosY - z1 * sinY
-                    if (k == 0) path.moveTo(cx + x2 * inner, cy + y1 * inner) else path.lineTo(cx + x2 * inner, cy + y1 * inner)
-                }
-                val edge = 1 - abs(strand - 4) / 4.0
-                g.color = hsv(hue + 90 + r * 70 + strand * 3, 0.7, 1.0, (0.1 + 0.45 * edge) * (0.5 + 0.5 * energy))
-                g.draw(path)
+        val cell = 2 * r / rows
+        g.font = Font(Font.MONOSPACED, Font.BOLD, max(4, (cell * 1.18).toInt()))
+        val fm = g.fontMetrics
+        val lightAngle = t * (0.5 + 0.8 * energy)
+        val lx = cos(lightAngle) * 0.65
+        val ly = -0.45
+        val lz = sin(lightAngle) * 0.35 + 0.65
+        val ll = sqrt(lx * lx + ly * ly + lz * lz)
+        val spin = t * (0.35 + 0.9 * pulse)
+        val cosS = cos(spin)
+        val sinS = sin(spin)
+        for (row in 0 until rows) {
+            val y = (row + 0.5) / rows * 2 - 1
+            for (col in 0 until rows) {
+                val x = (col + 0.5) / rows * 2 - 1
+                val d2 = x * x + y * y
+                if (d2 > 1) continue
+                val z = sqrt(1 - d2)
+                val light = max(0.0, (x * lx + y * ly + z * lz) / ll) * 0.75 + 0.18
+                val tx = x * cosS + z * sinS
+                val tz = -x * sinS + z * cosS
+                val bands = 0.5 + 0.5 * sin(tx * 7 + y * 3 + t * 0.8) * cos(y * 6 - tz * 4)
+                val wave = pulse * (0.5 + 0.5 * sin(sqrt(d2) * 14 - t * 9))
+                val value = (light * (0.6 + 0.4 * bands) + wave * 0.55) * (0.45 + 0.55 * energy)
+                val index = (value * (RAMP.length - 1)).toInt().coerceIn(0, RAMP.length - 1)
+                if (index == 0) continue
+                g.color = hue(t, (70 + 185 * value.coerceIn(0.0, 1.0)) / 255)
+                val ch = RAMP[index].toString()
+                g.drawString(ch, (cx + x * r - fm.stringWidth(ch) / 2.0).toFloat(), (cy + y * r + fm.ascent * 0.36).toFloat())
             }
         }
     }
 
     companion object {
+        /** De vacío a lleno. */
+        private const val RAMP = " .:-=+*#%@"
+
         /** Ícono (ventana, bandeja, .exe): la esfera sobre un círculo oscuro. */
         fun icon(size: Int): BufferedImage {
             val img = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)

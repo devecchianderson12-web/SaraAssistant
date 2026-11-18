@@ -210,6 +210,11 @@ jobs:
           Expand-Archive model.zip -DestinationPath model-tmp
           New-Item -ItemType Directory -Force content | Out-Null
           Move-Item model-tmp/vosk-model-small-es-0.42 content/model
+          # Voces de Piper: DLL de sherpa-onnx (la misma versión que Android).
+          Invoke-WebRequest https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-win-x64-jni.tar.bz2 -OutFile sherpa.tar.bz2
+          tar -xjf sherpa.tar.bz2
+          New-Item -ItemType Directory -Force content/sherpa | Out-Null
+          Copy-Item sherpa-onnx-v1.13.8-win-x64-jni/lib/*.dll content/sherpa/
           java -cp "$lib/*" com.sara.lucy.MainKt --write-icon windows/Launcher/lucy.ico
           if (-not (Test-Path windows/Launcher/lucy.ico)) { throw "sin ícono" }
 
@@ -224,7 +229,7 @@ jobs:
           $jar = (Get-ChildItem desktop/build/install/Lucy/lib -Filter "desktop*.jar" | Select-Object -First 1).Name
           jpackage --type app-image --name Lucy --app-version "1.0.${{ github.run_number }}" --vendor Lucy `
             --input desktop/build/install/Lucy/lib --main-jar $jar --main-class com.sara.lucy.MainKt `
-            --icon windows/Launcher/lucy.ico --app-content content/model --dest image `
+            --icon windows/Launcher/lucy.ico --app-content content/model --app-content content/sherpa --dest image `
             --java-options "-Xmx512m -XX:+UseSerialGC -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Djna.encoding=UTF-8" `
             --add-modules "java.base,java.desktop,java.logging,java.management,java.naming,java.net.http,java.prefs,java.scripting,java.sql,java.xml,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.localedata,jdk.charsets,jdk.zipfs,jdk.accessibility" `
             --jlink-options "--strip-debug --no-man-pages --no-header-files --compress=zip-6"

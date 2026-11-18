@@ -149,6 +149,13 @@ data class LucySettings(
     val city: String = "",
     val checkUpdates: Boolean = true,
     val startMinimized: Boolean = true,
+    /** Voz de Piper (gratis, sin Internet, la misma de Android) o la voz de Windows. */
+    val usePiper: Boolean = true,
+    val piperVoice: com.sara.core.voice.PiperVoice = com.sara.core.voice.PiperVoice.DANIELA,
+    /** Hace las órdenes completas sin esperar la pausa de fin de frase. */
+    val quickResponse: Boolean = true,
+    /** Después de una pregunta sigue escuchando para charlar (después de una orden se calla). */
+    val chatFollowUp: Boolean = true,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("wakeWordEnabled", wakeWordEnabled).put("sensitivity", sensitivity.toDouble()).put("heyPrefix", heyPrefix)
@@ -158,6 +165,7 @@ data class LucySettings(
         .put("sphereVisible", sphereVisible).put("sphereAlways", sphereAlways).put("sphereSize", sphereSize)
         .put("sphereX", sphereX ?: JSONObject.NULL).put("sphereY", sphereY ?: JSONObject.NULL).put("hotkey", hotkey)
         .put("saveHistory", saveHistory).put("city", city).put("checkUpdates", checkUpdates).put("startMinimized", startMinimized)
+        .put("usePiper", usePiper).put("piperVoice", piperVoice.name).put("quickResponse", quickResponse).put("chatFollowUp", chatFollowUp)
 
     companion object {
         fun fromJson(j: JSONObject): LucySettings {
@@ -186,6 +194,10 @@ data class LucySettings(
                 city = j.optString("city", d.city),
                 checkUpdates = j.optBoolean("checkUpdates", d.checkUpdates),
                 startMinimized = j.optBoolean("startMinimized", d.startMinimized),
+                usePiper = j.optBoolean("usePiper", d.usePiper),
+                piperVoice = runCatching { com.sara.core.voice.PiperVoice.valueOf(j.optString("piperVoice")) }.getOrDefault(d.piperVoice),
+                quickResponse = j.optBoolean("quickResponse", d.quickResponse),
+                chatFollowUp = j.optBoolean("chatFollowUp", d.chatFollowUp),
             )
         }
     }

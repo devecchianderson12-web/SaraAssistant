@@ -29,6 +29,8 @@ dependencies {
     implementation(libs.vosk.jvm)
     implementation(libs.jna.jvm)
     implementation(libs.jna.platform.jvm)
+    // Voces de Piper (API de Java de sherpa-onnx en src/main/java; las DLL las agrega la compilación de Windows).
+    implementation(libs.commons.compress)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

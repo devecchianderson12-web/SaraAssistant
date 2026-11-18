@@ -45,6 +45,7 @@ class SelfTest(private val dir: File) {
         runCatching { windows(app) }.onFailure { fail("windows", it.toString()) }
         runCatching { voice(app) }.onFailure { fail("voz", it.toString()) }
         runCatching { answers(app) }.onFailure { fail("respuestas", it.toString()) }
+        runCatching { piperVoice(app) }.onFailure { fail("voz Daniela", it.toString()) }
         runCatching { window(app) }.onFailure { fail("ventana", it.toString()) }
         runCatching { app.shutdown() }
         return finish()
@@ -142,6 +143,13 @@ class SelfTest(private val dir: File) {
             }
             withTimeoutOrNull(30_000) { while (app.orchestrator.isInteractionActive) kotlinx.coroutines.delay(100) }
         }
+    }
+
+    /** La voz Daniela (Piper): se baja, carga las DLL de sherpa-onnx y genera audio. */
+    private fun piperVoice(app: LucyApp) = runBlocking {
+        if (!app.piperModels.download()) { fail("voz Daniela", "no se pudo bajar"); return@runBlocking }
+        val samples = app.piper.synthesizeForTest("Hola, soy Lucy. ¿En qué te ayudo?")
+        if (samples > 0) ok("voz Daniela", "${samples / 22050f} s de audio") else fail("voz Daniela", "no generó audio (¿faltan las DLL?)")
     }
 
     private fun window(app: LucyApp) {

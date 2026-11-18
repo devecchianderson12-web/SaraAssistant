@@ -77,7 +77,7 @@ data class SaraSettings(
     /** Voz «Daniela» (Piper, Argentina, sin Internet). */
     val usePiper: Boolean = true,
     /** Cuál de las voces de Piper. */
-    val piperVoice: com.sara.assistant.voice.PiperVoice = com.sara.assistant.voice.PiperVoice.DANIELA,
+    val piperVoice: com.sara.core.voice.PiperVoice = com.sara.core.voice.PiperVoice.DANIELA,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
