@@ -336,32 +336,42 @@ jobs:
         with:
           name: Lucy-Windows-exe
 
-      - name: Crear release de Android SaraAssistantV${{ github.run_number }}
-        if: steps.cambios.outputs.android == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: SaraAssistantV${{ github.run_number }}
-          name: SaraAssistantV${{ github.run_number }}
-          target_commitish: ${{ github.sha }}
-          make_latest: true
-          files: SaraAssistant-*.apk
-          body: |
-            ${{ github.event.head_commit.message }}
-
-            APK debug generado automáticamente desde ${{ github.sha }}.
-            Instalación: descargá el APK, abrilo en el teléfono y permití «instalar apps desconocidas».
-
-      # «make_latest: false»: el teléfono busca la última release y no tiene que ver las de Windows.
-      - name: Crear release de Windows LucyV${{ github.run_number }}
-        if: steps.cambios.outputs.windows == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: LucyV${{ github.run_number }}
-          name: Lucy para Windows V${{ github.run_number }}
-          target_commitish: ${{ github.sha }}
-          make_latest: false
-          files: Lucy-Windows-*.exe
-          body: |
-            ${{ github.event.head_commit.message }}
-
-            Lucy para Windows: bajá el .exe y abrilo (no necesita instalación).
+      # Un solo release «SaraAssistant» con las dos apps (la versión va en el nombre de cada archivo).
+      # Se reemplaza sólo el archivo de la plataforma que cambió. El tag (SaraAssistantV<n>) sólo
+      # cambia con una versión nueva de Android: es lo que mira el teléfono para actualizarse.
+      - name: Actualizar el release SaraAssistant
+        if: steps.cambios.outputs.android == 'true' || steps.cambios.outputs.windows == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ANDROID: ${{ steps.cambios.outputs.android }}
+          WINDOWS: ${{ steps.cambios.outputs.windows }}
+          RUN: ${{ github.run_number }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -e
+          TAG=$(gh api "repos/$REPO/releases/latest" -q .tag_name 2>/dev/null || true)
+          if [ -z "$TAG" ]; then
+            TAG="SaraAssistantV$RUN"
+            gh release create "$TAG" -R "$REPO" --target "$SHA" --title "SaraAssistant" --notes "SaraAssistant" --latest
+          fi
+          echo "Release actual: $TAG"
+          ASSETS=$(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name')
+          if [ "$WINDOWS" = "true" ]; then
+            for a in $(echo "$ASSETS" | grep -E '^Lucy-Windows.*\.exe$' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
+            gh release upload "$TAG" Lucy-Windows-*.exe -R "$REPO" --clobber
+          fi
+          if [ "$ANDROID" = "true" ]; then
+            for a in $(echo "$ASSETS" | grep -E '\.apk$' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
+            gh release upload "$TAG" SaraAssistant-*.apk -R "$REPO" --clobber
+            NEW="SaraAssistantV$RUN"
+            gh release edit "$TAG" -R "$REPO" --tag "$NEW" --target "$SHA" --latest
+            TAG="$NEW"
+          fi
+          FILES=$(gh api "repos/$REPO/releases/tags/$TAG" -q '[.assets[].name] | join("\n- ")')
+          printf 'Sara para Android y Lucy para Windows.\n\n- %s\n\nAndroid: descargá el APK y abrilo en el teléfono (permití «instalar apps desconocidas»).\nWindows: descargá el .exe y abrilo (no necesita instalación).\n' "$FILES" > notas.md
+          gh release edit "$TAG" -R "$REPO" --title "SaraAssistant" --notes-file notas.md
+          # Releases separadas de Lucy de antes: ya no hacen falta.
+          for old in $(gh api "repos/$REPO/releases?per_page=100" -q '.[] | select(.tag_name | startswith("LucyV")) | .tag_name'); do
+            gh release delete "$old" -R "$REPO" -y --cleanup-tag || true
+          done
