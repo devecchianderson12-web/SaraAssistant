@@ -129,6 +129,8 @@ class AssistantOrchestrator(
     @Volatile private var wakeWordEnabled = false
     private var wakeJob: Job? = null
     private var interactionJob: Job? = null
+    /** La última respuesta terminó en pregunta: hay que escuchar lo que contesta el usuario. */
+    @Volatile private var endedWithQuestion = false
     /** La orden vino pegada al nombre: no se pregunta «¿Sí?». */
     @Volatile private var inlineCommand = false
 
@@ -339,6 +341,8 @@ class AssistantOrchestrator(
                         cfg.continuousConversation && interpretation.intent !is CommandIntent.Cancel -> followUpConversation(cfg)
                         // Charla: si le hiciste una pregunta (no una orden), sigue escuchando para conversar.
                         cfg.chatFollowUp && interpretation.intent is CommandIntent.Chat -> followUpConversation(cfg, chatOnly = true)
+                        // Terminó preguntando algo: escucha la respuesta en vez de cortar.
+                        endedWithQuestion -> followUpConversation(cfg, chatOnly = true)
                     }
                 }
             }
@@ -359,7 +363,11 @@ class AssistantOrchestrator(
             if (text.isEmpty()) return
             _events.emit(AssistantEvent.Heard(text, heard.engineId))
             machine.moveTo(AssistantState.Processing(text))
-            val interpretation = interpreter.interpret(text)
+            val answering = endedWithQuestion
+            val interpretation = interpreter.interpret(text).let {
+                // Respuesta a una pregunta de Sara («sí, mandalo»): va a la charla, que tiene el contexto.
+                if (answering && it.intent is CommandIntent.Unknown) it.copy(intent = CommandIntent.Chat(text)) else it
+            }
             when (interpretation.intent) {
                 is CommandIntent.Unknown -> return
                 is CommandIntent.Cancel -> {
@@ -368,8 +376,11 @@ class AssistantOrchestrator(
                 }
                 else -> {
                     execute(text, interpretation, cfg)
-                    // En la charla, una orden («poné música») la termina: hace la orden y se calla.
-                    if (chatOnly && interpretation.intent !is CommandIntent.Chat) return
+                    // En la charla, una orden («poné música») la termina: hace la orden y se calla
+                    // (salvo que la respuesta haya sido otra pregunta).
+                    if (chatOnly && interpretation.intent !is CommandIntent.Chat && !endedWithQuestion) return
+                    // Sin «charla continua», sólo se sigue escuchando mientras Sara termine preguntando.
+                    if (chatOnly && !cfg.chatFollowUp && !endedWithQuestion) return
                 }
             }
         }
@@ -529,6 +540,8 @@ class AssistantOrchestrator(
         execution.needsPermission?.let { _events.emit(AssistantEvent.PermissionNeeded(it)) }
         // Una orden que salió bien: «Okey, voy.» y nada más (el detalle queda escrito en pantalla).
         val brief = execution.success && !execution.informative && execution.needsPermission == null && intent !is CommandIntent.Cancel
+        // Si la respuesta termina en pregunta («¿Querés que le mande…?»), después se escucha la respuesta.
+        endedWithQuestion = !brief && execution.response.trimEnd().endsWith("?")
         when {
             brief -> speak(responses.acknowledgement, cfg, cacheable = true)
             execution.response.isNotBlank() -> speak(execution.response, cfg)

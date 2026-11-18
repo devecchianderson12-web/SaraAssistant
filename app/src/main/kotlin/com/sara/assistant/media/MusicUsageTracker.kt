@@ -13,13 +13,20 @@ import com.sara.core.util.SaraLogger
 
 /**
  * Mide cuánto tiempo reproduce cada app (Spotify, YouTube, etc.) usando las sesiones multimedia,
- * para saber cuál usa más el usuario. Sólo guarda el nombre del paquete y los minutos; no guarda
- * qué se escuchó. Necesita el «Acceso a notificaciones» que Sara ya pide para controlar la música.
+ * para saber cuál usa más el usuario, y qué artistas escucha más (gustos musicales, sin que haga
+ * falta decírselo). Sólo guarda paquetes, artistas y minutos. Necesita el «Acceso a notificaciones»
+ * que Sara ya pide para controlar la música.
  */
 class MusicUsageTracker(
     private val context: Context,
     private val logger: SaraLogger,
+    /** Resumen de gustos actualizado («Duki, Bizarrap y Tini»). */
+    private val onTaste: (String) -> Unit = {},
 ) {
+    private val taste = com.sara.core.memory.MusicTaste().apply { load(context.getSharedPreferences("music_usage", Context.MODE_PRIVATE).getString(TASTE_KEY, null)) }
+    /** Paquete -> artista que está sonando. */
+    private val artistOf = mutableMapOf<String, String>()
+    private var lastTaste: String? = null
     private val prefs = context.getSharedPreferences("music_usage", Context.MODE_PRIVATE)
     private val usage = MusicUsage().apply { load(prefs.getString(KEY, null)) }
     private val sessionManager = context.getSystemService(MediaSessionManager::class.java)
@@ -71,10 +78,12 @@ class MusicUsageTracker(
         list.filter { it.packageName != context.packageName }.forEach { controller ->
             val cb = object : MediaController.Callback() {
                 override fun onPlaybackStateChanged(state: PlaybackState?) = update(controller.packageName, state)
+                override fun onMetadataChanged(metadata: android.media.MediaMetadata?) = metadataChanged(controller.packageName, metadata)
                 override fun onSessionDestroyed() = stopped(controller.packageName)
             }
             controller.registerCallback(cb, main)
             callbacks[controller] = cb
+            metadataChanged(controller.packageName, controller.metadata)
             update(controller.packageName, controller.playbackState)
         }
     }
@@ -107,15 +116,50 @@ class MusicUsageTracker(
         if (playingSince.isNotEmpty()) save()
     }
 
-    private fun record(pkg: String, millis: Long) = usage.record(pkg, millis, System.currentTimeMillis())
+    /** Cambió la canción: lo escuchado hasta ahora va al artista anterior. */
+    @Synchronized
+    private fun metadataChanged(pkg: String, metadata: android.media.MediaMetadata?) {
+        val artist = metadata?.let {
+            it.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                ?: it.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                ?: it.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+        }?.takeIf { it.isNotBlank() }
+        if (artist == artistOf[pkg]) return
+        playingSince[pkg]?.let { since ->
+            val now = SystemClock.elapsedRealtime()
+            record(pkg, now - since)
+            playingSince[pkg] = now
+            save()
+        }
+        if (artist == null) artistOf.remove(pkg) else artistOf[pkg] = artist
+    }
+
+    private fun record(pkg: String, millis: Long) {
+        val now = System.currentTimeMillis()
+        usage.record(pkg, millis, now)
+        // Videos sueltos o podcasts en apps que no son de música no cuentan como gusto musical.
+        if (pkg !in NOT_MUSIC) artistOf[pkg]?.let { taste.record(it, millis, now) }
+    }
 
     private fun save() {
-        prefs.edit().putString(KEY, usage.serialize()).apply()
+        prefs.edit().putString(KEY, usage.serialize()).putString(TASTE_KEY, taste.serialize()).apply()
+        val summary = taste.summary(System.currentTimeMillis()) ?: return
+        if (summary != lastTaste) {
+            lastTaste = summary
+            runCatching { onTaste(summary) }
+        }
     }
 
     private companion object {
         const val TAG = "MusicUsage"
         const val KEY = "usage"
+        const val TASTE_KEY = "taste"
+        /** Apps donde lo que suena no suele ser música (videos, podcasts, audiolibros, navegadores). */
+        val NOT_MUSIC = setOf(
+            "com.google.android.youtube", "com.android.chrome", "com.google.android.apps.podcasts",
+            "com.audible.application", "com.netflix.mediaclient", "com.instagram.android", "com.zhiliaoapp.musically",
+            "com.ss.android.ugc.trill", "com.whatsapp", "com.whatsapp.w4b",
+        )
         const val RECENT_MS = 45_000L
     }
 }

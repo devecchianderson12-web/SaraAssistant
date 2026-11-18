@@ -26,6 +26,8 @@ class InMemoryStore : MemoryStore {
 object MemoryKeys {
     /** App para «poné música». Sin este dato se usa la app de siempre (la más usada o la del sistema). */
     const val MUSIC_APP = "app_musica"
+    /** Artistas que más escucha (lo aprende solo de las apps de música). */
+    const val MUSIC_TASTE = "gustos musicales"
     /** «rutina: buenas noches» -> «sacá la música y cerrá las apps». */
     const val ROUTINE_PREFIX = "rutina: "
     const val NOTE_PREFIX = "dato: "
@@ -35,6 +37,7 @@ object MemoryKeys {
     /** Cómo se lee en voz alta un recuerdo. */
     fun describe(key: String, value: String): String = when {
         key == MUSIC_APP -> "la música la pongo en $value"
+        key == MUSIC_TASTE -> "lo que más escuchás es $value"
         key.startsWith(ROUTINE_PREFIX) -> "cuando decís «${key.removePrefix(ROUTINE_PREFIX)}», $value"
         key.startsWith(NOTE_PREFIX) -> value
         else -> "$key: $value"
@@ -140,6 +143,8 @@ object SmallTalk {
 /** IA conversacional (Claude): responde preguntas, recuerda cosas y puede ejecutar órdenes. */
 interface ConversationalAssistant {
     fun isAvailable(): Boolean
+    /** Puede contestar esta pregunta (aunque no haya IA, p. ej. con Wikipedia). */
+    fun canAnswer(text: String): Boolean = isAvailable()
     /** Respuesta corta para decir en voz alta. Lanza excepción si falla la red o la clave. */
     suspend fun reply(text: String): String
 }

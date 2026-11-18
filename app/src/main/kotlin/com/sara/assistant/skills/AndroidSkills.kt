@@ -380,6 +380,8 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
         ),
         SkillAction("no_molestar", "Modo No molestar.", listOf(state), Risk.CHANGE, setOf(), "Relee el filtro de interrupciones."),
         SkillAction("bateria", "Nivel de batería y si está cargando."),
+        SkillAction("bloquear", "Bloquea y apaga la pantalla.", risk = Risk.CHANGE, permissions = setOf(PermissionKind.ACCESSIBILITY), verification = "Relee si la pantalla quedó apagada."),
+        SkillAction("desbloquear", "Prende la pantalla y la desbloquea (si no tiene contraseña).", risk = Risk.CHANGE, verification = "Relee si sigue bloqueada."),
         SkillAction("info", "Modelo, versión de Android, almacenamiento y memoria libres."),
     )
 
@@ -408,6 +410,8 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
         }
         "bluetooth" -> bluetooth(args.getValue("estado"), args["dispositivo"])
         "no_molestar" -> dnd(args.getValue("estado"))
+        "bloquear" -> lockScreen()
+        "desbloquear" -> unlockScreen()
         "bateria" -> {
             val bm = context.getSystemService(BatteryManager::class.java)
             val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -423,6 +427,38 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
                     "Libres: ${"%.1f".format(freeGb)} de ${"%.0f".format(totalGb)} gigas de almacenamiento y ${memory.availMem / 1_048_576} megas de memoria.",
             )
         }
+    }
+
+    private suspend fun lockScreen(): SkillResult {
+        val power = context.getSystemService(android.os.PowerManager::class.java)
+        if (!power.isInteractive) return SkillResult.Done("La pantalla ya está bloqueada.")
+        val done = com.sara.assistant.apps.SaraAccessibilityService.lockScreen(context)
+            ?: return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para bloquear la pantalla necesito Accesibilidad. Te dejé el botón.")
+        if (!done) return SkillResult.Failed("El teléfono no me dejó bloquear la pantalla.")
+        repeat(10) { if (!power.isInteractive) return SkillResult.Done("") ; delay(150) }
+        return SkillResult.Done("", verified = false)
+    }
+
+    private suspend fun unlockScreen(): SkillResult {
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        val power = context.getSystemService(android.os.PowerManager::class.java)
+        if (!keyguard.isKeyguardLocked && power.isInteractive) return SkillResult.Done("El teléfono ya está desbloqueado.")
+        // Prende la pantalla aunque Sara esté en segundo plano.
+        @Suppress("DEPRECATION")
+        val wake = power.newWakeLock(
+            android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            "sara:desbloquear",
+        )
+        runCatching { wake.acquire(3_000) }
+        val intent = Intent(context, com.sara.assistant.ui.UnlockActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        starter.start(intent, "Desbloquear")
+        repeat(20) {
+            if (!keyguard.isKeyguardLocked) return SkillResult.Done("Listo, desbloqueado.")
+            delay(150)
+        }
+        return if (keyguard.isDeviceSecure) SkillResult.Partial("Prendí la pantalla; como tiene contraseña, desbloqueala vos.")
+        else SkillResult.Done("Prendí la pantalla.", verified = false)
     }
 
     private suspend fun torch(on: Boolean): SkillResult {
@@ -823,22 +859,102 @@ class MapsSkill(private val starter: ActivityStarter, private val location: Loca
 
 class NotificationsSkill(private val context: Context) : Skill {
     override val id = "notificaciones"
-    override val description = "Lee un resumen de las notificaciones pendientes."
-    override val actions = listOf(SkillAction("leer", "Resumen de notificaciones.", permissions = setOf(PermissionKind.NOTIFICATION_ACCESS)))
+    override val description = "Lee las notificaciones pendientes (todas o de una app) y las borra."
+    private val appParam = Param("app", ParamType.STRING, "App (WhatsApp, Gmail…); vacío = todas.", required = false)
+    override val actions = listOf(
+        SkillAction("leer", "Lee las notificaciones: app, quién y qué dice.", listOf(appParam), permissions = setOf(PermissionKind.NOTIFICATION_ACCESS)),
+        SkillAction("borrar", "Borra las notificaciones (todas o de una app).", listOf(appParam), risk = Risk.CHANGE, permissions = setOf(PermissionKind.NOTIFICATION_ACCESS)),
+    )
+
+    /** Una notificación ya lista para decir. */
+    data class Item(val key: String, val packageName: String, val app: String, val title: String, val lines: List<String>, val clearable: Boolean)
 
     override suspend fun run(action: String, args: Map<String, String>): SkillResult {
-        val listener = SaraNotificationListener.instance ?: return SkillResult.Failed("El acceso a notificaciones todavía no se conectó.")
-        val pm = context.packageManager
-        val items = runCatching { listener.activeNotifications.toList() }.getOrDefault(emptyList())
-            .filter { !it.isOngoing && it.packageName != context.packageName }
-            .mapNotNull { sbn ->
-                val extras = sbn.notification.extras
-                val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() ?: return@mapNotNull null
-                val app = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
-                "$app: $title"
-            }.distinct()
-        if (items.isEmpty()) return SkillResult.Done("No tenés notificaciones.")
-        return SkillResult.Done("Tenés ${items.size}. " + items.take(5).joinToString("; ") + ".")
+        val listener = SaraNotificationListener.instance
+            ?: return SkillResult.NeedsPermission(PermissionKind.NOTIFICATION_ACCESS, "Necesito el acceso a notificaciones.")
+        val wanted = args["app"]?.takeIf { it.isNotBlank() }
+        val all = current(context, listener)
+        val items = if (wanted == null) all else all.filter { matchesApp(it, wanted) }
+        val where = wanted?.let { " de ${items.firstOrNull()?.app ?: it.replaceFirstChar { c -> c.uppercase() }}" }.orEmpty()
+        return when (action) {
+            "borrar" -> {
+                if (wanted == null) runCatching { listener.cancelAllNotifications() }
+                else items.forEach { runCatching { listener.cancelNotification(it.key) } }
+                // Se comprueba que se fueron (las fijas, como la música, no se pueden borrar).
+                kotlinx.coroutines.delay(300)
+                val left = current(context, listener).count { it.clearable && (wanted == null || matchesApp(it, wanted)) }
+                when {
+                    items.isEmpty() -> SkillResult.Done("No tenías notificaciones$where.")
+                    left == 0 -> SkillResult.Done("Listo, borré las notificaciones$where.")
+                    else -> SkillResult.Done("Borré algunas; quedan $left que no se pueden borrar.", verified = false)
+                }
+            }
+            else -> {
+                if (items.isEmpty()) return SkillResult.Done("No tenés notificaciones$where.")
+                val spoken = items.take(MAX_READ).joinToString(" ") { describe(it, showApp = wanted == null) }
+                val more = if (items.size > MAX_READ) " Y ${items.size - MAX_READ} más." else ""
+                val count = if (items.size == 1) "Tenés una notificación$where." else "Tenés ${items.size} notificaciones$where."
+                SkillResult.Done("$count $spoken$more")
+            }
+        }
+    }
+
+    companion object {
+        private const val MAX_READ = 6
+        private const val MAX_LINES = 4
+
+        fun matchesApp(item: Item, wanted: String): Boolean {
+            val w = com.sara.core.interpreter.TextNormalizer.normalize(wanted).replace(" ", "")
+            val app = com.sara.core.interpreter.TextNormalizer.normalize(item.app).replace(" ", "")
+            return app.contains(w) || w.contains(app) || item.packageName.contains(w)
+        }
+
+        private fun describe(item: Item, showApp: Boolean): String {
+            val who = if (showApp) "${item.app}, ${item.title}" else item.title
+            val body = item.lines.takeLast(MAX_LINES).joinToString(". ") { it.trim().trimEnd('.') }
+            return if (body.isBlank()) "$who." else "$who: $body."
+        }
+
+        /** Notificaciones visibles, sin resúmenes de grupo ni las fijas, con el texto completo de cada una. */
+        fun current(context: Context, listener: android.service.notification.NotificationListenerService): List<Item> {
+            val pm = context.packageManager
+            val raw = runCatching { listener.activeNotifications.toList() }.getOrDefault(emptyList())
+                .filter { it.packageName != context.packageName && !it.isOngoing }
+            // Si una app tiene notificaciones sueltas, su «resumen» (p. ej. «5 mensajes de 2 chats») sobra.
+            val withChildren = raw.filter { it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY == 0 }.map { it.packageName }.toSet()
+            return raw.filter { sbn -> sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY == 0 || sbn.packageName !in withChildren }
+                .sortedByDescending { it.postTime }
+                .mapNotNull { sbn ->
+                    val n = sbn.notification
+                    val extras = n.extras
+                    val title = (extras.getCharSequence(android.app.Notification.EXTRA_CONVERSATION_TITLE)
+                        ?: extras.getCharSequence(android.app.Notification.EXTRA_TITLE))?.toString()?.trim().orEmpty()
+                    val lines = mutableListOf<String>()
+                    // Mensajería (WhatsApp, Telegram…): cada mensaje con quién lo mandó.
+                    val messages = runCatching {
+                        android.app.Notification.MessagingStyle.Message.getMessagesFromBundleArray(
+                            extras.getParcelableArray(android.app.Notification.EXTRA_MESSAGES),
+                        )
+                    }.getOrNull().orEmpty()
+                    val isGroup = extras.getBoolean(android.app.Notification.EXTRA_IS_GROUP_CONVERSATION)
+                    for (m in messages) {
+                        val text = m.text?.toString()?.takeIf { it.isNotBlank() } ?: continue
+                        val sender = m.senderPerson?.name?.toString()
+                        lines += if (isGroup && sender != null) "$sender dice $text" else text
+                    }
+                    if (lines.isEmpty()) {
+                        extras.getCharSequenceArray(android.app.Notification.EXTRA_TEXT_LINES)?.mapNotNullTo(lines) { it?.toString() }
+                    }
+                    if (lines.isEmpty()) {
+                        (extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT) ?: extras.getCharSequence(android.app.Notification.EXTRA_TEXT))
+                            ?.toString()?.takeIf { it.isNotBlank() }?.let { lines += it }
+                    }
+                    if (title.isBlank() && lines.isEmpty()) return@mapNotNull null
+                    val app = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
+                    Item(sbn.key, sbn.packageName, app, title.ifBlank { app }, lines.map { it.replace(Regex("\\s+"), " ").take(300) }, sbn.isClearable)
+                }
+                .distinctBy { it.app + it.title + it.lines.joinToString() }
+        }
     }
 }
 

@@ -26,6 +26,23 @@ class SkillsTest {
     private fun intentOf(text: String) = RuleBasedCommandInterpreter().interpretNow(text).intent
 
     @Test
+    fun `pantalla, notificaciones y chats`() {
+        fun sk(text: String) = intentOf(text) as? CommandIntent.Skill
+        assertEquals("bloquear", sk("Sara, bloqueá la pantalla")?.action)
+        assertEquals("bloquear", sk("apagá la pantalla")?.action)
+        assertEquals("bloquear", sk("bloqueá el celular")?.action)
+        assertEquals("desbloquear", sk("Sara desbloqueá el celular")?.action)
+        assertEquals("desbloquear", sk("desbloqueá la pantalla")?.action)
+        assertEquals(CommandIntent.Skill("notificaciones", "leer", mapOf("app" to "whatsapp")), sk("Sara, léeme las notificaciones de WhatsApp"))
+        assertEquals(CommandIntent.Skill("notificaciones", "leer", emptyMap()), sk("leeme las notificaciones"))
+        assertEquals(CommandIntent.Skill("notificaciones", "borrar", emptyMap()), sk("borrá las notificaciones"))
+        assertEquals(CommandIntent.Skill("notificaciones", "borrar", mapOf("app" to "whatsapp")), sk("Sara, eliminá las notificaciones de WhatsApp"))
+        assertEquals(CommandIntent.Skill("whatsapp", "leer_chat", mapOf("contacto" to "Notas")), sk("Sara, leeme el chat de Notas"))
+        assertEquals(CommandIntent.Skill("whatsapp", "leer_chat", mapOf("contacto" to "mamá")), sk("leeme los mensajes de mi mamá"))
+        assertEquals(CommandIntent.Skill("whatsapp", "leer_chat", mapOf("contacto" to "Juan")), sk("qué me escribió Juan"))
+    }
+
+    @Test
     fun `horas y duraciones`() {
         assertEquals(600L, TimeParser.duration("un temporizador de 10 minutos"))
         assertEquals(5_400L, TimeParser.duration("una hora y media"))

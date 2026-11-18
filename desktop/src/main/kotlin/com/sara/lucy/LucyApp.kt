@@ -136,6 +136,7 @@ class LucyApp {
                 CommandSkills { executor },
                 ListsSkill(lists),
                 CalculatorSkill(),
+                com.sara.core.skills.MusicTasteSkill(memory),
                 AlarmSkill(scheduler),
                 ReminderSkill(scheduler),
                 RoutineSkill(scheduler),
@@ -153,7 +154,7 @@ class LucyApp {
 
     private val executor: DefaultCommandExecutor by lazy {
         DefaultCommandExecutor(
-            media, volume, apps = appLauncher, memory = memory, assistant = ai, skills = skills, planner = ai,
+            media, volume, apps = appLauncher, memory = memory, assistant = com.sara.core.ai.FastKnowledgeAssistant(ai, com.sara.core.ai.Wikipedia(logger)), skills = skills, planner = ai,
         )
     }
 

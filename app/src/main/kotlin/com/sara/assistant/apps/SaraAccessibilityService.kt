@@ -13,6 +13,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
+/** Lectura de un chat: mensajes de arriba a abajo; [fromMe] = lo mandó el usuario. */
+data class ChatLine(val fromMe: Boolean, val sender: String?, val text: String)
+
+sealed interface ChatReadResult {
+    data class Read(val chat: String, val lines: List<ChatLine>) : ChatReadResult
+    data object ChatNotFound : ChatReadResult
+    data class Failed(val message: String) : ChatReadResult
+}
+
 sealed interface ChatSendResult {
     data object Sent : ChatSendResult
     data object ChatNotFound : ChatSendResult
@@ -134,6 +143,49 @@ class SaraAccessibilityService : AccessibilityService() {
             }
         }
         ChatSendResult.Failed("No pude escribir en el chat").also { log("${it.message}. En pantalla: ${screenSummary(pkg)}") }
+    }
+
+    /** Abre [chat] (lista, archivados o búsqueda) y junta los últimos mensajes visibles. */
+    private suspend fun readChatNow(pkg: String, chat: String): ChatReadResult = withContext(Dispatchers.Main) {
+        if (!reachChatList(pkg)) {
+            log("WhatsApp no mostró la lista de chats. En pantalla: ${screenSummary(pkg)}")
+            return@withContext ChatReadResult.Failed("WhatsApp no respondió")
+        }
+        val opened = openFromList(pkg, chat) || openFromArchived(pkg, chat) || openFromSearch(pkg, chat)
+        if (!opened) {
+            log("No encontré «$chat». En pantalla: ${screenSummary(pkg)}")
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return@withContext ChatReadResult.ChatNotFound
+        }
+        val title = byId(pkg, "conversation_contact_name").firstOrNull()?.text?.toString() ?: chat
+        val width = resources.displayMetrics.widthPixels
+        repeat(12) {
+            delay(300)
+            val nodes = byId(pkg, "message_text").filter { !it.text.isNullOrBlank() && it.isVisibleToUser }
+            if (nodes.isEmpty()) return@repeat
+            val lines = nodes.map { n ->
+                val b = android.graphics.Rect().also(n::getBoundsInScreen)
+                // Los mensajes propios van a la derecha (globo verde): les sobra lugar a la izquierda.
+                val mine = b.left > width - b.right
+                ChatLine(mine, senderOf(pkg, n), n.text.toString().trim())
+            }
+            log("Leí ${lines.size} mensajes de «$title»")
+            return@withContext ChatReadResult.Read(title, lines)
+        }
+        log("El chat «$title» no mostró mensajes. En pantalla: ${screenSummary(pkg)}")
+        ChatReadResult.Read(title, emptyList())
+    }
+
+    /** En grupos, el nombre de quien escribió (está en el mismo globo que el texto). */
+    private fun senderOf(pkg: String, message: AccessibilityNodeInfo): String? {
+        var node: AccessibilityNodeInfo? = message.parent
+        repeat(4) {
+            val n = node ?: return null
+            n.findAccessibilityNodeInfosByViewId("$pkg:id/name_in_group_tv").orEmpty().firstOrNull()?.text?.let { return it.toString() }
+            n.findAccessibilityNodeInfosByViewId("$pkg:id/name_in_group").orEmpty().firstOrNull()?.text?.let { return it.toString() }
+            node = n.parent
+        }
+        return null
     }
 
     // ---------------------------------------------------------------- Ajustes del sistema
@@ -383,6 +435,11 @@ class SaraAccessibilityService : AccessibilityService() {
             return service.sendBySearch(pkg, chat, message)
         }
 
+        suspend fun readChat(context: Context, pkg: String, chat: String): ChatReadResult {
+            val service = awaitInstance(context) ?: return ChatReadResult.Failed("Accesibilidad detenida")
+            return service.readChatNow(pkg, chat)
+        }
+
         /** En la pantalla de Ajustes abierta, deja el interruptor principal en [on]. null = sin accesibilidad. */
         suspend fun setScreenSwitch(context: Context, on: Boolean): Boolean? {
             val service = awaitInstance(context) ?: return null
@@ -393,6 +450,12 @@ class SaraAccessibilityService : AccessibilityService() {
         suspend fun tapOnScreen(context: Context, name: String): String? {
             val service = awaitInstance(context) ?: return null
             return service.tapLabel(name)
+        }
+
+        /** Bloquea la pantalla (apaga y deja el teléfono bloqueado). null = sin accesibilidad. */
+        suspend fun lockScreen(context: Context): Boolean? {
+            val service = awaitInstance(context) ?: return null
+            return service.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
 
         fun back(context: Context) {

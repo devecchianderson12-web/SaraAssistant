@@ -47,7 +47,13 @@ import kotlin.random.Random
 @OptIn(ExperimentalCoroutinesApi::class)
 class AssistantOrchestratorTest {
 
-    private class Harness(scope: TestScope, val engines: FakeEngineProvider, config: AssistantConfig = AssistantConfig()) {
+    private class Harness(
+        scope: TestScope,
+        val engines: FakeEngineProvider,
+        config: AssistantConfig = AssistantConfig(),
+        assistant: com.sara.core.memory.ConversationalAssistant? = null,
+        interpreter: com.sara.core.interpreter.CommandInterpreter = RuleBasedCommandInterpreter(),
+    ) {
         val media = FakeMedia(MediaActionResult.Done("Música"))
         val volume = FakeVolume(VolumeState(6, 0, 15))
         val history = mutableListOf<HistoryEntry>()
@@ -55,8 +61,8 @@ class AssistantOrchestratorTest {
         val orchestrator = AssistantOrchestrator(
             scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scope.testScheduler)),
             engines = engines,
-            interpreter = RuleBasedCommandInterpreter(),
-            executor = DefaultCommandExecutor(media, volume, ResponseCatalog(Random(0))),
+            interpreter = interpreter,
+            executor = DefaultCommandExecutor(media, volume, ResponseCatalog(Random(0)), assistant = assistant),
             connectivity = FakeConnectivity(true),
             configProvider = { config },
             history = object : CommandHistory {
@@ -153,6 +159,35 @@ class AssistantOrchestratorTest {
 
         assertEquals(listOf(MediaAction.PLAY to null), h.media.calls)
         assertEquals(3, offline.calls) // no siguió escuchando después de «poné música»
+    }
+
+    @Test
+    fun `si la respuesta termina en pregunta escucha la respuesta`() = runTest {
+        val offline = FakeRecognizer("vosk", false)
+            .willReturn("¿qué es la luna?").willReturn("sí").willReturn("subí el volumen")
+        val asked = mutableListOf<String>()
+        val ai = object : com.sara.core.memory.ConversationalAssistant {
+            override fun isAvailable() = true
+            override suspend fun reply(text: String): String {
+                asked += text
+                return if (asked.size == 1) "Es el satélite de la Tierra. ¿Querés que te cuente más?" else "Se formó hace 4500 millones de años."
+            }
+        }
+        val voice = FakeVoice("tts", false)
+        val h = Harness(
+            this, FakeEngineProvider(offline = offline, offlineVoiceEngine = voice),
+            AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE, chatFollowUp = false),
+            assistant = ai,
+            interpreter = com.sara.core.interpreter.CompositeCommandInterpreter(RuleBasedCommandInterpreter(), aiAvailable = { true }),
+        )
+
+        h.orchestrator.activate()
+        advanceUntilIdle()
+
+        assertEquals(listOf("¿qué es la luna?", "sí"), asked)
+        // Después de una respuesta sin pregunta, se calla: no escuchó «subí el volumen».
+        assertEquals(2, offline.calls)
+        assertEquals(null, h.volume.lastSet)
     }
 
     @Test

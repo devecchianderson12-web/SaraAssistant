@@ -355,7 +355,7 @@ class DefaultCommandExecutor(
 
     private suspend fun chatAnswer(text: String): ExecutionResult {
         SmallTalk.answer(text)?.let { return ExecutionResult(true, it) }
-        val ai = assistant?.takeIf { it.isAvailable() }
+        val ai = assistant?.takeIf { it.canAnswer(text) }
             ?: return ExecutionResult(false, responses.needsAi(), ErrorKind.EXECUTION_FAILED, needsPermission = PermissionKind.AI_KEY)
         return runCatching { ExecutionResult(true, ai.reply(text)) }
             .getOrElse { ExecutionResult(false, it.message ?: responses.aiFailed(), ErrorKind.EXECUTION_FAILED) }

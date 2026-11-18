@@ -3,6 +3,7 @@
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 14+: tipo de servicio en primer plano "microphone" -->
@@ -129,6 +130,17 @@
             android:taskAffinity="com.sara.assistant.sphere"
             android:theme="@style/Theme.Sara.Sphere"
             android:turnScreenOn="true" />
+
+        <!-- Desbloquear por voz (teléfono sin contraseña): prende la pantalla y saca el bloqueo. -->
+        <activity
+            android:name=".ui.UnlockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="com.sara.assistant.unlock"
+            android:theme="@style/Theme.Sara.Sphere" />
 
         <service
             android:name=".services.SaraListeningService"

@@ -212,3 +212,16 @@ class CommandSkills(private val executor: () -> CommandExecutor) : Skill {
         return if (result.success) SkillResult.Done(result.response) else SkillResult.Failed(result.response)
     }
 }
+
+/** «¿Qué música me gusta?»: lo que aprendió de las apps de música. */
+class MusicTasteSkill(private val memory: com.sara.core.memory.MemoryStore) : Skill {
+    override val id = "gustos"
+    override val description = "Dice qué música le gusta al usuario (artistas que más escucha)."
+    override val actions = listOf(SkillAction("musica", "Artistas que más escucha."))
+
+    override suspend fun run(action: String, args: Map<String, String>): SkillResult {
+        val taste = memory.get(com.sara.core.memory.MemoryKeys.MUSIC_TASTE)
+            ?: return SkillResult.Done("Todavía no sé; dejame escucharte un poco más y te digo.")
+        return SkillResult.Done("Lo que más escuchás es $taste.")
+    }
+}

@@ -114,6 +114,17 @@ object SkillParser {
         }
         if (has("bluetooth", "blutu", "bluetu")) return skill("dispositivo", "bluetooth", "estado" to when { off -> "apagar"; on || has("conecta") -> "prender"; else -> "consultar" })
         if (has("no molestar", "modo no molestar")) return skill("dispositivo", "no_molestar", "estado" to when { off -> "apagar"; on -> "prender"; else -> "consultar" })
+        if (has("que musica me gusta", "que musica escucho", "que artistas me gustan", "que artistas escucho", "mis gustos musicales",
+                "que escucho mas", "que musica escucho mas", "cual es mi musica favorita", "cual es mi artista favorito", "que artista escucho mas")) {
+            return skill("gustos", "musica")
+        }
+        // «Bloqueá la pantalla», «apagá la pantalla», «desbloqueá el celular».
+        if (has("desbloquea", "desbloqueame", "desbloquear", "desbloqueá", "destraba", "destrabame")) return skill("dispositivo", "desbloquear")
+        if (has("bloquea", "bloqueame", "bloquear", "traba", "trabame") && has("pantalla", "celular", "telefono", "movil") ||
+            Regex("^(?:bloquea|bloqueate|bloquear)$").matches(n) ||
+            has("apaga la pantalla", "apagame la pantalla", "apagar la pantalla")
+        ) return skill("dispositivo", "bloquear")
+        if (has("prende la pantalla", "prendeme la pantalla", "encende la pantalla", "enciende la pantalla", "despertar la pantalla")) return skill("dispositivo", "desbloquear")
         if (has("bateria", "cuanta carga", "carga tengo", "porcentaje de carga")) return skill("dispositivo", "bateria")
         if (has("que telefono tengo", "que celular tengo", "version de android", "informacion del telefono", "info del telefono", "almacenamiento", "espacio libre", "cuanto espacio", "memoria libre")) {
             return skill("dispositivo", "info")
@@ -153,7 +164,23 @@ object SkillParser {
         if (has("donde estoy", "mi ubicacion", "en que calle estoy", "donde me encuentro")) return skill("mapas", "ubicacion")
 
         // ---------------------------------------------------------- Notificaciones
-        if (has("notificaciones", "notificacion") && !has("acceso")) return skill("notificaciones", "leer")
+        // «Leeme el chat de Notas», «qué me escribió Juan», «leeme los mensajes de mamá».
+        Regex("^(?:leeme|lee|leer|leelo|leime|lei|decime|dime|contame|que dice|que dicen)\\s+(?:el\\s+|los\\s+|las\\s+|los ultimos\\s+|el ultimo\\s+)?(?:chat|mensajes|mensaje|conversacion|whatsapp|whatsapps)\\s+(?:de|del|con)\\s+(.+)$").find(n)?.let { m ->
+            val who = cleanContact(originalTail(text, m.groupValues[1]))
+            if (who.isNotBlank() && TextNormalizer.normalize(who) !in setOf("whatsapp", "hoy", "ayer")) return skill("whatsapp", "leer_chat", "contacto" to who)
+        }
+        Regex("^(?:que|que cosa|que mas)\\s+(?:me\\s+)?(?:escribio|mando|dijo|puso|envio)\\s+(.+)$").find(n)?.let { m ->
+            val who = cleanContact(originalTail(text, m.groupValues[1]))
+            if (who.isNotBlank()) return skill("whatsapp", "leer_chat", "contacto" to who)
+        }
+        if (has("notificaciones", "notificacion") && !has("acceso")) {
+            val app = Regex("\\b(?:de|del)\\s+(?!hoy\\b|ayer\\b|ahora\\b)([a-z0-9 ]+)$").find(n)?.groupValues?.get(1)
+                ?.replace(Regex("^(?:(?:la|el|mi)\\s+)+"), "")?.trim()?.takeIf { it.isNotBlank() && it.split(' ').size <= 3 }
+            if (has("borra", "borrame", "borrar", "elimina", "eliminame", "eliminar", "limpia", "limpiame", "limpiar", "saca", "sacame", "quita", "quitame", "descarta", "cerra")) {
+                return skill("notificaciones", "borrar", "app" to app)
+            }
+            return skill("notificaciones", "leer", "app" to app)
+        }
 
         // ---------------------------------------------------------- Traducción
         Regex("^(?:como se dice|traduci|traduceme|traducime|traduce|traducir)\\s+(.+?)\\s+(?:al|en|a)\\s+(ingles|portugues|frances|italiano|aleman|japones|chino|ruso|coreano|espanol|castellano)$").find(n)?.let { m ->
@@ -274,6 +301,13 @@ object SkillParser {
 
     /** Devuelve el fragmento del texto original (con mayúsculas y tildes) que corresponde a [normalizedTail]. */
     private val GENERIC_BLUETOOTH = setOf("bluetooth", "blutu", "bluetu", "mi bluetooth", "el bluetooth", "algo", "algun dispositivo", "lo de siempre", "lo que siempre")
+
+    /** «mi mamá por WhatsApp» → «mamá». */
+    private fun cleanContact(raw: String): String = raw
+        .replace(Regex("\\s+(?:por|en|de)\\s+(?:whatsapp|wasap|guasap)$", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("^(?:(?:mi|mis|la|el|los|las)\\s+)+", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("^(?:chat|grupo)\\s+(?:de\\s+)?", RegexOption.IGNORE_CASE), "")
+        .trim(' ', ',', '.', '?', '¿', '!', '¡')
 
     private fun originalTail(text: String, normalizedTail: String): String {
         val words = normalizedTail.split(' ').size

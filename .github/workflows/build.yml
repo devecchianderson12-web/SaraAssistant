@@ -112,6 +112,12 @@ jobs:
             sleep 5
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'agregá pan a la lista de compras'" || true
             sleep 5
+            # Saber general sin IA (Wikipedia) y notificaciones.
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'qué es la fotosíntesis'" || true
+            sleep 8
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'leeme las notificaciones'" || true
+            sleep 5
+            adb logcat -d | grep -iE "fotos|Wikipedia|notificaci" | tail -8 || true
             adb shell input tap 160 601 || true
             sleep 3
             # Pestaña Ajustes (abajo a la derecha) y recorrido. Cada línea corre aparte: coordenadas fijas

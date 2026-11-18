@@ -80,7 +80,7 @@ class AppContainer(private val app: Application) {
 
     val activityStarter = com.sara.assistant.apps.ActivityStarter(app, ::isAppInForeground)
     val appLauncher = com.sara.assistant.apps.AndroidAppLauncher(app, activityStarter, logger)
-    val musicUsage = com.sara.assistant.media.MusicUsageTracker(app, logger)
+    val musicUsage = com.sara.assistant.media.MusicUsageTracker(app, logger) { taste -> memory.put(com.sara.core.memory.MemoryKeys.MUSIC_TASTE, taste) }
     val mediaControl = AndroidMediaControl(app, activityStarter, appLauncher, musicUsage, logger)
     private val messenger = com.sara.assistant.apps.WhatsAppMessenger(app, activityStarter, logger)
 
@@ -105,6 +105,7 @@ class AppContainer(private val app: Application) {
                 com.sara.core.skills.CommandSkills { executor },
                 com.sara.core.skills.ListsSkill(lists),
                 com.sara.core.skills.CalculatorSkill(),
+                com.sara.core.skills.MusicTasteSkill(memory),
                 com.sara.assistant.skills.AlarmSkill(app, activityStarter),
                 com.sara.assistant.skills.ReminderSkill(scheduler),
                 com.sara.assistant.skills.RoutineSkill(scheduler),
@@ -114,6 +115,7 @@ class AppContainer(private val app: Application) {
                 com.sara.assistant.skills.CalendarSkill(app, activityStarter),
                 com.sara.assistant.skills.MapsSkill(activityStarter, location),
                 com.sara.assistant.skills.NotificationsSkill(app),
+                com.sara.assistant.skills.WhatsAppReadSkill(app, activityStarter),
                 com.sara.assistant.skills.GoogleSkill(ai),
                 com.sara.assistant.skills.TranslatorSkill(ai),
                 com.sara.assistant.skills.SmartHomeSkill(app, activityStarter),
@@ -131,7 +133,7 @@ class AppContainer(private val app: Application) {
         DefaultCommandExecutor(
             mediaControl, AndroidVolumeControl(app), hasMediaSessionAccess = mediaControl::hasNotificationAccess, apps = appLauncher,
             messenger = messenger, confirmMessages = { settings.settings.value.confirmMessages },
-            memory = memory, assistant = ai, skills = skills, planner = ai,
+            memory = memory, assistant = com.sara.core.ai.FastKnowledgeAssistant(ai, com.sara.core.ai.Wikipedia(logger)), skills = skills, planner = ai,
         )
     }
 
