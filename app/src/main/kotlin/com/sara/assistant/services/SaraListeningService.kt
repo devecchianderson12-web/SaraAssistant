@@ -94,11 +94,7 @@ object SaraNotifications {
  */
 class SaraListeningService : LifecycleService() {
 
-    /**
-     * Escucha inteligente: el servicio queda vivo (sin micrófono) y abre el micrófono sólo cuando
-     * corresponde: conectado al auto o a un Bluetooth, cargando, con la pantalla encendida o en el
-     * horario elegido. Se vuelve a evaluar ante cada cambio y una vez por minuto (horario).
-     */
+    /** Cambios de conexión Bluetooth: se vuelve a evaluar si Sara sigue escuchando (ver [evaluate]). */
     private val conditionsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = evaluate()
     }
@@ -111,54 +107,50 @@ class SaraListeningService : LifecycleService() {
         override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>?) = evaluate()
     }
 
-    private fun screenOn() = getSystemService(android.os.PowerManager::class.java)?.isInteractive != false
+    private fun bluetoothAudio() = container.micRouter.bluetoothAudioConnected()
+    private var lastBluetooth: Boolean? = null
 
-    private fun charging(): Boolean =
-        getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
-
-    private fun conditions() = com.sara.core.assistant.ListenConditions(
-        appOpen = container.appTaskAlive.value,
-        bluetoothAudio = container.micRouter.bluetoothAudioConnected(),
-        charging = charging(),
-        screenOn = screenOn(),
-        hour = java.time.LocalTime.now().hour,
-    )
-
-    /** Abre o cierra el micrófono de la espera según el modo y lo que pasa ahora. */
+    /**
+     * Sara escucha mientras la app está abierta o en Recientes, o mientras sigue conectada a un
+     * Bluetooth. Al conectarse a un Bluetooth se quita sola de Recientes; al desconectarlo (o al
+     * sacarla de Recientes sin Bluetooth) se apaga del todo hasta que se vuelva a abrir la app.
+     */
     private fun evaluate() {
         val c = container
-        val s = c.settings.settings.value
-        if (!s.wakeWordEnabled) return
-        val listen = com.sara.core.assistant.ListenPolicy.shouldListen(s.listenMode, s.smartListening, conditions())
-        if (listen == listeningNow) return
-        // Si está en plena charla u orden, no se corta: se vuelve a evaluar al terminar.
-        if (!listen && c.orchestrator.isInteractionActive) return
-        listeningNow = listen
-        c.logger.d(TAG, com.sara.core.assistant.ListenPolicy.describe(s.listenMode, s.smartListening, conditions()))
-        c.orchestrator.setWakeWordEnabled(listen)
+        if (!c.settings.settings.value.wakeWordEnabled) return
+        val bluetooth = bluetoothAudio()
+        val appOpen = c.appTaskAlive.value
+        if (lastBluetooth == false && bluetooth && appOpen) {
+            c.logger.d(TAG, "Conectado a un Bluetooth: Sara se quita de Recientes y sigue escuchando")
+            c.appTaskAlive.value = false
+            runCatching { getSystemService(android.app.ActivityManager::class.java).appTasks.forEach { it.finishAndRemoveTask() } }
+        }
+        lastBluetooth = bluetooth
+        if (!c.appTaskAlive.value && !bluetooth) {
+            // Si está en plena orden o charla, se apaga al terminar.
+            if (c.orchestrator.isInteractionActive) return
+            c.logger.d(TAG, "Sin la app abierta ni Bluetooth: Sara se apaga del todo")
+            c.orchestrator.setWakeWordEnabled(false)
+            stopSelfSafely()
+            return
+        }
+        if (listeningNow != true) {
+            listeningNow = true
+            c.orchestrator.setWakeWordEnabled(true)
+        }
     }
 
     private fun startWatching() {
         if (watching) return
         watching = true
         registerReceiver(conditionsReceiver, android.content.IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_POWER_CONNECTED)
-            addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction(android.bluetooth.BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
         })
         receiverRegistered = true
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(audioDevices, null)
         // Cambios de ajustes, fin de cada interacción y el horario (cada minuto).
-        lifecycleScope.launch { container.settings.settings.collect { listeningNow = null; evaluate() } }
         lifecycleScope.launch { container.appTaskAlive.collect { evaluate() } }
         lifecycleScope.launch { container.orchestrator.state.collect { if (!container.orchestrator.isInteractionActive) evaluate() } }
-        lifecycleScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(60_000)
-                evaluate()
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -178,7 +170,7 @@ class SaraListeningService : LifecycleService() {
             else -> {
                 // intent == null: el sistema relanzó el servicio tras cerrarlo (START_STICKY). En el modo
                 // «sólo con la app abierta» no vuelve solo.
-                if (intent == null && (!c.settings.settings.value.wakeWordEnabled || !com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(c.settings.settings.value.listenMode, c.settings.settings.value.smartListening))) {
+                if (intent == null && (!c.settings.settings.value.wakeWordEnabled || (!c.appTaskAlive.value && !bluetoothAudio()))) {
                     stopSelfSafely()
                     return START_NOT_STICKY
                 }
@@ -193,24 +185,11 @@ class SaraListeningService : LifecycleService() {
         return START_STICKY
     }
 
-    /**
-     * Cerrar Sara desde «Recientes»: si además hay otros momentos elegidos (auto, carga…), el servicio
-     * queda vivo sin micrófono y escucha sólo cuando se cumplen; si sólo estaba «con la app abierta»,
-     * se apaga del todo.
-     */
+    /** Sacarla de Recientes: si no hay Bluetooth conectado se apaga del todo (ver [evaluate]). */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        val c = container
-        c.appTaskAlive.value = false
-        val s = c.settings.settings.value
-        if (!com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(s.listenMode, s.smartListening)) {
-            c.logger.d(TAG, "App quitada de recientes: se apaga la escucha")
-            c.orchestrator.setWakeWordEnabled(false)
-            stopSelfSafely()
-        } else {
-            c.logger.d(TAG, "App quitada de recientes; escucha sólo en los momentos elegidos")
-            evaluate()
-        }
+        container.appTaskAlive.value = false
+        evaluate()
     }
 
     private var observing = false
@@ -279,10 +258,9 @@ class SaraListeningService : LifecycleService() {
     }
 
     private fun statusText(state: AssistantState) = when (state) {
-        AssistantState.Inactive -> com.sara.core.assistant.ListenPolicy.describe(
-            container.settings.settings.value.listenMode, container.settings.settings.value.smartListening, conditions(),
-        ) + " · tocá «Hablar» o usá el botón de asistente"
-        AssistantState.WaitingForWakeWord -> "Esperando tu llamado · el audio se procesa en el teléfono"
+        AssistantState.Inactive -> "En pausa · tocá «Hablar» o usá el botón de asistente"
+        AssistantState.WaitingForWakeWord -> if (bluetoothAudio() && !container.appTaskAlive.value) "Esperando tu llamado · se apaga al desconectar el Bluetooth"
+        else "Esperando tu llamado · se apaga al sacarla de Recientes"
         is AssistantState.Listening -> "Escuchando tu orden…"
         is AssistantState.Processing -> "Procesando…"
         is AssistantState.Executing -> "Ejecutando…"
@@ -337,7 +315,7 @@ class SaraListeningService : LifecycleService() {
     }
 }
 
-/** Reactiva la escucha tras reiniciar o actualizar la app, si el usuario lo pidió. */
+/** Tras actualizar la app avisa con una notificación. La escucha no arranca sola: sólo al abrir la app. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
@@ -346,10 +324,6 @@ class BootReceiver : BroadcastReceiver() {
         c.scope.launch {
             try {
                 if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) SaraNotifications.postUpdated(context)
-                val settings = c.settings.current()
-                if (settings.wakeWordEnabled && settings.autostart && com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(settings.listenMode, settings.smartListening)) {
-                    SaraListeningService.start(context, StartContext.BOOT_COMPLETED)
-                }
             } finally {
                 pending.finish()
             }

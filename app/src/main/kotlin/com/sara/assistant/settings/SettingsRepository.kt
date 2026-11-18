@@ -32,7 +32,6 @@ data class SaraSettings(
     val wakeEngine: WakeEngineType = WakeEngineType.VOSK,
     val sensitivity: Float = WakeWordTuning.DEFAULT_SENSITIVITY,
     val acknowledgement: Acknowledgement = Acknowledgement.VOICE,
-    val autostart: Boolean = false,
     val echoCancellation: Boolean = true,
     /** Silencio tolerado dentro de una orden (pausas al hablar). */
     val speechPauseMillis: Int = 1_700,
@@ -60,9 +59,6 @@ data class SaraSettings(
     val continuousConversation: Boolean = false,
     /** Activación con «Ey Sara» (true, menos falsas activaciones) o con «Sara» sola. */
     val heySara: Boolean = false,
-    /** Cuándo escucha «Sara»: siempre, inteligente (auto, cargando…) o sólo con la app abierta. */
-    val listenMode: com.sara.core.assistant.ListenMode = com.sara.core.assistant.ListenMode.SMART,
-    val smartListening: com.sara.core.assistant.SmartListening = com.sara.core.assistant.SmartListening(),
     /** Mostrar la esfera a pantalla completa al llamarla fuera de la app (también bloqueado). */
     val sphereOverlay: Boolean = true,
     // Micrófono y Bluetooth (auto, auriculares)
@@ -110,7 +106,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val wakeEngine = stringPreferencesKey("wake_engine")
         val sensitivity = floatPreferencesKey("sensitivity")
         val acknowledgement = stringPreferencesKey("ack")
-        val autostart = booleanPreferencesKey("autostart")
         val echoCancellation = booleanPreferencesKey("echo_cancellation")
         val speechPause = androidx.datastore.preferences.core.intPreferencesKey("speech_pause_ms")
         val voiceMode = stringPreferencesKey("voice_mode")
@@ -130,14 +125,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val aiProvider = stringPreferencesKey("ai_provider")
         val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
         val heySara = booleanPreferencesKey("hey_sara_v2")
-        val listenMode = stringPreferencesKey("listen_mode")
-        val smartAppOpen = booleanPreferencesKey("smart_app_open")
-        val smartBluetooth = booleanPreferencesKey("smart_bluetooth")
-        val smartCharging = booleanPreferencesKey("smart_charging")
-        val smartScreenOn = booleanPreferencesKey("smart_screen_on")
-        val smartSchedule = booleanPreferencesKey("smart_schedule")
-        val smartFrom = androidx.datastore.preferences.core.intPreferencesKey("smart_from")
-        val smartTo = androidx.datastore.preferences.core.intPreferencesKey("smart_to")
         val sphereOverlay = booleanPreferencesKey("sphere_overlay")
         val micChoice = stringPreferencesKey("mic_choice")
         val voiceBoost = booleanPreferencesKey("voice_boost")
@@ -159,7 +146,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             wakeEngine = this[Keys.wakeEngine].toEnum(d.wakeEngine),
             sensitivity = this[Keys.sensitivity] ?: d.sensitivity,
             acknowledgement = this[Keys.acknowledgement].toEnum(d.acknowledgement),
-            autostart = this[Keys.autostart] ?: d.autostart,
             echoCancellation = this[Keys.echoCancellation] ?: d.echoCancellation,
             speechPauseMillis = this[Keys.speechPause] ?: d.speechPauseMillis,
             voiceMode = this[Keys.voiceMode].toEnum(d.voiceMode),
@@ -179,16 +165,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             aiProvider = this[Keys.aiProvider].toEnum(d.aiProvider),
             continuousConversation = this[Keys.continuousConversation] ?: d.continuousConversation,
             heySara = this[Keys.heySara] ?: d.heySara,
-            listenMode = this[Keys.listenMode].toEnum(d.listenMode),
-            smartListening = com.sara.core.assistant.SmartListening(
-                appOpen = this[Keys.smartAppOpen] ?: d.smartListening.appOpen,
-                bluetooth = this[Keys.smartBluetooth] ?: d.smartListening.bluetooth,
-                charging = this[Keys.smartCharging] ?: d.smartListening.charging,
-                screenOn = this[Keys.smartScreenOn] ?: d.smartListening.screenOn,
-                schedule = this[Keys.smartSchedule] ?: d.smartListening.schedule,
-                fromHour = this[Keys.smartFrom] ?: d.smartListening.fromHour,
-                toHour = this[Keys.smartTo] ?: d.smartListening.toHour,
-            ),
             sphereOverlay = this[Keys.sphereOverlay] ?: d.sphereOverlay,
             micChoice = this[Keys.micChoice].toEnum(d.micChoice),
             voiceBoost = this[Keys.voiceBoost] ?: d.voiceBoost,
@@ -206,7 +182,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.wakeEngine] = s.wakeEngine.name
         this[Keys.sensitivity] = s.sensitivity
         this[Keys.acknowledgement] = s.acknowledgement.name
-        this[Keys.autostart] = s.autostart
         this[Keys.echoCancellation] = s.echoCancellation
         this[Keys.speechPause] = s.speechPauseMillis
         this[Keys.voiceMode] = s.voiceMode.name
@@ -226,14 +201,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.aiProvider] = s.aiProvider.name
         this[Keys.continuousConversation] = s.continuousConversation
         this[Keys.heySara] = s.heySara
-        this[Keys.listenMode] = s.listenMode.name
-        this[Keys.smartAppOpen] = s.smartListening.appOpen
-        this[Keys.smartBluetooth] = s.smartListening.bluetooth
-        this[Keys.smartCharging] = s.smartListening.charging
-        this[Keys.smartScreenOn] = s.smartListening.screenOn
-        this[Keys.smartSchedule] = s.smartListening.schedule
-        this[Keys.smartFrom] = s.smartListening.fromHour
-        this[Keys.smartTo] = s.smartListening.toHour
         this[Keys.sphereOverlay] = s.sphereOverlay
         this[Keys.micChoice] = s.micChoice.name
         this[Keys.voiceBoost] = s.voiceBoost

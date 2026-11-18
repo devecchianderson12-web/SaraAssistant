@@ -40,7 +40,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import com.sara.assistant.BuildConfig
 import com.sara.assistant.audio.MicChoice
-import com.sara.core.assistant.ListenMode
 import com.sara.assistant.audio.MusicWhileListening
 import kotlinx.coroutines.launch
 import com.sara.assistant.settings.OfflineRecognizerType
@@ -232,31 +231,11 @@ fun SettingsScreen(
             ) { v -> actions.update { it.copy(acknowledgement = v) } }
 
             SubHeader("Escucha y batería")
-            Text("Cuándo espera «${if (settings.heySara) "Ey Sara" else "Sara"}»: elegí uno o varios (alcanza con que se cumpla uno)", style = MaterialTheme.typography.bodyLarge)
-            val always = settings.listenMode == ListenMode.ALWAYS
-            SwitchRow(
-                "Siempre",
-                if (always) "Te escucha todo el tiempo (es lo que más batería gasta). Con esto activado, las opciones de abajo no hacen falta."
-                else "Apagado: sólo escucha en los momentos que elijas abajo; el resto del tiempo no gasta batería.",
-                always,
-            ) { v -> actions.update { it.copy(listenMode = if (v) ListenMode.ALWAYS else ListenMode.SMART) } }
-            val smart = settings.smartListening
-            fun setSmart(change: (com.sara.core.assistant.SmartListening) -> com.sara.core.assistant.SmartListening) =
-                actions.update { it.copy(smartListening = change(it.smartListening)) }
-            SwitchRow("Con la app abierta", "Mientras está abierta o en Recientes (al sacarla de Recientes deja de contar)", smart.appOpen, enabled = !always) { v -> setSmart { it.copy(appOpen = v) } }
-            SwitchRow("Conectado al auto o a un Bluetooth", "Radio del auto, auriculares, parlante: al desconectarlo cierra el micrófono", smart.bluetooth, enabled = !always) { v -> setSmart { it.copy(bluetooth = v) } }
-            SwitchRow("Mientras carga", "Enchufado no gasta batería", smart.charging, enabled = !always) { v -> setSmart { it.copy(charging = v) } }
-            SwitchRow("Con la pantalla encendida", "Mientras usás el teléfono", smart.screenOn, enabled = !always) { v -> setSmart { it.copy(screenOn = v) } }
-            SwitchRow("En un horario", "Por ejemplo, de 8 a 23", smart.schedule, enabled = !always) { v -> setSmart { it.copy(schedule = v) } }
-            if (smart.schedule && !always) {
-                SliderRow("Desde", smart.fromHour.toFloat(), 0f..23f, { "${it.roundToInt()} h" }) { v -> setSmart { it.copy(fromHour = v.roundToInt()) } }
-                SliderRow("Hasta", smart.toHour.toFloat(), 0f..23f, { "${it.roundToInt()} h" }) { v -> setSmart { it.copy(toHour = v.roundToInt()) } }
-            }
-            if (!always && !smart.appOpen && !smart.bluetooth && !smart.charging && !smart.screenOn && !smart.schedule) {
-                Hint("Sin ningún momento elegido no te escucha sola: llamala con el botón de abajo o tocando la esfera.")
-            } else if (!always && smart.appOpen && !(smart.bluetooth || smart.charging || smart.screenOn || smart.schedule)) {
-                Hint("Sólo con la app abierta: al sacarla de Recientes Sara se apaga del todo.")
-            }
+            Hint(
+                "Sara te escucha mientras la app está abierta o en Recientes. Si se conecta a un Bluetooth (el auto), se quita sola de " +
+                    "Recientes y sigue escuchando hasta que lo desconectes; ahí se apaga del todo. Al sacarla de Recientes también se " +
+                    "apaga. Para volver a usarla, abrí la app.",
+            )
             StatusLine(
                 "Llamarla con el botón, sin gastar batería",
                 if (system.defaultAssistant) "Activado: mantené apretado el botón de encendido (o deslizá desde una esquina) y Sara te escucha, en cualquier modo."
@@ -292,9 +271,6 @@ fun SettingsScreen(
             ) { v -> actions.update { it.copy(sphereOverlay = v) } }
             SwitchRow("Activación manual", "Tocar el círculo central para hablar", settings.manualActivationEnabled) { v ->
                 actions.update { it.copy(manualActivationEnabled = v) }
-            }
-            SwitchRow("Reactivar al encender el teléfono", "En Android 11+ requiere tocar una notificación, salvo que Sara sea el asistente predeterminado", settings.autostart) { v ->
-                actions.update { it.copy(autostart = v) }
             }
 
             SubHeader("Motor")

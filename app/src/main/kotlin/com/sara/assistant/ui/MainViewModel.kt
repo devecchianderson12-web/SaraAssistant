@@ -150,7 +150,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         c.settings.update(transform)
         val after = c.settings.current()
         // Reinicia la detección si cambió el motor o la sensibilidad.
-        if (after.wakeWordEnabled && (before.wakeEngine != after.wakeEngine || before.sensitivity != after.sensitivity || before.heySara != after.heySara || before.listenMode != after.listenMode) && SaraListeningService.running.value) {
+        if (after.wakeWordEnabled && (before.wakeEngine != after.wakeEngine || before.sensitivity != after.sensitivity || before.heySara != after.heySara) && SaraListeningService.running.value) {
             c.orchestrator.setWakeWordEnabled(false)
             c.orchestrator.setWakeWordEnabled(true)
         }

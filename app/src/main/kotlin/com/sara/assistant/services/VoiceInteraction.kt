@@ -46,15 +46,8 @@ class SaraVoiceInteractionService : VoiceInteractionService() {
     override fun onReady() {
         super.onReady()
         val c = container
+        // La escucha de «Sara» sólo arranca al abrir la app (no sola al prender el teléfono).
         c.logger.d("VIS", "Sara es el asistente predeterminado")
-        c.scope.launch {
-            val settings = c.settings.current()
-            if (settings.wakeWordEnabled && settings.autostart && com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(settings.listenMode, settings.smartListening) &&
-                !SaraListeningService.running.value
-            ) {
-                SaraListeningService.start(this@SaraVoiceInteractionService, StartContext.VOICE_INTERACTION_SERVICE)
-            }
-        }
     }
 }
 
