@@ -146,6 +146,7 @@ class PiperVoiceEngine(
     private val cache = HashMap<String, FloatArray>()
     /** Muestras ya entregadas al parlante en la frase actual. */
     @Volatile private var written = 0
+    @Volatile private var firstSound = 0L
 
     override suspend fun availability(): Availability =
         if (models.isInstalled()) Availability.Available else fallback.availability()
@@ -194,6 +195,8 @@ class PiperVoiceEngine(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         written = 0
+        val started = System.currentTimeMillis()
+        firstSound = 0L
         return try {
             track.setVolume(params.volume.coerceIn(0f, 1f))
             track.play()
@@ -215,6 +218,7 @@ class PiperVoiceEngine(
             // Esperar a que termine de sonar lo que quedó en el búfer (máximo 3 s).
             val end = System.currentTimeMillis() + 3_000
             while (track.playbackHeadPosition < written && System.currentTimeMillis() < end) kotlinx.coroutines.delay(20)
+            logger.d(TAG, "Daniela habló: ${firstSound - started} ms hasta el primer sonido, ${written / engine.sampleRate().toFloat()} s de audio")
             SpeakResult.Completed(id)
         } catch (e: CancellationException) {
             throw e
@@ -236,6 +240,7 @@ class PiperVoiceEngine(
             var sum = 0.0
             for (i in offset until offset + n) sum += samples[i] * samples[i]
             levels.update((sqrt(sum / n) * 4).toFloat())
+            if (firstSound == 0L) firstSound = System.currentTimeMillis()
             val count = track.write(samples, offset, n, AudioTrack.WRITE_BLOCKING)
             if (count <= 0) return
             offset += count
