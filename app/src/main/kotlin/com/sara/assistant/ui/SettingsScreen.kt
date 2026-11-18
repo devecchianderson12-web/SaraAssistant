@@ -137,10 +137,11 @@ private fun UpdateCard(state: UpdateState, actions: SettingsActions) {
     }
 }
 
-/** Voces neuronales de Azure de Argentina y Uruguay (las «Natural» de Edge). */
+/** Voces neuronales de Azure de Argentina, Uruguay y Chile (las «Natural» de Edge). */
 private val NATURAL_VOICES = listOf(
     "es-AR-ElenaNeural" to "Elena · Argentina", "es-AR-TomasNeural" to "Tomás · Argentina",
     "es-UY-ValentinaNeural" to "Valentina · Uruguay", "es-UY-MateoNeural" to "Mateo · Uruguay",
+    "es-CL-CatalinaNeural" to "Catalina · Chile",
 )
 
 private val modeOptions = listOf(EngineMode.AUTOMATIC to "Automático", EngineMode.ONLINE to "Online", EngineMode.OFFLINE to "Offline")
