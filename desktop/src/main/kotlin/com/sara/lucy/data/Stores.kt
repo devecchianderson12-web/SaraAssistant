@@ -158,6 +158,8 @@ data class LucySettings(
     val chatFollowUp: Boolean = true,
     /** Micrófono que usa Lucy (nombre); vacío = el predeterminado de Windows. */
     val microphone: String = "",
+    /** Potenciador del micrófono: 0 = automático, 100 = normal, 200…800 = ×2…×8. */
+    val micBoost: Int = 0,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("wakeWordEnabled", wakeWordEnabled).put("sensitivity", sensitivity.toDouble()).put("heyPrefix", heyPrefix)
@@ -168,6 +170,7 @@ data class LucySettings(
         .put("sphereX", sphereX ?: JSONObject.NULL).put("sphereY", sphereY ?: JSONObject.NULL).put("hotkey", hotkey)
         .put("saveHistory", saveHistory).put("city", city).put("checkUpdates", checkUpdates).put("startMinimized", startMinimized)
         .put("usePiper", usePiper).put("piperVoice", piperVoice.name).put("quickResponse", quickResponse).put("chatFollowUp", chatFollowUp).put("microphone", microphone)
+        .put("micBoost", micBoost)
 
     companion object {
         fun fromJson(j: JSONObject): LucySettings {
@@ -201,6 +204,7 @@ data class LucySettings(
                 quickResponse = j.optBoolean("quickResponse", d.quickResponse),
                 chatFollowUp = j.optBoolean("chatFollowUp", d.chatFollowUp),
                 microphone = j.optString("microphone", d.microphone),
+                micBoost = j.optInt("micBoost", d.micBoost).coerceIn(0, 800),
             )
         }
     }

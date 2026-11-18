@@ -54,9 +54,19 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
     private val continuous = JCheckBox("Conversación continua (sigue escuchando unos segundos después de responder)", s.continuousConversation)
     private val autostart = JCheckBox("Iniciar con Windows", Autostart.isEnabled())
     private val hotkey = JCheckBox("Atajo Ctrl+Alt+L para hablarle (se aplica al reiniciar Lucy)", s.hotkey)
-    private val mic = JComboBox((listOf("Predeterminado de Windows") + com.sara.lucy.audio.Microphone.available()).toTypedArray()).apply {
-        selectedItem = s.microphone.ifBlank { "Predeterminado de Windows" }
+    private val mic = JComboBox((listOf(AUTO_MIC) + com.sara.lucy.audio.Microphone.available()).toTypedArray()).apply {
+        selectedItem = s.microphone.ifBlank { AUTO_MIC }
+        renderer = javax.swing.DefaultListCellRenderer().let { base ->
+            javax.swing.ListCellRenderer<String?> { list, value, index, sel, focus ->
+                val text = if (value != null && value != AUTO_MIC && com.sara.lucy.audio.Microphone.looksBluetooth(value)) "$value  ·  Bluetooth (modo llamada)" else value
+                base.getListCellRendererComponent(list, text, index, sel, focus)
+            }
+        }
     }
+    private val boost = JComboBox(BOOSTS.map { it.second }.toTypedArray()).apply {
+        selectedIndex = BOOSTS.indexOfFirst { it.first == s.micBoost }.coerceAtLeast(0)
+    }
+    private val asrStatus = JLabel(" ")
     private val quick = JCheckBox("Respuesta rápida (hace la orden apenas la entiende, sin esperar la pausa)", s.quickResponse)
     private val chat = JCheckBox("Charlar después de una pregunta (sigue escuchando sin decir «Lucy»; después de una orden se calla)", s.chatFollowUp)
     private val duck = JCheckBox("Bajar la música de las otras apps mientras te escucho y hablo", s.duckMusic)
@@ -77,7 +87,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
     private val provider = JComboBox(arrayOf("Google (Gemini)", "Claude (Anthropic)"))
     private val geminiKey = JPasswordField(30)
     private val claudeKey = JPasswordField(30)
-    private val precise = JCheckBox("Entender mejor las órdenes con Google (manda el audio de cada orden; un poco más lento)", s.preciseRecognition)
+    private val precise = JCheckBox("Mientras se baja el reconocimiento preciso, entender las órdenes con Google (manda el audio de cada orden)", s.preciseRecognition)
 
     // Esfera
     private val sphereVisible = JCheckBox("Mostrar la esfera flotante al llamarme", s.sphereVisible)
@@ -95,6 +105,17 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         voiceChoice.selectedIndex = if (s.usePiper) s.piperVoice.ordinal else com.sara.core.voice.PiperVoice.entries.size
         showPiperStatus()
         voiceChoice.addActionListener { showPiperStatus() }
+        app.scope.launch(Dispatchers.Swing) {
+            app.parakeet.state.collect { st ->
+                asrStatus.text = when (st) {
+                    is com.sara.lucy.speech.PiperState.Downloading -> "Bajándose: ${(st.progress * 100).roundToInt()} % (490 MB, una sola vez)…"
+                    com.sara.lucy.speech.PiperState.Installing -> "Instalando…"
+                    com.sara.lucy.speech.PiperState.Ready -> "Listo."
+                    is com.sara.lucy.speech.PiperState.Failed -> st.message
+                    com.sara.lucy.speech.PiperState.NotInstalled -> "Se baja solo (490 MB, una vez)."
+                }
+            }
+        }
         provider.selectedIndex = if (s.aiProvider == AiProvider.CLAUDE) 1 else 0
         geminiKey.text = if (app.secrets.get(SecretStore.GEMINI_KEY) != null) KEEP else ""
         claudeKey.text = if (app.secrets.get(SecretStore.ANTHROPIC_KEY) != null) KEEP else ""
@@ -112,7 +133,9 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
             labeled("Sensibilidad (más = te escucha desde más lejos, pero se activa más por error)", sensitivity),
             labeled("Cuando la llamás", ack), row(quick), row(chat), row(continuous), row(duck), row(echo),
             labeled("Micrófono", mic),
-            note("Con «Predeterminado» Lucy usa la cancelación de eco de Windows; con otro micrófono, lo usa directo."),
+            note("En automático Lucy usa el micrófono de la compu y nunca el de un parlante o auricular Bluetooth: abrir ese micrófono pone todo el audio en «modo llamada» (la música se escucha mal). Si elegís uno Bluetooth, pasa eso mientras Lucy escucha."),
+            labeled("Potenciar el micrófono (para hablarle normal desde lejos)", boost),
+            labeled("Reconocimiento preciso (entiende frases libres, sin Internet)", asrStatus),
             row(JButton("Probar micrófono").apply { addActionListener { testMicrophone() } }), row(autostart), row(hotkey), row(minimized),
         ))
         tabs.addTab("Voz", form(
@@ -223,6 +246,7 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         continuousConversation = continuous.isSelected,
         quickResponse = quick.isSelected,
         microphone = (mic.selectedItem as? String)?.takeIf { mic.selectedIndex > 0 } ?: "",
+        micBoost = BOOSTS.getOrElse(boost.selectedIndex) { BOOSTS[0] }.first,
         chatFollowUp = chat.isSelected,
         usePiper = voiceChoice.selectedIndex < com.sara.core.voice.PiperVoice.entries.size,
         piperVoice = com.sara.core.voice.PiperVoice.entries.getOrElse(voiceChoice.selectedIndex) { s.piperVoice },
@@ -329,6 +353,10 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         val UIManagerFont: java.awt.Font get() = javax.swing.UIManager.getFont("Label.font")
         /** Marca que muestra que ya hay una clave guardada (no se muestra la clave). */
         const val KEEP = "••••••••••••"
+        const val AUTO_MIC = "Automático (el de la compu, nunca el de un parlante Bluetooth)"
+        val BOOSTS = listOf(
+            0 to "Automático (sube la voz baja sin subir el ruido)", 100 to "Normal", 200 to "×2", 300 to "×3", 500 to "×5", 800 to "×8 (máximo)",
+        )
     }
 }
 

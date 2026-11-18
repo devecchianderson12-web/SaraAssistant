@@ -33,6 +33,17 @@ import javax.sound.sampled.SourceDataLine
 import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
+/** Carpeta con las DLL de sherpa-onnx que vienen con Lucy (voces de Piper y reconocimiento Parakeet). */
+internal fun sherpaNativeDir(): File? {
+    val candidates = buildList {
+        System.getProperty("jpackage.app-path")?.let { File(it).parentFile }?.let { add(File(it, "sherpa")); add(File(it, "app/sherpa")) }
+        runCatching { File(PiperVoiceEngine::class.java.protectionDomain.codeSource.location.toURI()).parentFile }.getOrNull()?.let {
+            add(File(it, "sherpa")); add(File(it.parentFile, "sherpa"))
+        }
+    }
+    return candidates.firstOrNull { File(it, "sherpa-onnx-jni.dll").isFile }
+}
+
 /** Estado de la voz elegida (bajándose, lista…). */
 sealed interface PiperState {
     data object NotInstalled : PiperState
@@ -174,15 +185,7 @@ class PiperVoiceEngine(
     }
 
     /** Las DLL de sherpa-onnx van en la carpeta «sherpa» junto al programa. */
-    private fun nativeLibraries(): File? {
-        val candidates = buildList {
-            System.getProperty("jpackage.app-path")?.let { File(it).parentFile }?.let { add(File(it, "sherpa")); add(File(it, "app/sherpa")) }
-            runCatching { File(PiperVoiceEngine::class.java.protectionDomain.codeSource.location.toURI()).parentFile }.getOrNull()?.let {
-                add(File(it, "sherpa")); add(File(it.parentFile, "sherpa"))
-            }
-        }
-        return candidates.firstOrNull { File(it, "sherpa-onnx-jni.dll").isFile }
-    }
+    private fun nativeLibraries(): File? = sherpaNativeDir()
 
     /** Para la autoprueba: genera una frase sin reproducirla (cuántas muestras salieron). */
     suspend fun synthesizeForTest(text: String): Int = engine()?.let { withContext(Dispatchers.Default) { it.generate(text, selected().sid, selected().speed).samples.size } } ?: 0

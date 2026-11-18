@@ -27,7 +27,8 @@ class CompositeCommandInterpreter(
     /** Si hay planificador (IA con habilidades), los pedidos nuevos o complejos van a él. */
     private val plannerAvailable: () -> Boolean = { false },
 ) : CommandInterpreter {
-    override suspend fun interpret(text: String): InterpretationResult {
+    override suspend fun interpret(spoken: String): InterpretationResult {
+        val text = SpokenForms.rewrite(spoken)
         val routine = memory?.get(MemoryKeys.routineKey(text.trim().replace(Regex("^(?i)(?:${com.sara.core.model.AssistantIdentity.NAMES})\\b"), "").trim(' ', ',')))
         // Una rutina puede tener varias órdenes («sacá la música y cerrá las apps»).
         if (routine != null) return (splitCompound(routine) ?: rules.interpret(routine)).copy(ruleId = "routine")
@@ -105,7 +106,8 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
 
     override suspend fun interpret(text: String): InterpretationResult = interpretNow(text)
 
-    fun interpretNow(text: String): InterpretationResult {
+    fun interpretNow(spoken: String): InterpretationResult {
+        val text = SpokenForms.rewrite(spoken)
         val normalized = TextNormalizer.normalize(text)
         val tokens = TextNormalizer.tokens(normalized)
         if (tokens.isEmpty()) return InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "empty")

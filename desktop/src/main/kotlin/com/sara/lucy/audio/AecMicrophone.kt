@@ -28,7 +28,10 @@ class AecMicrophone(
     private val logger: SaraLogger,
     /** Ajuste del usuario: usar la cancelación de eco. */
     private val enabled: () -> Boolean,
+    /** Micrófono elegido (nombre); vacío = automático (nunca el de un parlante Bluetooth si hay otro). */
+    private val device: () -> String = { "" },
 ) : AudioSource {
+    @Volatile private var openedFor: String? = null
     private val listeners = CopyOnWriteArrayList<LinkedBlockingQueue<ByteArray>>()
     private val lock = Any()
     private var process: Process? = null
@@ -38,10 +41,12 @@ class AecMicrophone(
     /** Qué micrófono se está usando (para el diagnóstico). */
     @Volatile var mode: String = "sin usar"
         private set
+    /** Nombre del micrófono que abrió la cancelación de eco. */
+    @Volatile private var openedDevice: String? = null
 
     override suspend fun capture(onChunk: (ByteArray, Int) -> Boolean): CaptureOutcome {
         if (!enabled() || failures >= MAX_FAILURES) {
-            mode = "micrófono común"
+            mode = "${fallback.describe()} (sin cancelación de eco)"
             return fallback.capture(onChunk)
         }
         val queue = LinkedBlockingQueue<ByteArray>()
@@ -70,7 +75,7 @@ class AecMicrophone(
                     }
                     got = true
                     failures = 0
-                    mode = "con cancelación de eco"
+                    mode = "${openedDevice ?: "predeterminado"} con cancelación de eco"
                     if (allSilent && chunk.any { it.toInt() != 0 }) allSilent = false
                     levels.update(AudioLevelMeter.levelOfPcm16(chunk, chunk.size))
                     if (!onChunk(chunk, chunk.size)) break
@@ -87,12 +92,18 @@ class AecMicrophone(
     }
 
     private fun start(): Boolean = synchronized(lock) {
+        val wanted = device().trim()
+        // Cambió el micrófono elegido: se reabre con el nuevo.
+        if (process?.isAlive == true && openedFor != wanted) stop()
         if (process?.isAlive == true) return true
+        openedFor = wanted
         return runCatching {
-            val p = ProcessBuilder(
+            val args = mutableListOf(
                 "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                 "-File", WinBridge.scriptFile().absolutePath, "-Mode", "mic",
-            ).start()
+            )
+            if (wanted.isNotEmpty()) args += listOf("-Device", wanted)
+            val p = ProcessBuilder(args).start()
             process = p
             thread(isDaemon = true, name = "lucy-aec-err") {
                 runCatching { p.errorStream.bufferedReader().forEachLine { logger.w(TAG, "Cancelación de eco: $it") } }
@@ -110,14 +121,16 @@ class AecMicrophone(
     /** Lee el audio del proceso y lo reparte en bloques de 100 ms. */
     private fun pump(p: Process, input: InputStream) {
         runCatching {
-            // Primero la línea «READY».
-            val header = StringBuilder()
+            // Primero la línea «READY <micrófono>».
+            val header = java.io.ByteArrayOutputStream()
             while (true) {
                 val c = input.read()
                 if (c < 0) return
                 if (c == '\n'.code) break
-                header.append(c.toChar())
+                header.write(c)
             }
+            openedDevice = header.toString(Charsets.UTF_8).removePrefix("READY").trim().ifEmpty { null }
+            logger.d(TAG, "Grabando con: ${openedDevice ?: "micrófono predeterminado"}")
             val buf = ByteArray(Microphone.CHUNK_BYTES)
             while (p.isAlive) {
                 var read = 0

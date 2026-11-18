@@ -67,7 +67,7 @@ class LucyBrainTest {
         assertTrue(r.response, r.response.contains("bien"))
         val who = executor.execute(intent("Lucy, ¿cómo te llamás?"))
         assertTrue(who.response, who.response.contains("Lucy"))
-        assertEquals("Música, volumen, apps, recordatorios y preguntas.", executor.execute(intent("Lucy, qué podés hacer")).response)
+        assertEquals("Música, volumen, apps, recordatorios, alarmas, listas, clima, cuentas, charla y preguntas.", executor.execute(intent("Lucy, qué podés hacer")).response)
     }
 
     @Test fun calculatorAnswers() = runBlocking {

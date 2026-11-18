@@ -26,6 +26,14 @@ class SkillsTest {
     private fun intentOf(text: String) = RuleBasedCommandInterpreter().interpretNow(text).intent
 
     @Test
+    fun `formas de tu y errores del reconocedor`() {
+        assertEquals("recordatorios", (intentOf("Recuérdame mañana a las nueve llamar a mi mamá.") as CommandIntent.Skill).skill)
+        assertEquals("alarma", (intentOf("Despiértame a las 7.") as CommandIntent.Skill).skill)
+        assertEquals(CommandIntent.Skill("listas", "agregar", mapOf("lista" to "compras", "texto" to "leche")), intentOf("Añade leche a la lista de la compra."))
+        assertEquals(CommandIntent.PlayMusic("queen", "spotify"), intentOf("Ponen música de Queen en Spotify."))
+    }
+
+    @Test
     fun `pantalla, notificaciones y chats`() {
         fun sk(text: String) = intentOf(text) as? CommandIntent.Skill
         assertEquals("bloquear", sk("Sara, bloqueá la pantalla")?.action)

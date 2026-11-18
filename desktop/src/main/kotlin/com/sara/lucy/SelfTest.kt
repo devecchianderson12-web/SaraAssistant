@@ -46,6 +46,7 @@ class SelfTest(private val dir: File) {
         runCatching { voice(app) }.onFailure { fail("voz", it.toString()) }
         runCatching { answers(app) }.onFailure { fail("respuestas", it.toString()) }
         runCatching { piperVoice(app) }.onFailure { fail("voz Daniela", it.toString()) }
+        runCatching { precise(app) }.onFailure { fail("reconocimiento preciso", it.toString()) }
         runCatching { window(app) }.onFailure { fail("ventana", it.toString()) }
         runCatching { app.shutdown() }
         return finish()
@@ -150,6 +151,23 @@ class SelfTest(private val dir: File) {
         if (!app.piperModels.download()) { fail("voz Daniela", "no se pudo bajar"); return@runBlocking }
         val samples = app.piper.synthesizeForTest("Hola, soy Lucy. ¿En qué te ayudo?")
         if (samples > 0) ok("voz Daniela", "${samples / 22050f} s de audio") else fail("voz Daniela", "no generó audio (¿faltan las DLL?)")
+    }
+
+    /** Parakeet: se baja, carga las DLL de sherpa-onnx y transcribe una frase dicha por Windows. */
+    private fun precise(app: LucyApp) = runBlocking {
+        if (!app.parakeet.download()) { fail("reconocimiento preciso", "no se pudo bajar"); return@runBlocking }
+        val t0 = System.currentTimeMillis()
+        if (app.parakeet.load() == null) { fail("reconocimiento preciso", "no carga (¿faltan las DLL?)"); return@runBlocking }
+        info("reconocimiento preciso", "cargó en ${System.currentTimeMillis() - t0} ms")
+        val voices = app.system.call("voices") as? JSONArray ?: JSONArray()
+        val spanish = (0 until voices.length()).map { voices.getJSONObject(it) }.firstOrNull { it.optString("culture").startsWith("es") }?.optString("name")
+        val wav = File(dir, "orden.wav")
+        app.system.call("speakToWav", mapOf("text" to "Lucy, poné música de Queen en Spotify.", "path" to wav.absolutePath, "voice" to spanish), timeoutMillis = 30_000)
+        val pcm = wav.readBytes().let { it.copyOfRange(44.coerceAtMost(it.size), it.size) }
+        val t1 = System.currentTimeMillis()
+        val text = app.parakeet.transcribe(pcm)
+        if (text == null) fail("reconocimiento preciso", "no transcribió nada")
+        else ok("reconocimiento preciso", "«$text» en ${System.currentTimeMillis() - t1} ms (voz ${spanish ?: "en inglés"})")
     }
 
     private fun window(app: LucyApp) {

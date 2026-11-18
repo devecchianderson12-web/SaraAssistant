@@ -289,35 +289,79 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Actualizar release
+    name: Publicar actualizaciones
     needs: [build, arranque, windows]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Cada plataforma se actualiza sólo si cambió lo suyo: app/ → Android, desktop/ → Windows,
+      # core/ (el cerebro compartido) → las dos. «[windows]» o «[android]» en el mensaje lo fuerzan.
+      - name: Qué plataformas cambiaron
+        id: cambios
+        env:
+          BEFORE: ${{ github.event.before }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            FILES=$(git show --name-only --format= HEAD)
+          else
+            FILES=$(git diff --name-only "$BEFORE" HEAD)
+          fi
+          echo "$FILES"
+          ANDROID=false; WINDOWS=false
+          echo "$FILES" | grep -qE '^(app/|core/)' && ANDROID=true
+          echo "$FILES" | grep -qE '^(desktop/|core/|windows/)' && WINDOWS=true
+          case "$MSG" in *"[windows]"*) ANDROID=false; WINDOWS=true ;; esac
+          case "$MSG" in *"[android]"*) ANDROID=true; WINDOWS=false ;; esac
+          echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
+          echo "windows=$WINDOWS" >> "$GITHUB_OUTPUT"
+          echo "Android: $ANDROID · Windows: $WINDOWS"
+
       - name: Descargar APK
+        if: steps.cambios.outputs.android == 'true'
         uses: actions/download-artifact@v4
         with:
           name: SaraAssistant-debug-apk
 
       - name: Descargar Lucy para Windows
+        if: steps.cambios.outputs.windows == 'true'
         uses: actions/download-artifact@v4
         with:
           name: Lucy-Windows-exe
 
-      - name: Crear release SaraAssistantV${{ github.run_number }}
+      - name: Crear release de Android SaraAssistantV${{ github.run_number }}
+        if: steps.cambios.outputs.android == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: SaraAssistantV${{ github.run_number }}
           name: SaraAssistantV${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: |
-            SaraAssistant-*.apk
-            Lucy-Windows-*.exe
+          files: SaraAssistant-*.apk
           body: |
             ${{ github.event.head_commit.message }}
 
             APK debug generado automáticamente desde ${{ github.sha }}.
             Instalación: descargá el APK, abrilo en el teléfono y permití «instalar apps desconocidas».
+
+      # «make_latest: false»: el teléfono busca la última release y no tiene que ver las de Windows.
+      - name: Crear release de Windows LucyV${{ github.run_number }}
+        if: steps.cambios.outputs.windows == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: LucyV${{ github.run_number }}
+          name: Lucy para Windows V${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: false
+          files: Lucy-Windows-*.exe
+          body: |
+            ${{ github.event.head_commit.message }}
+
+            Lucy para Windows: bajá el .exe y abrilo (no necesita instalación).

@@ -300,11 +300,15 @@ class DeviceSkill(private val bridge: WinBridge) : Skill {
         ),
         SkillAction("no_molestar", "Modo No molestar.", listOf(state), Risk.CHANGE),
         SkillAction("bateria", "Nivel de batería y si está cargando."),
+        SkillAction("bloquear", "Bloquea la computadora (pantalla de inicio de sesión).", risk = Risk.CHANGE),
+        SkillAction("desbloquear", "Desbloquear (Windows no lo permite: pide la contraseña)."),
         SkillAction("info", "Versión de Windows, espacio en disco y memoria libres."),
     )
 
     override suspend fun run(action: String, args: Map<String, String>): SkillResult = withContext(Dispatchers.IO) {
         when (action) {
+            "bloquear" -> if (runCatching { bridge.call("lock") }.isSuccess) SkillResult.Done("") else SkillResult.Failed("Windows no me dejó bloquear.")
+            "desbloquear" -> SkillResult.Failed("Por seguridad Windows no deja que una app la desbloquee: entrá con tu PIN o contraseña.")
             "linterna" -> SkillResult.Failed("La computadora no tiene linterna.")
             "brillo" -> brightness(args["accion"] ?: "consultar", args["porcentaje"]?.toIntOrNull())
             "wifi" -> radio("WiFi", "el Wi-Fi", args["estado"] ?: "consultar")
@@ -432,7 +436,8 @@ fun phoneOnlySkills() = listOf(
             SkillAction("sms", "Deja un SMS escrito.", listOf(Param("contacto", ParamType.STRING, "Nombre o número."), Param("mensaje", ParamType.STRING, "Texto.")), Risk.SENSITIVE),
         ),
     ),
-    PhoneOnlySkill("notificaciones", "leer tus notificaciones", listOf(SkillAction("leer", "Resumen de notificaciones."))),
+    PhoneOnlySkill("notificaciones", "leer ni borrar tus notificaciones", listOf(SkillAction("leer", "Resumen de notificaciones."), SkillAction("borrar", "Borra notificaciones."))),
+    PhoneOnlySkill("whatsapp", "leer chats de WhatsApp", listOf(SkillAction("leer_chat", "Lee un chat.", listOf(Param("contacto", ParamType.STRING, "Chat."))))),
     PhoneOnlySkill("hogar", "manejar tu casa", listOf(SkillAction("controlar", "Hogar inteligente.", listOf(Param("pedido", ParamType.STRING, "Qué querés hacer.")), Risk.CHANGE))),
 )
 

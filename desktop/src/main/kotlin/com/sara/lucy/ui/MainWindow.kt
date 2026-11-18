@@ -234,6 +234,10 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
 
     // ---------------------------------------------------------------- Estado de Lucy → pantalla
     private fun observe() {
+        // Sin clave de IA Lucy sólo hace órdenes: para charlar y preguntar como Sara en el teléfono hace falta.
+        if (!app.ai.isAvailable()) {
+            showBanner("Para charlar y hacerle preguntas como a Sara, cargá la clave gratis de Google.", "Cargar clave") { openSettings(2) }
+        }
         app.scope.launch(Dispatchers.Swing) {
             app.orchestrator.state.collect { state -> render(state) }
         }

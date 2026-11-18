@@ -78,7 +78,7 @@ object LucyIdentity {
         AssistantIdentity.name = "Lucy"
         AssistantIdentity.device = "computadora"
         AssistantIdentity.platform = "una computadora con Windows"
-        AssistantIdentity.capabilities = "Música, volumen, apps, recordatorios y preguntas."
+        AssistantIdentity.capabilities = "Música, volumen, apps, recordatorios, alarmas, listas, clima, cuentas, charla y preguntas."
         WakeWordTuning.profile = WakeWordProfile.LUCY
     }
 }
@@ -98,9 +98,12 @@ class LucyApp {
     val secrets = SecretStore(File(LucyPaths.home, "keys.json"), system, logger)
     /** Micrófono con cancelación de eco de Windows (si no anda, el común). */
     // La cancelación de eco usa el micrófono predeterminado de Windows; si elegís otro, se usa ese directo.
-    val microphone = AecMicrophone(levels, Microphone(levels) { settings.current.microphone }, logger) {
-        settings.current.echoCancellation && settings.current.microphone.isBlank()
+    // Automático: nunca el micrófono de un parlante Bluetooth si hay otro (pondría la música en «modo llamada»).
+    val microphone = AecMicrophone(levels, Microphone(levels) { settings.current.microphone }, logger, { settings.current.echoCancellation }) {
+        settings.current.microphone
     }
+    /** Lo que escuchan la palabra «Lucy» y las órdenes: el micrófono con el potenciador. */
+    private val listeningSource = com.sara.lucy.audio.BoostedSource(microphone) { settings.current.micBoost }
     val models = VoskModels(logger)
     val history = FileCommandHistory(File(LucyPaths.home, "history.json")) { settings.current.saveHistory }
     val memory = FileMemoryStore(File(LucyPaths.home, "memory.json"))
@@ -118,7 +121,9 @@ class LucyApp {
     }
 
     val appLauncher = WinAppLauncher(system, logger) { listOf(ProcessHandle.current().pid(), system.pid, voiceBridge.pid) }
-    val media = WinMediaControl(system, appLauncher, data, logger)
+    val media = WinMediaControl(system, appLauncher, data, logger).apply {
+        onTaste = { memory.put(com.sara.core.memory.MemoryKeys.MUSIC_TASTE, it) }
+    }
     private val volume = WinVolumeControl(system)
 
     // ---------------------------------------------------------------- Habilidades y cerebro
@@ -162,7 +167,7 @@ class LucyApp {
     suspend fun microphoneTest(): String {
         val pcm = java.io.ByteArrayOutputStream()
         var peak = 0
-        val outcome = microphone.capture { buf, len ->
+        val outcome = listeningSource.capture { buf, len ->
             pcm.write(buf, 0, len)
             peak = maxOf(peak, WakeWordTuning.peakOf(buf, len))
             pcm.size() < 16_000 * 2 * 4
@@ -201,9 +206,20 @@ class LucyApp {
 
     // ---------------------------------------------------------------- Motores
     private val transcriber = GeminiTranscriber({ secrets.get(SecretStore.GEMINI_KEY) }, connectivity::isOnline)
-    val wake = VoskWakeWordEngine(models, microphone, logger)
-    private val recognizer = VoskSpeechRecognitionEngine(models, microphone) { pcm, draft ->
-        if (settings.current.preciseRecognition) transcriber.transcribe(pcm, draft) else null
+    val wake = VoskWakeWordEngine(models, listeningSource, logger)
+    /** Reconocimiento preciso sin Internet (Parakeet): se baja solo la primera vez. */
+    val parakeet = com.sara.lucy.speech.ParakeetAsr(logger)
+    private val recognizer = VoskSpeechRecognitionEngine(models, listeningSource) { pcm, draft ->
+        // Vosk marca cuándo terminaste; Parakeet (local) o, si todavía no está, Google transcriben bien la frase.
+        parakeet.transcribe(pcm) ?: if (settings.current.preciseRecognition) transcriber.transcribe(pcm, draft) else null
+    }
+
+    /** Baja (una vez) y deja cargado el reconocimiento preciso. */
+    fun ensureParakeet() {
+        scope.launch(Dispatchers.IO) {
+            if (!parakeet.isInstalled() && !parakeet.download()) return@launch
+            parakeet.load()
+        }
     }
     private val sapi = SapiVoiceEngine(voiceBridge)
     /** Voces de Piper (Daniela, Claude, Sharvard): se bajan una vez; mientras tanto habla la voz de Windows. */
@@ -264,6 +280,7 @@ class LucyApp {
 
     fun start() {
         ensurePiper()
+        ensureParakeet()
         scheduler.onReminder = { r, late ->
             val said = when (r.kind) {
                 Reminder.KIND_ALARM -> "¡Alarma! Son las ${java.time.LocalTime.now().let { "${it.hour}:${it.minute.toString().padStart(2, '0')}" }}." + if (r.text != "Alarma") " ${r.text}." else ""

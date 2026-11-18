@@ -162,7 +162,18 @@ class WinMediaControl(
         val now = System.currentTimeMillis()
         usage.record(app, 60_000, now)
         store.put(USAGE_KEY, usage.serialize())
+        // Gustos musicales: el artista que suena (no en navegadores, que suelen ser videos).
+        val browser = listOf("chrome", "msedge", "firefox", "opera", "brave", "vivaldi").any { it in app.lowercase() }
+        if (!browser) info.optString("artist").takeIf { it.isNotBlank() }?.let { artist ->
+            taste.record(artist, 60_000, now)
+            store.put(TASTE_KEY, taste.serialize())
+            taste.summary(now)?.let(onTaste)
+        }
     }
+
+    private val taste = com.sara.core.memory.MusicTaste().apply { load(store.get(TASTE_KEY)) }
+    /** Resumen de gustos actualizado (lo guarda la memoria para la IA y «qué música me gusta»). */
+    var onTaste: (String) -> Unit = {}
 
     fun favoriteService(): Service? = usage.favorite(System.currentTimeMillis())?.let { serviceOfApp(it) }
 
@@ -309,6 +320,7 @@ class WinMediaControl(
 
     private companion object {
         const val TAG = "WinMedia"
+        const val TASTE_KEY = "gustos_musicales"
         const val USAGE_KEY = "music_usage"
         const val DEFAULT_QUERY = "música mix"
     }

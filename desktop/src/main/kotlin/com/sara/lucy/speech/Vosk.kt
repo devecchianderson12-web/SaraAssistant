@@ -232,6 +232,7 @@ class VoskSpeechRecognitionEngine(
         var heardSpeech = false
         var lastPartial = ""
         var lastChange = start
+        var anySpeech = false
         val gain = RunningGain()
         try {
             var settle = SETTLE_CHUNKS
@@ -254,12 +255,16 @@ class VoskSpeechRecognitionEngine(
                     // Era sólo el nombre o el eco del saludo: se sigue esperando la orden.
                     if (t.isNotEmpty()) {
                         heardSpeech = false
+                        anySpeech = false
                         lastPartial = ""
+                        // Ese audio (el nombre o el eco) tampoco va al reconocedor preciso.
+                        audio.reset()
                     }
                 } else {
                     val partial = JSONObject(recognizer.partialResult).optString("partial").trim()
                     if (partial.isNotEmpty() && partial != lastPartial) {
                         heardSpeech = true
+                        anySpeech = true
                         lastPartial = partial
                         lastChange = System.currentTimeMillis()
                         onPartial(partial)
@@ -280,11 +285,16 @@ class VoskSpeechRecognitionEngine(
                 }
             }
             val recognized = text
+            // Vosk sólo marca cuándo terminaste: si hubo voz, el reconocedor preciso transcribe la frase
+            // entera (aunque Vosk no la haya entendido).
+            val better = if (refine != null && (anySpeech || !recognized.isNullOrBlank()) && audio.size() > MIN_REFINE_BYTES) {
+                val r = refine
+                runCatching { r(audio.toByteArray(), recognized.orEmpty()) }.getOrNull()?.trim()?.ifBlank { null }
+            } else null
+            val final = better?.takeIf { !onlyEcho(it) } ?: recognized
             return when {
-                !recognized.isNullOrBlank() && !onlyEcho(recognized) -> {
-                    val better = refine?.let { r -> runCatching { r(audio.toByteArray(), recognized) }.getOrNull() }?.trim()?.ifBlank { null }
-                    RecognitionResult.Success(better ?: recognized, null, if (better != null) "$id+gemini" else id)
-                }
+                !final.isNullOrBlank() && !onlyEcho(final) ->
+                    RecognitionResult.Success(final, null, if (final == better) "$id+preciso" else id)
                 outcome is CaptureOutcome.Failed -> RecognitionResult.Failure(outcome.error, id)
                 outcome is CaptureOutcome.Completed && outcome.allSilent -> RecognitionResult.Failure(microphoneError(), id)
                 else -> RecognitionResult.Failure(EngineError(EngineErrorType.NO_SPEECH, "No se detectó voz."), id)
@@ -308,7 +318,8 @@ class VoskSpeechRecognitionEngine(
         const val SETTLE_CHUNKS = 3 // 0,3 s
         /** Lo que no es una orden: el nombre o el eco del saludo de Lucy. */
         val ECHO_WORDS = setOf("si", "sí", "decime", "dime", "luci", "lucy", "lusi", "lucie", "luchi", "luz", "y", "[unk]")
-        fun onlyEcho(text: String) = text.lowercase().split(' ').filter { it.isNotBlank() }.all { it in ECHO_WORDS }
+        fun onlyEcho(text: String) = text.lowercase().split(' ').map { it.trim('.', ',', '¿', '?', '¡', '!') }.filter { it.isNotBlank() }.all { it in ECHO_WORDS }
         const val MAX_AUDIO_BYTES = 16_000 * 2 * 25
+        const val MIN_REFINE_BYTES = 16_000 * 2 / 2
     }
 }

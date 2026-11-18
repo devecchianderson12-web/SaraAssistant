@@ -1,7 +1,7 @@
 # Puente de Lucy con Windows (PowerShell 5.1, viene con Windows; no requiere administrador).
 # Protocolo: una línea JSON por pedido {"id":1,"cmd":"...","args":{...}} y una por respuesta
 # {"id":1,"ok":true,"result":...} o {"id":1,"ok":false,"error":"..."}.
-param([string]$Mode = "system")
+param([string]$Mode = "system", [string]$Device = "")
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
@@ -68,7 +68,7 @@ namespace LucyMic {
   [StructLayout(LayoutKind.Sequential)]
   public struct PropertyKey { public Guid fmtid; public int pid; public PropertyKey(Guid g, int p) { fmtid = g; pid = p; } }
   [StructLayout(LayoutKind.Explicit, Size = 24)]
-  public struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public int intVal; [FieldOffset(8)] public short boolVal; }
+  public struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public int intVal; [FieldOffset(8)] public short boolVal; [FieldOffset(8)] public IntPtr ptr; }
   [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
   public interface IPropertyStore {
     [PreserveSig] int GetCount(out int c);
@@ -107,6 +107,52 @@ namespace LucyMic {
       return -1;
     }
 
+    static readonly Guid DeviceProps = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0");
+
+    static string Prop(IMMDevice d, int pid) {
+      IntPtr p; if (d.OpenPropertyStore(0, out p) != 0 || p == IntPtr.Zero) return "";
+      try {
+        var store = (IPropertyStore)Marshal.GetObjectForIUnknown(p);
+        var key = new PropertyKey(DeviceProps, pid); PropVariant v;
+        if (store.GetValue(ref key, out v) != 0 || v.vt != 31 || v.ptr == IntPtr.Zero) return "";
+        return Marshal.PtrToStringUni(v.ptr) ?? "";
+      } catch { return ""; } finally { Marshal.Release(p); }
+    }
+
+    // Micrófonos de parlantes/auriculares Bluetooth: abrirlos pone todo el audio en «modo llamada».
+    public static bool IsBluetooth(string name, string enumerator) {
+      var e = (enumerator ?? "").ToUpperInvariant();
+      var n = (name ?? "").ToLowerInvariant();
+      return e.StartsWith("BTH") || n.Contains("hands-free") || n.Contains("manos libres") || n.Contains("bluetooth");
+    }
+
+    // Qué micrófono usar: el elegido (por nombre) o el predeterminado, salvo que sea Bluetooth y haya otro.
+    static int ChooseMic(string wanted, out string chosen) {
+      chosen = "";
+      var en = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());
+      IMMDeviceCollection all; if (en.EnumAudioEndpoints(1, 1, out all) != 0) return -1;
+      int n; all.GetCount(out n);
+      string defId = null; IMMDevice def; if (en.GetDefaultAudioEndpoint(1, 0, out def) == 0) def.GetId(out defId);
+      int defIdx = -1, firstOther = -1, wantedIdx = -1;
+      var names = new string[n];
+      for (int i = 0; i < n; i++) {
+        IMMDevice d; all.Item(i, out d); string id; d.GetId(out id);
+        names[i] = Prop(d, 14);
+        bool bt = IsBluetooth(names[i], Prop(d, 24));
+        if (id == defId) defIdx = i;
+        if (!bt && firstOther < 0) firstOther = i;
+        if (!string.IsNullOrEmpty(wanted) && wantedIdx < 0 && names[i].Length > 0 && (names[i].StartsWith(wanted) || wanted.StartsWith(names[i]))) wantedIdx = i;
+        if (id == defId && bt) defIdx = -2 - i;
+      }
+      int idx;
+      if (wantedIdx >= 0) idx = wantedIdx;
+      else if (defIdx >= 0) idx = defIdx;
+      else if (defIdx <= -2) idx = firstOther >= 0 ? firstOther : (-2 - defIdx);
+      else idx = firstOther;
+      if (idx >= 0) chosen = names[idx];
+      return idx;
+    }
+
     static void Set(IPropertyStore ps, int pid, int value, bool isBool) {
       var key = new PropertyKey(AecProps, pid);
       var v = new PropVariant();
@@ -115,12 +161,12 @@ namespace LucyMic {
       if (hr != 0) throw new Exception("propiedad " + pid + ": 0x" + hr.ToString("X8"));
     }
 
-    public static void Run() {
+    public static void Run(string device) {
       var dmo = (IMediaObject)(new AecDmo());
       var ps = (IPropertyStore)dmo;
       Set(ps, 3, 1, true);   // modo fuente: el DSP graba solo
       Set(ps, 2, 0, false);  // SINGLE_CHANNEL_AEC: cancelación de eco
-      int mic = IndexOfDefault(1), spk = IndexOfDefault(0);
+      string chosen; int mic = ChooseMic(device, out chosen), spk = IndexOfDefault(0);
       if (mic >= 0 && spk >= 0) Set(ps, 4, (int)(((uint)spk << 16) | ((uint)mic & 0xFFFF)), false);
       var wf = Marshal.AllocHGlobal(18);
       var bytes = new byte[18];
@@ -140,7 +186,7 @@ namespace LucyMic {
       var ptr = Marshal.GetComInterfaceForObject(buffer, typeof(IMediaBuffer));
       var outs = new OutputBuffer[1];
       var stdout = Console.OpenStandardOutput();
-      var ready = System.Text.Encoding.ASCII.GetBytes("READY\n");
+      var ready = System.Text.Encoding.UTF8.GetBytes("READY " + chosen.Replace("\n", " ") + "\n");
       stdout.Write(ready, 0, ready.Length); stdout.Flush();
       var chunk = new byte[32000];
       while (true) {
@@ -163,7 +209,7 @@ namespace LucyMic {
   }
 }
 "@
-  try { [LucyMic.Capture]::Run() } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 3 }
+  try { [LucyMic.Capture]::Run($Device) } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 3 }
   exit 0
 }
 
@@ -437,6 +483,7 @@ while ($true) {
       'openApp'    { Start-Process ("shell:AppsFolder\" + $a.id); @{ opened = $true } }
       'open'       { Start-Process $a.target; @{ opened = $true } }
       'battery'    { Battery }
+      'lock'       { Start-Process rundll32.exe -ArgumentList 'user32.dll,LockWorkStation'; @{ locked = $true } }
       'radio'      { Radio $a.kind $a.state }
       'brightness' { Brightness $a.percent }
       'info'       { Info }

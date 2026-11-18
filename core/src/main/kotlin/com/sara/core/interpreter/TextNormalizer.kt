@@ -34,6 +34,28 @@ object TextNormalizer {
         if (normalized.isBlank()) emptyList() else normalized.split(' ')
 }
 
+/**
+ * Formas de «tú» o errores típicos de los reconocedores que transcriben en español neutro
+ * («Recuérdame», «Despiértame», «Añade», «Ponen música») → las del voseo que entienden las reglas.
+ */
+object SpokenForms {
+    private val rules = listOf(
+        Regex("\\b(?:recu[eé]rd[ae]me|recordarme)\\b", RegexOption.IGNORE_CASE) to "recordame",
+        Regex("\\bdespi[eé]rt[ae]me\\b", RegexOption.IGNORE_CASE) to "despertame",
+        Regex("\\bl[eé]v[aá]ntame\\b", RegexOption.IGNORE_CASE) to "levantame",
+        Regex("\\ba[ñn][aá]d[ae]me\\b", RegexOption.IGNORE_CASE) to "agregame",
+        Regex("\\ba[ñn]ad[eií]\\b", RegexOption.IGNORE_CASE) to "agregá",
+        Regex("\\bcu[eé]ntame\\b", RegexOption.IGNORE_CASE) to "contame",
+        Regex("\\bmu[eé]strame\\b", RegexOption.IGNORE_CASE) to "mostrame",
+        Regex("\\bl[eé]eme\\b", RegexOption.IGNORE_CASE) to "leeme",
+        Regex("\\blista de la compra\\b", RegexOption.IGNORE_CASE) to "lista de compras",
+        // «Poné música» suele salir «Ponen música».
+        Regex("^((?:(?:${com.sara.core.model.AssistantIdentity.NAMES})[,.]?\\s+)?)ponen\\b", RegexOption.IGNORE_CASE) to "$1poné",
+    )
+
+    fun rewrite(text: String): String = rules.fold(text) { t, (r, to) -> r.replace(t, to) }
+}
+
 /** Números en español (dígitos o palabras) del 0 al 100. */
 object SpanishNumbers {
     data class Match(val value: Int, val start: Int, val endExclusive: Int)

@@ -109,18 +109,28 @@ class SingleInstance(private val dir: File) {
 class Updater(private val logger: SaraLogger) {
     data class Release(val version: Int, val url: String, val name: String)
 
+    /**
+     * Última versión de Lucy. Lucy y el APK se publican por separado (una actualización de Windows
+     * no actualiza el teléfono y viceversa): se busca la release más nueva que traiga el .exe.
+     */
     fun latest(): Release? = runCatching {
-        val conn = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
+        val conn = URL("https://api.github.com/repos/$REPO/releases?per_page=30").openConnection() as HttpURLConnection
         conn.connectTimeout = 6_000
         conn.readTimeout = 8_000
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         conn.setRequestProperty("User-Agent", "Lucy")
-        val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-        val version = Regex("(\\d+)$").find(json.optString("tag_name"))?.value?.toInt() ?: return null
-        val assets = json.optJSONArray("assets") ?: return null
-        val exe = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").let { n -> n.startsWith("Lucy-Windows") && n.endsWith(".exe") } }
-            ?: return null
-        Release(version, exe.getString("browser_download_url"), exe.getString("name"))
+        val releases = org.json.JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+        (0 until releases.length()).map { releases.getJSONObject(it) }
+            .filter { !it.optBoolean("draft") }
+            .mapNotNull { json ->
+                val assets = json.optJSONArray("assets") ?: return@mapNotNull null
+                val exe = (0 until assets.length()).map { assets.getJSONObject(it) }
+                    .firstOrNull { it.optString("name").let { n -> n.startsWith("Lucy-Windows") && n.endsWith(".exe") } } ?: return@mapNotNull null
+                val version = Regex("(\\d+)\\.exe$").find(exe.getString("name"))?.groupValues?.get(1)?.toInt()
+                    ?: Regex("(\\d+)$").find(json.optString("tag_name"))?.value?.toInt() ?: return@mapNotNull null
+                Release(version, exe.getString("browser_download_url"), exe.getString("name"))
+            }
+            .maxByOrNull { it.version }
     }.onFailure { logger.w(TAG, "No pude buscar actualizaciones", it) }.getOrNull()
 
     fun available(): Release? = latest()?.takeIf { LucyLocation.version in 1 until it.version }
