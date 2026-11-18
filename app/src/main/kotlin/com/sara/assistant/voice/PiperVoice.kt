@@ -244,9 +244,12 @@ class PiperVoiceEngine(
                     }
                 }
             }
-            // Esperar a que termine de sonar lo que quedó en el búfer (máximo 3 s).
-            val end = System.currentTimeMillis() + 3_000
-            while (track.playbackHeadPosition < written && System.currentTimeMillis() < end) kotlinx.coroutines.delay(20)
+            // Que suene lo que quedó en el búfer: con frases cortas («¿Sí?») el búfer no se llena y el
+            // parlante no arrancaba hasta el tiempo límite (eso demoraba 3 s en abrir el micrófono).
+            // stop() en modo stream reproduce lo pendiente y termina; se espera sólo lo que dura el audio.
+            track.stop()
+            val end = System.currentTimeMillis() + (written * 1000L / engine.sampleRate()) + 300
+            while (track.playbackHeadPosition < written && System.currentTimeMillis() < end) kotlinx.coroutines.delay(10)
             logger.d(TAG, "${selected().label} habló: ${firstSound - started} ms hasta el primer sonido, ${written / engine.sampleRate().toFloat()} s de audio")
             SpeakResult.Completed(id)
         } catch (e: CancellationException) {
