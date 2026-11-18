@@ -42,7 +42,7 @@ import kotlin.math.sqrt
  * [speed] corrige el ritmo propio de cada voz (Daniela habla rápido y suena cortante: se la frena).
  */
 enum class PiperVoice(val label: String, val country: String, val folder: String, val onnx: String, val sid: Int, val speed: Float, val megabytes: Int) {
-    DANIELA("Daniela", "Argentina", "vits-piper-es_AR-daniela-high", "es_AR-daniela-high.onnx", 0, 0.85f, 115),
+    DANIELA("Daniela", "Argentina", "vits-piper-es_AR-daniela-high", "es_AR-daniela-high.onnx", 0, 0.8f, 115),
     CLAUDE("Claude", "México", "vits-piper-es_MX-claude-high", "es_MX-claude-high.onnx", 0, 1.0f, 67),
     SHARVARD("Sharvard", "España", "vits-piper-es_ES-sharvard-medium", "es_ES-sharvard-medium.onnx", 1, 1.0f, 80),
     ;
@@ -235,19 +235,12 @@ class PiperVoiceEngine(
                 if (cached != null) {
                     write(track, cached)
                 } else {
-                    // Va sonando a medida que se genera (frase por frase): empieza a hablar enseguida.
-                    val job = coroutineContext
-                    engine.generateWithCallback(
-                        text, sid = selected().sid, speed = speedOf(params),
-                        callback = PiperChunkCallback { samples ->
-                            if (job.isActive) {
-                                write(track, samples)
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                    )
+                    // Frase por frase: empieza a sonar apenas está lista la primera (la generación con
+                    // callback de la librería ignora la velocidad, por eso no se usa).
+                    for (sentence in text.split(SENTENCE).map { it.trim() }.filter { it.isNotEmpty() }) {
+                        if (!coroutineContext.isActive) break
+                        write(track, engine.generate(sentence, sid = selected().sid, speed = speedOf(params)).samples)
+                    }
                 }
             }
             // Esperar a que termine de sonar lo que quedó en el búfer (máximo 3 s).
@@ -287,5 +280,6 @@ class PiperVoiceEngine(
         const val TAG = "Piper"
         const val THREADS = 2
         const val CHUNK = 2_048
+        val SENTENCE = Regex("(?<=[.!?;:])\\s+")
     }
 }
