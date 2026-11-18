@@ -18,6 +18,11 @@ class DebugCommandReceiver : BroadcastReceiver() {
             resultData = if (context.container.orchestrator.activate(com.sara.core.model.Trigger.MANUAL)) "OK" else "OCUPADA"
             return
         }
+        // «--ez wake true»: como si hubieran dicho «Sara» (mide cuánto tarda en abrir el micrófono).
+        if (intent.getBooleanExtra("wake", false)) {
+            resultData = if (context.container.orchestrator.activate(com.sara.core.model.Trigger.WAKE_WORD)) "OK" else "OCUPADA"
+            return
+        }
         // «--ez piper true»: baja la voz Daniela ya (prueba en el emulador).
         if (intent.getBooleanExtra("piper", false)) {
             context.container.ensurePiper(force = true)

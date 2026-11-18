@@ -78,6 +78,7 @@ class AndroidSpeechRecognitionEngine(
 
     private suspend fun recognizeOnMain(request: RecognitionRequest, onPartial: (String) -> Unit): RecognitionResult =
         withContext(Dispatchers.Main) {
+            val requestedAt = System.currentTimeMillis()
             suspendCancellableCoroutine { cont ->
                 val recognizer = if (onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
@@ -95,7 +96,9 @@ class AndroidSpeechRecognitionEngine(
                 }
 
                 recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) = Unit
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        android.util.Log.d("Sara/Recognizer", "Listo para escuchar en ${System.currentTimeMillis() - requestedAt} ms")
+                    }
                     override fun onBeginningOfSpeech() = Unit
                     override fun onRmsChanged(rmsdB: Float) = levels.update((rmsdB + 2f) / 12f)
                     override fun onBufferReceived(buffer: ByteArray?) = Unit

@@ -291,6 +291,7 @@ class AssistantOrchestrator(
     }
 
     private suspend fun runInteraction(trigger: Trigger) {
+        val started = clock()
         val cfg = configProvider()
         feedback.interactionStarted()
         _events.emit(AssistantEvent.Activated(trigger))
@@ -308,6 +309,7 @@ class AssistantOrchestrator(
         }
 
         var retried = false
+        logger.d(TAG, "Abro el micrófono para la orden (${clock() - started} ms desde el llamado)")
         while (true) {
             machine.moveTo(AssistantState.Listening())
             val result = listen(cfg)

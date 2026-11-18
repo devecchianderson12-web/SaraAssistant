@@ -131,6 +131,12 @@ jobs:
             for i in $(seq 1 100); do adb logcat -d | grep -q "Voz Daniela instalada\|No pude bajar la voz Daniela" && break; sleep 3; done; adb logcat -d | grep "Sara/Piper" | tail -5 || true
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es say "'Hola, soy Sara. ¿En qué te ayudo?'" || true
             for i in $(seq 1 40); do adb logcat -d | grep -q "Sara/Debug" && break; sleep 3; done; adb logcat -d | grep -E "Sara/Piper|Sara/Debug" | tail -8 || true
+            # Llamado («Sara»): cuánto tarda en saludar y abrir el micrófono (dos veces: la segunda con todo cargado).
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --ez wake true || true
+            sleep 12
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --ez wake true || true
+            sleep 12
+            adb logcat -d | grep -E "Abro el micrófono|Listo para escuchar|Sara/Piper: .*habló" | tail -8 || true
             # Esfera sobre otra pantalla: se va al inicio y se llama a Sara.
             adb shell appops set com.sara.assistant SYSTEM_ALERT_WINDOW allow || true
             adb shell input keyevent KEYCODE_HOME
