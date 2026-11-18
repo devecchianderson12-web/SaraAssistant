@@ -306,6 +306,7 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
         menu.add(trayWakeItem)
         menu.add(item("Mostrar la esfera para moverla") { sphereWindow.isVisible = true; sphereWindow.setCaption("Arrastrame") })
         menu.add(item("Ajustes") { showWindow(); openSettings() })
+        menu.add(item("Buscar actualizaciones") { checkUpdatesNow(manual = true) })
         menu.addSeparator()
         menu.add(item("Salir") { exit() })
         val icon = TrayIcon(SpherePainter.icon(32), "Lucy").apply { isImageAutoSize = true }
@@ -330,11 +331,34 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
     }
 
     // ---------------------------------------------------------------- Actualizaciones
+    private var updater: Updater? = null
+
+    /** Al abrir y después cada 6 horas (si está activado avisar de versiones nuevas). */
     fun checkUpdates(updater: Updater) {
-        if (!app.settings.current.checkUpdates) return
+        this.updater = updater
         app.scope.launch(Dispatchers.IO) {
-            val release = updater.available() ?: return@launch
+            while (true) {
+                if (app.settings.current.checkUpdates) checkUpdatesNow(manual = false)
+                kotlinx.coroutines.delay(6 * 60 * 60_000L)
+            }
+        }
+    }
+
+    /** «Buscar actualizaciones»: [manual] = lo pidió el usuario (avisa también si ya está al día). */
+    fun checkUpdatesNow(manual: Boolean) {
+        val updater = updater ?: Updater(app.logger).also { this.updater = it }
+        app.scope.launch(Dispatchers.IO) {
+            val release = updater.available()
             launch(Dispatchers.Swing) {
+                if (release == null) {
+                    if (manual) JOptionPane.showMessageDialog(
+                        this@MainWindow,
+                        if (updater.latest() == null) "No pude buscar actualizaciones. Revisá la conexión." else "Lucy está al día (V${com.sara.lucy.win.LucyLocation.version}).",
+                        "Lucy", JOptionPane.INFORMATION_MESSAGE,
+                    )
+                    return@launch
+                }
+                if (manual) showWindow()
                 showBanner("Hay una versión nueva de Lucy (V${release.version}).", "Actualizar") {
                     status.setWrapped("Bajando la actualización…")
                     app.scope.launch(Dispatchers.IO) {

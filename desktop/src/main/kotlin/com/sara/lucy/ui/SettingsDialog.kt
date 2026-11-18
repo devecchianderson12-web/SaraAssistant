@@ -163,6 +163,8 @@ class SettingsDialog(owner: JFrame, private val app: LucyApp, tab: Int, private 
         ))
         tabs.addTab("Otros", form(
             labeled("Ciudad para el clima (vacía = se estima por tu conexión)", city), row(saveHistory), row(updates),
+            row(JButton("Buscar actualizaciones").apply { addActionListener { (owner as? MainWindow)?.checkUpdatesNow(manual = true) } }),
+            note("Versión instalada: V${com.sara.lucy.win.LucyLocation.version}"),
             row(JButton("Diagnóstico").apply { addActionListener { diagnostics() } }),
             row(JButton("Abrir la carpeta de Lucy").apply { addActionListener { shellOpen(app.system, LucyPaths.home.absolutePath) } }),
             row(JButton("Borrar lo que recuerdo de vos").apply { addActionListener { forgetAll() } }),

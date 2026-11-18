@@ -106,53 +106,26 @@ class SpherePainter {
         private const val RAMP = " .:-=+*#%@"
 
         /** Ícono (ventana, bandeja, .exe): la esfera sobre un círculo oscuro. */
-        /**
-         * Ícono de Lucy (ventana, bandeja y .exe): círculo con degradado púrpura (violeta claro arriba,
-         * púrpura profundo abajo), un brillo suave y una esfera de puntos blancos al centro.
-         */
+        /** Ícono de Lucy (ventana, bandeja y .exe): la esfera de Lucy sobre fondo oscuro (el de antes, amarillo). */
         fun icon(size: Int): BufferedImage {
             val img = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
             val g = img.createGraphics()
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-            val s = size.toFloat()
-            val pad = s * 0.03f
-            val d = s - pad * 2
-            // Degradado púrpura en diagonal.
-            g.paint = java.awt.LinearGradientPaint(
-                pad, pad, pad + d, pad + d, floatArrayOf(0f, 0.5f, 1f),
-                arrayOf(Color(0xC0, 0x84, 0xFC), Color(0x8B, 0x5C, 0xF6), Color(0x4C, 0x1D, 0x95)),
-            )
-            g.fill(Ellipse2D.Float(pad, pad, d, d))
-            // Brillo arriba a la izquierda.
-            g.paint = RadialGradientPaint(
-                Point2D.Float(pad + d * 0.32f, pad + d * 0.28f), d * 0.55f, floatArrayOf(0f, 1f),
-                arrayOf(Color(255, 255, 255, 110), Color(255, 255, 255, 0)),
-            )
-            g.fill(Ellipse2D.Float(pad, pad, d, d))
-            // Esfera de puntos (como la de Lucy), en blanco.
-            val cx = s / 2
-            val cy = s / 2
-            val r = d * 0.30f
-            if (size <= 24) {
-                g.color = Color(255, 255, 255, 235)
-                g.fill(Ellipse2D.Float(cx - r * 0.6f, cy - r * 0.6f, r * 1.2f, r * 1.2f))
+            g.color = Color(8, 6, 20)
+            g.fillOval(0, 0, size, size)
+            if (size <= 32) {
+                // A tamaño chico, una esfera de color se ve mejor que las partículas.
+                val r = size / 2f
+                g.paint = RadialGradientPaint(
+                    Point2D.Float(r * 0.8f, r * 0.75f), r * 0.85f, floatArrayOf(0f, 0.55f, 1f),
+                    arrayOf(Color(255, 255, 255), Color(170, 90, 255), Color(30, 140, 255, 0)),
+                )
+                g.fillOval((size * 0.12).toInt(), (size * 0.12).toInt(), (size * 0.76).toInt(), (size * 0.76).toInt())
             } else {
-                val rows = if (size >= 128) 13 else 9
-                val dot = r * 2 / rows * 0.42f
-                for (row in 0 until rows) {
-                    val y = (row + 0.5f) / rows * 2 - 1
-                    for (col in 0 until rows) {
-                        val x = (col + 0.5f) / rows * 2 - 1
-                        val d2 = x * x + y * y
-                        if (d2 > 1) continue
-                        val z = sqrt(1 - d2)
-                        val light = (0.35f + 0.65f * ((-x * 0.4f - y * 0.5f + z * 0.77f).coerceAtLeast(0f))).toFloat()
-                        g.color = Color(255, 255, 255, (90 + 165 * light).toInt().coerceIn(0, 255))
-                        val dd = dot * (0.6f + 0.6f * light)
-                        g.fill(Ellipse2D.Float(cx + x * r - dd / 2, cy + y * r - dd / 2, dd, dd))
-                    }
-                }
+                // La esfera ocupa un tercio del área que se le da: se dibuja más grande y centrada.
+                val big = (size * 1.45).toInt()
+                g.translate((size - big) / 2, (size - big) / 2)
+                SpherePainter().apply { energy = 1f; level = 0.6f }.paint(g, big, big, 1.3)
             }
             g.dispose()
             return img
