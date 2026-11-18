@@ -59,6 +59,9 @@ import kotlinx.coroutines.launch
  */
 class AppContainer(private val app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** La app está abierta o en Recientes (para la escucha «con la app abierta»). */
+    val appTaskAlive = kotlinx.coroutines.flow.MutableStateFlow(false)
     val logger = DiagnosticsLog()
     val levels = AudioLevelMeter()
     val settings = SettingsRepository(app, scope)

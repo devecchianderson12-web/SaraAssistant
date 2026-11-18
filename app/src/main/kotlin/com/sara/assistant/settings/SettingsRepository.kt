@@ -131,6 +131,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val continuousConversation = booleanPreferencesKey("continuous_conversation_v2")
         val heySara = booleanPreferencesKey("hey_sara_v2")
         val listenMode = stringPreferencesKey("listen_mode")
+        val smartAppOpen = booleanPreferencesKey("smart_app_open")
         val smartBluetooth = booleanPreferencesKey("smart_bluetooth")
         val smartCharging = booleanPreferencesKey("smart_charging")
         val smartScreenOn = booleanPreferencesKey("smart_screen_on")
@@ -180,6 +181,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             heySara = this[Keys.heySara] ?: d.heySara,
             listenMode = this[Keys.listenMode].toEnum(d.listenMode),
             smartListening = com.sara.core.assistant.SmartListening(
+                appOpen = this[Keys.smartAppOpen] ?: d.smartListening.appOpen,
                 bluetooth = this[Keys.smartBluetooth] ?: d.smartListening.bluetooth,
                 charging = this[Keys.smartCharging] ?: d.smartListening.charging,
                 screenOn = this[Keys.smartScreenOn] ?: d.smartListening.screenOn,
@@ -225,6 +227,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.continuousConversation] = s.continuousConversation
         this[Keys.heySara] = s.heySara
         this[Keys.listenMode] = s.listenMode.name
+        this[Keys.smartAppOpen] = s.smartListening.appOpen
         this[Keys.smartBluetooth] = s.smartListening.bluetooth
         this[Keys.smartCharging] = s.smartListening.charging
         this[Keys.smartScreenOn] = s.smartListening.screenOn

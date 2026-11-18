@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ListenPolicyTest {
-    private val idle = ListenConditions(bluetoothAudio = false, charging = false, screenOn = false, hour = 15)
+    private val idle = ListenConditions(appOpen = false, bluetoothAudio = false, charging = false, screenOn = false, hour = 15)
 
     @Test fun smartListensInTheCarOrCharging() {
         val smart = SmartListening()
@@ -25,8 +25,17 @@ class ListenPolicyTest {
         assertFalse(ListenPolicy.inSchedule(23, 8, 23))
     }
 
-    @Test fun alwaysAndAppOnlyListen() {
-        assertTrue(ListenPolicy.shouldListen(ListenMode.ALWAYS, SmartListening(), idle))
-        assertTrue(ListenPolicy.shouldListen(ListenMode.APP_ONLY, SmartListening(), idle))
+    @Test fun alwaysListens() = assertTrue(ListenPolicy.shouldListen(ListenMode.ALWAYS, SmartListening(), idle))
+
+    @Test fun appOpenCombinesWithTheCar() {
+        val both = SmartListening(appOpen = true, bluetooth = true, charging = false)
+        // App abierta: escucha (para decirle «conectate al auto»).
+        assertTrue(ListenPolicy.shouldListen(ListenMode.SMART, both, idle.copy(appOpen = true)))
+        // App cerrada pero en el auto: sigue escuchando.
+        assertTrue(ListenPolicy.shouldListen(ListenMode.SMART, both, idle.copy(bluetoothAudio = true)))
+        // App cerrada y se bajó del auto: micrófono cerrado.
+        assertFalse(ListenPolicy.shouldListen(ListenMode.SMART, both, idle))
+        assertTrue(ListenPolicy.keepsRunningWhenAppClosed(ListenMode.SMART, both))
+        assertFalse(ListenPolicy.keepsRunningWhenAppClosed(ListenMode.SMART, SmartListening(appOpen = true, bluetooth = false, charging = false)))
     }
 }

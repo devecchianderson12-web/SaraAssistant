@@ -147,6 +147,7 @@ class MainActivity : ComponentActivity() {
     private val pvPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = false) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        container.appTaskAlive.value = true
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(SaraColors.Background.toArgb()),
             navigationBarStyle = SystemBarStyle.dark(SaraColors.Background.toArgb()),

@@ -2,16 +2,16 @@ package com.sara.core.assistant
 
 /** Cuándo tiene el micrófono abierto esperando «Sara» / «Ey Sara». */
 enum class ListenMode {
-    /** Siempre (lo que más batería gasta). */
+    /** Siempre (lo que más batería gasta; las demás opciones no cambian nada). */
     ALWAYS,
-    /** Escucha inteligente: sólo cuando tiene sentido (auto, cargando, pantalla encendida, horario). */
+    /** Sólo en los momentos elegidos (se pueden combinar varios). */
     SMART,
-    /** Sólo mientras la app está abierta o en Recientes; al sacarla de Recientes se apaga. */
-    APP_ONLY,
 }
 
-/** Qué momentos activan la escucha inteligente (los elige el usuario). */
+/** Qué momentos abren el micrófono (el usuario elige uno o varios; alcanza con que se cumpla uno). */
 data class SmartListening(
+    /** Mientras la app está abierta o en Recientes. */
+    val appOpen: Boolean = true,
     val bluetooth: Boolean = true,
     val charging: Boolean = true,
     val screenOn: Boolean = false,
@@ -23,6 +23,8 @@ data class SmartListening(
 
 /** Lo que pasa ahora en el teléfono. */
 data class ListenConditions(
+    /** La app está abierta o en Recientes. */
+    val appOpen: Boolean,
     val bluetoothAudio: Boolean,
     val charging: Boolean,
     val screenOn: Boolean,
@@ -31,12 +33,20 @@ data class ListenConditions(
 
 object ListenPolicy {
     fun shouldListen(mode: ListenMode, smart: SmartListening, now: ListenConditions): Boolean = when (mode) {
-        ListenMode.ALWAYS, ListenMode.APP_ONLY -> true
-        ListenMode.SMART -> (smart.bluetooth && now.bluetoothAudio) ||
+        ListenMode.ALWAYS -> true
+        ListenMode.SMART -> (smart.appOpen && now.appOpen) ||
+            (smart.bluetooth && now.bluetoothAudio) ||
             (smart.charging && now.charging) ||
             (smart.screenOn && now.screenOn) ||
             (smart.schedule && inSchedule(now.hour, smart.fromHour, smart.toHour))
     }
+
+    /**
+     * Con la app cerrada (fuera de Recientes), ¿hay algún motivo para que el servicio siga vivo
+     * esperando? Si sólo está elegido «con la app abierta», no: se apaga del todo.
+     */
+    fun keepsRunningWhenAppClosed(mode: ListenMode, smart: SmartListening): Boolean =
+        mode == ListenMode.ALWAYS || smart.bluetooth || smart.charging || smart.screenOn || smart.schedule
 
     fun inSchedule(hour: Int, from: Int, to: Int): Boolean = when {
         from == to -> true
@@ -47,9 +57,9 @@ object ListenPolicy {
     /** Por qué está escuchando o en pausa (para la notificación y Ajustes). */
     fun describe(mode: ListenMode, smart: SmartListening, now: ListenConditions): String = when (mode) {
         ListenMode.ALWAYS -> "Escucha siempre"
-        ListenMode.APP_ONLY -> "Escucha mientras la app está abierta o en Recientes"
         ListenMode.SMART -> {
             val reasons = buildList {
+                if (smart.appOpen && now.appOpen) add("app abierta")
                 if (smart.bluetooth && now.bluetoothAudio) add("conectado por Bluetooth")
                 if (smart.charging && now.charging) add("cargando")
                 if (smart.screenOn && now.screenOn) add("pantalla encendida")

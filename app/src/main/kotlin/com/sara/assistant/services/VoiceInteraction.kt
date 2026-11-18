@@ -49,7 +49,7 @@ class SaraVoiceInteractionService : VoiceInteractionService() {
         c.logger.d("VIS", "Sara es el asistente predeterminado")
         c.scope.launch {
             val settings = c.settings.current()
-            if (settings.wakeWordEnabled && settings.autostart && settings.listenMode != com.sara.core.assistant.ListenMode.APP_ONLY &&
+            if (settings.wakeWordEnabled && settings.autostart && com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(settings.listenMode, settings.smartListening) &&
                 !SaraListeningService.running.value
             ) {
                 SaraListeningService.start(this@SaraVoiceInteractionService, StartContext.VOICE_INTERACTION_SERVICE)

@@ -117,6 +117,7 @@ class SaraListeningService : LifecycleService() {
         getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
 
     private fun conditions() = com.sara.core.assistant.ListenConditions(
+        appOpen = container.appTaskAlive.value,
         bluetoothAudio = container.micRouter.bluetoothAudioConnected(),
         charging = charging(),
         screenOn = screenOn(),
@@ -150,6 +151,7 @@ class SaraListeningService : LifecycleService() {
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(audioDevices, null)
         // Cambios de ajustes, fin de cada interacción y el horario (cada minuto).
         lifecycleScope.launch { container.settings.settings.collect { listeningNow = null; evaluate() } }
+        lifecycleScope.launch { container.appTaskAlive.collect { evaluate() } }
         lifecycleScope.launch { container.orchestrator.state.collect { if (!container.orchestrator.isInteractionActive) evaluate() } }
         lifecycleScope.launch {
             while (true) {
@@ -176,7 +178,7 @@ class SaraListeningService : LifecycleService() {
             else -> {
                 // intent == null: el sistema relanzó el servicio tras cerrarlo (START_STICKY). En el modo
                 // «sólo con la app abierta» no vuelve solo.
-                if (intent == null && (!c.settings.settings.value.wakeWordEnabled || c.settings.settings.value.listenMode == com.sara.core.assistant.ListenMode.APP_ONLY)) {
+                if (intent == null && (!c.settings.settings.value.wakeWordEnabled || !com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(c.settings.settings.value.listenMode, c.settings.settings.value.smartListening))) {
                     stopSelfSafely()
                     return START_NOT_STICKY
                 }
@@ -192,18 +194,22 @@ class SaraListeningService : LifecycleService() {
     }
 
     /**
-     * Cerrar Sara desde «Recientes»: en el modo «sólo con la app abierta» se apaga del todo; en los
-     * otros modos sólo se cierra la ventana y la escucha sigue en este servicio.
+     * Cerrar Sara desde «Recientes»: si además hay otros momentos elegidos (auto, carga…), el servicio
+     * queda vivo sin micrófono y escucha sólo cuando se cumplen; si sólo estaba «con la app abierta»,
+     * se apaga del todo.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         val c = container
-        if (c.settings.settings.value.listenMode == com.sara.core.assistant.ListenMode.APP_ONLY) {
-            c.logger.d(TAG, "App quitada de recientes: se apaga la escucha (modo sólo con la app abierta)")
+        c.appTaskAlive.value = false
+        val s = c.settings.settings.value
+        if (!com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(s.listenMode, s.smartListening)) {
+            c.logger.d(TAG, "App quitada de recientes: se apaga la escucha")
             c.orchestrator.setWakeWordEnabled(false)
             stopSelfSafely()
         } else {
-            c.logger.d(TAG, "App quitada de recientes; la escucha sigue activa")
+            c.logger.d(TAG, "App quitada de recientes; escucha sólo en los momentos elegidos")
+            evaluate()
         }
     }
 
@@ -341,7 +347,7 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) SaraNotifications.postUpdated(context)
                 val settings = c.settings.current()
-                if (settings.wakeWordEnabled && settings.autostart && settings.listenMode != com.sara.core.assistant.ListenMode.APP_ONLY) {
+                if (settings.wakeWordEnabled && settings.autostart && com.sara.core.assistant.ListenPolicy.keepsRunningWhenAppClosed(settings.listenMode, settings.smartListening)) {
                     SaraListeningService.start(context, StartContext.BOOT_COMPLETED)
                 }
             } finally {
