@@ -65,6 +65,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings: StateFlow<SaraSettings> = c.settings.settings
     val history = c.history.entries
     val modelState = c.voskModels.state
+    val piperState = c.piperModels.state
     val serviceRunning = SaraListeningService.running
     val micActive = c.microphone.active
     val micSilenced = c.microphone.silenced
@@ -191,6 +192,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun dismissMicCompare() { _micCompare.value = null }
+
+    fun downloadPiper(force: Boolean) = c.ensurePiper(force)
     fun dismissUpdate() = c.updates.dismiss()
     fun installUpdate(release: com.sara.assistant.update.ReleaseInfo) = viewModelScope.launch { c.updates.downloadAndInstall(release) }
 

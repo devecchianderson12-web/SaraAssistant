@@ -77,6 +77,8 @@ data class SaraSettings(
     val quickResponse: Boolean = true,
     /** Charla: después de responder una pregunta sigue escuchando para conversar (no después de órdenes). */
     val chatFollowUp: Boolean = true,
+    /** Voz «Daniela» (Piper, Argentina, sin Internet). */
+    val usePiper: Boolean = true,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -135,6 +137,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val onlineInCar = booleanPreferencesKey("online_in_car")
         val quickResponse = booleanPreferencesKey("quick_response")
         val chatFollowUp = booleanPreferencesKey("chat_follow_up")
+        val usePiper = booleanPreferencesKey("use_piper")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -176,6 +179,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             onlineInCar = this[Keys.onlineInCar] ?: d.onlineInCar,
             quickResponse = this[Keys.quickResponse] ?: d.quickResponse,
             chatFollowUp = this[Keys.chatFollowUp] ?: d.chatFollowUp,
+            usePiper = this[Keys.usePiper] ?: d.usePiper,
         )
     }
 
@@ -213,5 +217,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.onlineInCar] = s.onlineInCar
         this[Keys.quickResponse] = s.quickResponse
         this[Keys.chatFollowUp] = s.chatFollowUp
+        this[Keys.usePiper] = s.usePiper
     }
 }

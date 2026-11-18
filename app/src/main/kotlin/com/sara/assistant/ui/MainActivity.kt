@@ -254,6 +254,7 @@ class MainActivity : ComponentActivity() {
         val routines by viewModel.routines.collectAsStateWithLifecycle()
         val reminders by viewModel.reminders.collectAsStateWithLifecycle()
         val micCompare by viewModel.micCompare.collectAsStateWithLifecycle()
+        val piperState by viewModel.piperState.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         val aiRequested by aiDialogRequested
         LaunchedEffect(aiRequested) { if (aiRequested) tab = Tab.SETTINGS }
@@ -366,9 +367,11 @@ class MainActivity : ComponentActivity() {
                                 compareMicrophones = { withMicPermission { viewModel.compareMicrophones() } },
                                 dismissMicCompare = viewModel::dismissMicCompare,
                                 installUpdate = { viewModel.installUpdate(it) },
+                                downloadPiper = { viewModel.downloadPiper(it) },
                             ),
                             updateState = updateState,
                             micCompare = micCompare,
+                            piperState = piperState,
                         )
                     }
                 }

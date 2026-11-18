@@ -155,6 +155,17 @@ class AppContainer(private val app: Application) {
     private val azureRecognizer = AzureSpeechRecognitionEngine(azure, microphone)
     val offlineTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = false)
     val systemNetworkTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = true)
+    /** Voz Daniela (Piper): se baja sola por Wi-Fi; mientras tanto habla la voz del teléfono. */
+    val piperModels = com.sara.assistant.voice.PiperModelManager(app, logger)
+    val piperVoice = com.sara.assistant.voice.PiperVoiceEngine(piperModels, offlineTts, focus, levels, logger)
+
+    /** Baja la voz Daniela si está elegida y falta (por Wi-Fi, o [force] desde el botón de Ajustes). */
+    fun ensurePiper(force: Boolean = false) {
+        if (!settings.settings.value.usePiper || piperModels.isInstalled()) return
+        if (piperModels.state.value is com.sara.assistant.speech.vosk.ModelState.Downloading) return
+        if (force || piperModels.onUnmeteredNetwork()) scope.launch { piperModels.download() }
+    }
+
     val azureVoice = AzureNeuralVoiceEngine(azure, focus, levels, phraseCache)
 
     val engines = object : EngineProvider {
@@ -182,7 +193,7 @@ class AppContainer(private val app: Application) {
             OnlineVoiceType.SYSTEM_NETWORK -> systemNetworkTts
         }
 
-        override fun offlineVoice(): VoiceEngine = offlineTts
+        override fun offlineVoice(): VoiceEngine = if (s.usePiper) piperVoice else offlineTts
     }
 
     val orchestrator = AssistantOrchestrator(
@@ -199,6 +210,7 @@ class AppContainer(private val app: Application) {
 
     init {
         scope.launch { history.load() }
+        ensurePiper()
         if (mediaControl.hasNotificationAccess()) musicUsage.start()
         // Recordatorios y rutinas: al iniciar el proceso se vuelven a programar por si se perdieron.
         scope.launch { runCatching { scheduler.rescheduleAll() } }
@@ -242,7 +254,8 @@ class AppContainer(private val app: Application) {
         // En el auto (Bluetooth conectado) se puede pedir Google aunque el modo sea Offline.
         recognitionMode = if (onlineInCar && recognitionMode == com.sara.core.engine.EngineMode.OFFLINE && micRouter.bluetoothAudioConnected()) com.sara.core.engine.EngineMode.AUTOMATIC else recognitionMode,
         allowRecognitionFallback = allowRecognitionFallback,
-        voiceMode = voiceMode,
+        // Daniela es local: con ella elegida no se usan voces online.
+        voiceMode = if (usePiper) com.sara.core.engine.EngineMode.OFFLINE else voiceMode,
         languageTag = language,
         endSilenceMillis = speechPauseMillis.toLong(),
         continuousConversation = continuousConversation,

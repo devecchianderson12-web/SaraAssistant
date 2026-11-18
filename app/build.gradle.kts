@@ -4,6 +4,18 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Voz «Daniela» (Piper, Argentina) con sherpa-onnx: la librería se baja una vez de su release oficial
+// (no se guarda en el repositorio). Es la última versión que trae el fonetizador de Piper (espeak-ng).
+val sherpaVersion = "1.13.8"
+val sherpaAar = file("libs/sherpa-onnx-$sherpaVersion.aar")
+if (!sherpaAar.isFile) {
+    sherpaAar.parentFile.mkdirs()
+    val tmp = File(sherpaAar.path + ".part")
+    uri("https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/sherpa-onnx-$sherpaVersion.aar").toURL()
+        .openStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+    tmp.renameTo(sherpaAar)
+}
+
 android {
     namespace = "com.sara.assistant"
     compileSdk = 35
@@ -101,6 +113,8 @@ dependencies {
     implementation(libs.vosk.android)
     implementation(libs.jna) { artifact { type = "aar" } }
     implementation(libs.porcupine.android)
+    implementation(files(sherpaAar))
+    implementation(libs.commons.compress)
     // IA conversacional (Claude) con el SDK oficial de Anthropic.
     implementation(libs.anthropic.java)
     implementation(libs.kotlin.reflect)

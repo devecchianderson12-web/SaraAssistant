@@ -91,6 +91,7 @@ class SettingsActions(
     val compareMicrophones: () -> Unit = {},
     val dismissMicCompare: () -> Unit = {},
     val installUpdate: (com.sara.assistant.update.ReleaseInfo) -> Unit = {},
+    val downloadPiper: (force: Boolean) -> Unit = {},
 )
 
 /** Apartados (para el índice de arriba) y su color. */
@@ -137,6 +138,9 @@ private fun UpdateCard(state: UpdateState, actions: SettingsActions) {
     }
 }
 
+private const val PIPER = "piper:daniela"
+private const val PHONE = "telefono"
+
 /** Voces neuronales de Azure de Argentina, Uruguay y Chile (las «Natural» de Edge). */
 private val NATURAL_VOICES = listOf(
     "es-AR-ElenaNeural" to "Elena · Argentina", "es-AR-TomasNeural" to "Tomás · Argentina",
@@ -164,6 +168,7 @@ fun SettingsScreen(
     routines: List<com.sara.assistant.skills.ScheduledRoutine> = emptyList(),
     reminders: List<com.sara.assistant.skills.Reminder> = emptyList(),
     micCompare: String? = null,
+    piperState: ModelState = ModelState.NotInstalled,
 ) {
     var aiDialog by remember { mutableStateOf(false) }
     LaunchedEffect(aiDialogRequested) {
@@ -341,17 +346,44 @@ fun SettingsScreen(
         SectionCard("Voz", Modifier.anchor("Voz"), "Cómo te habla Sara", SaraColors.Pink) {
             SubHeader("Voz de Sara")
             val azureReady = system.azureConfigured
-            val current = if (settings.onlineVoice == OnlineVoiceType.AZURE) settings.onlineVoiceId ?: NATURAL_VOICES.first().first else null
-            OptionChips(
-                "Voces naturales (las mismas de «Leer en voz alta» de Edge)",
-                NATURAL_VOICES,
-                current,
-                subtitle = if (azureReady) "Elegí la que más te guste y tocá «Probar voz»."
-                else "Necesitan la clave de Azure Speech (gratis hasta 500.000 caracteres por mes, de sobra para Sara). Tocá «Configurar» acá abajo.",
-            ) { id ->
-                actions.update { it.copy(onlineVoice = OnlineVoiceType.AZURE, onlineVoiceId = id, voiceMode = if (it.voiceMode == EngineMode.OFFLINE) EngineMode.AUTOMATIC else it.voiceMode) }
-                if (!azureReady) azureDialog = true
+            val current = when {
+                settings.usePiper -> PIPER
+                settings.voiceMode != EngineMode.OFFLINE && settings.onlineVoice == OnlineVoiceType.AZURE -> settings.onlineVoiceId ?: NATURAL_VOICES.first().first
+                else -> PHONE
             }
+            OptionChips(
+                "Elegí cómo querés que suene",
+                listOf(PIPER to "Daniela · Argentina", PHONE to "Voz del teléfono") + NATURAL_VOICES,
+                current,
+                subtitle = when (current) {
+                    PIPER -> "Gratis, sin Internet y sin cuentas. Se baja sola una vez (115 MB, por Wi-Fi)."
+                    PHONE -> "La voz que trae tu teléfono (más robótica)."
+                    else -> if (azureReady) "Voz natural de Microsoft (necesita Internet)." else "Esta voz necesita una clave de Azure Speech."
+                },
+            ) { id ->
+                when (id) {
+                    PIPER -> { actions.update { it.copy(usePiper = true) }; actions.downloadPiper(false) }
+                    PHONE -> actions.update { it.copy(usePiper = false, voiceMode = EngineMode.OFFLINE) }
+                    else -> {
+                        actions.update { it.copy(usePiper = false, onlineVoice = OnlineVoiceType.AZURE, onlineVoiceId = id, voiceMode = EngineMode.AUTOMATIC) }
+                        if (!azureReady) azureDialog = true
+                    }
+                }
+            }
+            if (settings.usePiper) {
+                val (detail, ok) = when (piperState) {
+                    ModelState.Ready -> "Lista: habla desde el teléfono, sin Internet" to true
+                    ModelState.NotInstalled -> "Se baja sola cuando estés con Wi-Fi (mientras tanto habla la voz del teléfono)" to false
+                    is ModelState.Downloading -> "Bajando ${(piperState.progress * 100).roundToInt()} %…" to false
+                    ModelState.Installing -> "Instalando…" to false
+                    is ModelState.Failed -> piperState.message to false
+                }
+                StatusLine("Voz Daniela", detail, ok)
+                if (piperState is ModelState.NotInstalled || piperState is ModelState.Failed) {
+                    ActionButton("Bajar ahora (115 MB)") { actions.downloadPiper(true) }
+                }
+            }
+            ActionButton("Probar voz", onClick = actions.testVoice)
             SubHeader("Avanzado")
             OptionChips("Modo de voz", modeOptions, settings.voiceMode, "Automático: neuronal online con respaldo offline") { v ->
                 actions.update { it.copy(voiceMode = v) }
@@ -383,7 +415,6 @@ fun SettingsScreen(
             SliderRow("Volumen de Sara", settings.voiceVolume, 0.2f..1f, { "${(it * 100).roundToInt()} %" }) { v ->
                 actions.update { it.copy(voiceVolume = v) }
             }
-            ActionButton("Probar voz", onClick = actions.testVoice)
         }
 
         // ---------------------------------------------------------------- Reconocimiento
