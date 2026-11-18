@@ -37,19 +37,43 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
 /**
- * La voz «Daniela» (Piper, español de Argentina): libre, gratis y sin Internet. Se descarga sola una
- * vez (unos 115 MB, por Wi-Fi) y después habla desde el teléfono con sherpa-onnx.
+ * Voces femeninas de Piper (libres, gratis y sin Internet). Son todas las voces femeninas en español
+ * que publica Piper: no hay de Chile, Uruguay ni Colombia.
+ * [speed] corrige el ritmo propio de cada voz (Daniela habla rápido y suena cortante: se la frena).
  */
-class PiperModelManager(private val context: Context, private val logger: SaraLogger) {
+enum class PiperVoice(val label: String, val country: String, val folder: String, val onnx: String, val sid: Int, val speed: Float, val megabytes: Int) {
+    DANIELA("Daniela", "Argentina", "vits-piper-es_AR-daniela-high", "es_AR-daniela-high.onnx", 0, 0.85f, 115),
+    CLAUDE("Claude", "México", "vits-piper-es_MX-claude-high", "es_MX-claude-high.onnx", 0, 1.0f, 67),
+    SHARVARD("Sharvard", "España", "vits-piper-es_ES-sharvard-medium", "es_ES-sharvard-medium.onnx", 1, 1.0f, 80),
+    ;
+
+    val url get() = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$folder.tar.bz2"
+}
+
+/** Descarga e instala la voz elegida (una vez, por Wi-Fi) y dice si está lista. */
+class PiperModelManager(private val context: Context, private val logger: SaraLogger, private val selected: () -> PiperVoice) {
     private val dir = File(context.filesDir, "piper")
-    private val modelDir = File(dir, MODEL)
     private val mutex = Mutex()
-    private val _state = MutableStateFlow<ModelState>(if (isInstalled()) ModelState.Ready else ModelState.NotInstalled)
+    private val _state = MutableStateFlow<ModelState>(ModelState.NotInstalled)
+    /** Estado de la voz elegida. */
     val state: StateFlow<ModelState> = _state.asStateFlow()
 
-    fun isInstalled() = File(modelDir, "$ONNX").isFile && File(modelDir, "tokens.txt").isFile && File(modelDir, "espeak-ng-data").isDirectory
+    init {
+        refresh()
+    }
 
-    fun modelDir(): File = modelDir
+    fun modelDir(voice: PiperVoice = selected()): File = File(dir, voice.folder)
+
+    fun isInstalled(voice: PiperVoice = selected()) = modelDir(voice).let {
+        File(it, voice.onnx).isFile && File(it, "tokens.txt").isFile && File(it, "espeak-ng-data").isDirectory
+    }
+
+    /** Al cambiar de voz: muestra si la nueva ya está bajada. */
+    fun refresh() {
+        if (_state.value !is ModelState.Downloading && _state.value != ModelState.Installing) {
+            _state.value = if (isInstalled()) ModelState.Ready else ModelState.NotInstalled
+        }
+    }
 
     /** Wi-Fi u otra red sin costo: ahí se baja sola. Con datos móviles espera (o el botón de Ajustes). */
     fun onUnmeteredNetwork(): Boolean {
@@ -59,12 +83,14 @@ class PiperModelManager(private val context: Context, private val logger: SaraLo
     }
 
     suspend fun download(): Boolean = withContext(Dispatchers.IO) {
+        val voice = selected()
         mutex.withLock {
-            if (isInstalled()) return@withLock true.also { _state.value = ModelState.Ready }
-            val archive = File(context.cacheDir, "piper-daniela.tar.bz2")
+            if (isInstalled(voice)) return@withLock true.also { _state.value = ModelState.Ready }
+            val modelDir = modelDir(voice)
+            val archive = File(context.cacheDir, "piper-${voice.name.lowercase()}.tar.bz2")
             try {
                 _state.value = ModelState.Downloading(0f)
-                val conn = (URL(URL_MODEL).openConnection() as HttpURLConnection).apply {
+                val conn = (URL(voice.url).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 15_000
                     readTimeout = 30_000
                     instanceFollowRedirects = true
@@ -97,13 +123,13 @@ class PiperModelManager(private val context: Context, private val logger: SaraLo
                     }
                 }
                 modelDir.deleteRecursively()
-                if (!File(tmp, MODEL).renameTo(modelDir)) error("no se pudo instalar")
+                if (!File(tmp, voice.folder).renameTo(modelDir)) error("no se pudo instalar")
                 tmp.deleteRecursively()
-                _state.value = ModelState.Ready
-                logger.d(TAG, "Voz Daniela instalada")
+                _state.value = if (selected() == voice) ModelState.Ready else _state.value
+                logger.d(TAG, "Voz ${voice.label} instalada")
                 true
             } catch (e: Exception) {
-                logger.w(TAG, "No pude bajar la voz Daniela", e)
+                logger.w(TAG, "No pude bajar la voz ${voice.label}", e)
                 _state.value = ModelState.Failed("No pude bajar la voz: ${e.message ?: "error"}. Probá de nuevo.")
                 false
             } finally {
@@ -112,37 +138,31 @@ class PiperModelManager(private val context: Context, private val logger: SaraLo
         }
     }
 
-    fun delete() {
-        modelDir.deleteRecursively()
-        _state.value = ModelState.NotInstalled
-    }
-
-    companion object {
-        private const val TAG = "Piper"
-        const val MODEL = "vits-piper-es_AR-daniela-high"
-        const val ONNX = "es_AR-daniela-high.onnx"
-        const val URL_MODEL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$MODEL.tar.bz2"
+    private companion object {
+        const val TAG = "Piper"
     }
 }
 
 /**
- * Habla con Daniela. Mientras la voz no está descargada (o si falla) usa la voz del teléfono, así
+ * Habla con la voz de Piper elegida. Mientras la voz no está descargada (o si falla) usa la voz del teléfono, así
  * Sara nunca se queda muda. Las frases cortas de siempre («Okey, voy.», «¿Sí?») quedan preparadas en
  * memoria para que suenen al instante.
  */
 class PiperVoiceEngine(
     private val models: PiperModelManager,
+    private val selected: () -> PiperVoice,
     private val fallback: VoiceEngine,
     private val focus: AudioFocusHelper,
     private val levels: AudioLevelMeter,
     private val logger: SaraLogger,
 ) : VoiceEngine {
-    override val id = "piper-daniela"
-    override val displayName = "Daniela (Argentina, sin Internet)"
+    override val id = "piper"
+    override val displayName = "Voces de Piper (sin Internet)"
     override val isOnline = false
 
     private val lock = Mutex()
     private var tts: OfflineTts? = null
+    private var loaded: PiperVoice? = null
     private val cache = HashMap<String, FloatArray>()
     /** Muestras ya entregadas al parlante en la frase actual. */
     @Volatile private var written = 0
@@ -151,19 +171,26 @@ class PiperVoiceEngine(
     override suspend fun availability(): Availability =
         if (models.isInstalled()) Availability.Available else fallback.availability()
 
-    override suspend fun voices(languageTag: String): List<VoiceOption> =
-        listOf(VoiceOption(id, "Daniela", "es-AR", requiresNetwork = false, description = "Argentina · femenina · sin Internet"))
+    override suspend fun voices(languageTag: String): List<VoiceOption> = PiperVoice.entries.map {
+        VoiceOption(it.name, it.label, it.country, requiresNetwork = false, description = "${it.country} · femenina · sin Internet")
+    }
 
     private suspend fun engine(): OfflineTts? = lock.withLock {
-        tts?.let { return it }
-        if (!models.isInstalled()) return null
-        val dir = models.modelDir()
+        val voice = selected()
+        if (loaded == voice) tts?.let { return it }
+        // Cambió la voz: se libera la anterior (y lo que tenía preparado).
+        tts?.release()
+        tts = null
+        loaded = null
+        synchronized(cache) { cache.clear() }
+        if (!models.isInstalled(voice)) return null
+        val dir = models.modelDir(voice)
         runCatching {
             OfflineTts(
                 config = OfflineTtsConfig(
                     model = OfflineTtsModelConfig(
                         vits = OfflineTtsVitsModelConfig(
-                            model = File(dir, PiperModelManager.ONNX).absolutePath,
+                            model = File(dir, voice.onnx).absolutePath,
                             tokens = File(dir, "tokens.txt").absolutePath,
                             dataDir = File(dir, "espeak-ng-data").absolutePath,
                         ),
@@ -171,17 +198,20 @@ class PiperVoiceEngine(
                     ),
                 ),
             )
-        }.onFailure { logger.w(TAG, "No pude cargar la voz Daniela", it) }.getOrNull()?.also { tts = it }
+        }.onFailure { logger.w(TAG, "No pude cargar la voz ${voice.label}", it) }.getOrNull()?.also {
+            tts = it
+            loaded = voice
+        }
     }
 
     /** Velocidad de Sara (1.0 normal) → velocidad de Piper. */
-    private fun speedOf(params: VoiceParams) = params.rate.coerceIn(0.5f, 2f)
+    private fun speedOf(params: VoiceParams) = (params.rate * selected().speed).coerceIn(0.5f, 2f)
 
     override suspend fun prepare(text: String, params: VoiceParams) {
-        val key = "${speedOf(params)}|$text"
+        val key = "${selected()}|${speedOf(params)}|$text"
         if (synchronized(cache) { key in cache }) return
         val engine = engine() ?: return
-        val audio = withContext(Dispatchers.Default) { engine.generate(text, sid = 0, speed = speedOf(params)) }
+        val audio = withContext(Dispatchers.Default) { engine.generate(text, sid = selected().sid, speed = speedOf(params)) }
         synchronized(cache) { cache[key] = audio.samples }
     }
 
@@ -200,7 +230,7 @@ class PiperVoiceEngine(
         return try {
             track.setVolume(params.volume.coerceIn(0f, 1f))
             track.play()
-            val cached = synchronized(cache) { cache["${speedOf(params)}|$text"] }
+            val cached = synchronized(cache) { cache["${selected()}|${speedOf(params)}|$text"] }
             withContext(Dispatchers.Default) {
                 if (cached != null) {
                     write(track, cached)
@@ -208,7 +238,7 @@ class PiperVoiceEngine(
                     // Va sonando a medida que se genera (frase por frase): empieza a hablar enseguida.
                     val job = coroutineContext
                     engine.generateWithCallback(
-                        text, sid = 0, speed = speedOf(params),
+                        text, sid = selected().sid, speed = speedOf(params),
                         callback = PiperChunkCallback { samples ->
                             if (job.isActive) {
                                 write(track, samples)
@@ -223,12 +253,12 @@ class PiperVoiceEngine(
             // Esperar a que termine de sonar lo que quedó en el búfer (máximo 3 s).
             val end = System.currentTimeMillis() + 3_000
             while (track.playbackHeadPosition < written && System.currentTimeMillis() < end) kotlinx.coroutines.delay(20)
-            logger.d(TAG, "Daniela habló: ${firstSound - started} ms hasta el primer sonido, ${written / engine.sampleRate().toFloat()} s de audio")
+            logger.d(TAG, "${selected().label} habló: ${firstSound - started} ms hasta el primer sonido, ${written / engine.sampleRate().toFloat()} s de audio")
             SpeakResult.Completed(id)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.w(TAG, "Daniela no pudo hablar; uso la voz del teléfono", e)
+            logger.w(TAG, "${selected().label} no pudo hablar; uso la voz del teléfono", e)
             fallback.speak(text, params)
         } finally {
             levels.reset()

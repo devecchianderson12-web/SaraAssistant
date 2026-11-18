@@ -159,11 +159,12 @@ class AppContainer(private val app: Application) {
     val offlineTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = false)
     val systemNetworkTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = true)
     /** Voz Daniela (Piper): se baja sola por Wi-Fi; mientras tanto habla la voz del teléfono. */
-    val piperModels = com.sara.assistant.voice.PiperModelManager(app, logger)
-    val piperVoice = com.sara.assistant.voice.PiperVoiceEngine(piperModels, offlineTts, focus, levels, logger)
+    val piperModels = com.sara.assistant.voice.PiperModelManager(app, logger) { settings.settings.value.piperVoice }
+    val piperVoice = com.sara.assistant.voice.PiperVoiceEngine(piperModels, { settings.settings.value.piperVoice }, offlineTts, focus, levels, logger)
 
     /** Baja la voz Daniela si está elegida y falta (por Wi-Fi, o [force] desde el botón de Ajustes). */
     fun ensurePiper(force: Boolean = false) {
+        piperModels.refresh()
         if (!settings.settings.value.usePiper || piperModels.isInstalled()) return
         if (piperModels.state.value is com.sara.assistant.speech.vosk.ModelState.Downloading) return
         if (force || piperModels.onUnmeteredNetwork()) scope.launch { piperModels.download() }

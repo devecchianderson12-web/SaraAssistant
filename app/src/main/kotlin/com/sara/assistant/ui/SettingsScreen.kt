@@ -138,7 +138,6 @@ private fun UpdateCard(state: UpdateState, actions: SettingsActions) {
     }
 }
 
-private const val PIPER = "piper:daniela"
 private const val PHONE = "telefono"
 
 /** Voces neuronales de Azure de Argentina, Uruguay y Chile (las «Natural» de Edge). */
@@ -346,28 +345,37 @@ fun SettingsScreen(
         // ---------------------------------------------------------------- Voz
         SectionCard("Voz", Modifier.anchor("Voz"), "Cómo te habla Sara", SaraColors.Pink) {
             SubHeader("Voz de Sara")
-            val azureReady = system.azureConfigured
             val current = when {
-                settings.usePiper -> PIPER
+                settings.usePiper -> "piper:" + settings.piperVoice.name
                 settings.voiceMode != EngineMode.OFFLINE && settings.onlineVoice == OnlineVoiceType.AZURE -> settings.onlineVoiceId ?: NATURAL_VOICES.first().first
                 else -> PHONE
             }
             OptionChips(
-                "Elegí cómo querés que suene",
-                listOf(PIPER to "Daniela · Argentina", PHONE to "Voz del teléfono") + NATURAL_VOICES,
+                "Voces gratis y sin Internet (se bajan una vez)",
+                com.sara.assistant.voice.PiperVoice.entries.map { "piper:" + it.name to "${it.label} · ${it.country}" },
                 current,
-                subtitle = when (current) {
-                    PIPER -> "Gratis, sin Internet y sin cuentas. Se baja sola una vez (115 MB, por Wi-Fi)."
-                    PHONE -> "La voz que trae tu teléfono (más robótica)."
-                    else -> if (azureReady) "Voz natural de Microsoft (necesita Internet)." else "Esta voz necesita una clave de Azure Speech."
+                subtitle = if (settings.usePiper) "Mujer, de ${settings.piperVoice.country}. Pesa ${settings.piperVoice.megabytes} MB y se baja sola por Wi-Fi. No hay voces gratis de Chile, Uruguay ni Colombia."
+                else "Daniela (Argentina), Claude (México) y Sharvard (España): todas las voces femeninas en español que hay gratis.",
+            ) { id ->
+                val voice = com.sara.assistant.voice.PiperVoice.valueOf(id.removePrefix("piper:"))
+                actions.update { it.copy(usePiper = true, piperVoice = voice) }
+                actions.downloadPiper(false)
+            }
+            OptionChips(
+                "Otras",
+                listOf(PHONE to "Voz del teléfono") + NATURAL_VOICES,
+                current,
+                subtitle = when {
+                    current == PHONE -> "La voz que trae tu teléfono (más robótica)."
+                    !settings.usePiper -> if (system.azureConfigured) "Voz natural de Microsoft (necesita Internet)." else "Esta voz necesita una clave de Azure Speech."
+                    else -> "Las de Microsoft necesitan una clave de Azure Speech."
                 },
             ) { id ->
                 when (id) {
-                    PIPER -> { actions.update { it.copy(usePiper = true) }; actions.downloadPiper(false) }
                     PHONE -> actions.update { it.copy(usePiper = false, voiceMode = EngineMode.OFFLINE) }
                     else -> {
                         actions.update { it.copy(usePiper = false, onlineVoice = OnlineVoiceType.AZURE, onlineVoiceId = id, voiceMode = EngineMode.AUTOMATIC) }
-                        if (!azureReady) azureDialog = true
+                        if (!system.azureConfigured) azureDialog = true
                     }
                 }
             }
@@ -379,9 +387,9 @@ fun SettingsScreen(
                     ModelState.Installing -> "Instalando…" to false
                     is ModelState.Failed -> piperState.message to false
                 }
-                StatusLine("Voz Daniela", detail, ok)
+                StatusLine("Voz ${settings.piperVoice.label}", detail, ok)
                 if (piperState is ModelState.NotInstalled || piperState is ModelState.Failed) {
-                    ActionButton("Bajar ahora (115 MB)") { actions.downloadPiper(true) }
+                    ActionButton("Bajar ahora (${settings.piperVoice.megabytes} MB)") { actions.downloadPiper(true) }
                 }
             }
             ActionButton("Probar voz", onClick = actions.testVoice)

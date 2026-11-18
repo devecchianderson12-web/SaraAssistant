@@ -76,6 +76,8 @@ data class SaraSettings(
     val chatFollowUp: Boolean = true,
     /** Voz «Daniela» (Piper, Argentina, sin Internet). */
     val usePiper: Boolean = true,
+    /** Cuál de las voces de Piper. */
+    val piperVoice: com.sara.assistant.voice.PiperVoice = com.sara.assistant.voice.PiperVoice.DANIELA,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "sara_settings")
@@ -133,6 +135,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val quickResponse = booleanPreferencesKey("quick_response")
         val chatFollowUp = booleanPreferencesKey("chat_follow_up")
         val usePiper = booleanPreferencesKey("use_piper")
+        val piperVoice = stringPreferencesKey("piper_voice")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -173,6 +176,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             quickResponse = this[Keys.quickResponse] ?: d.quickResponse,
             chatFollowUp = this[Keys.chatFollowUp] ?: d.chatFollowUp,
             usePiper = this[Keys.usePiper] ?: d.usePiper,
+            piperVoice = this[Keys.piperVoice].toEnum(d.piperVoice),
         )
     }
 
@@ -209,5 +213,6 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.quickResponse] = s.quickResponse
         this[Keys.chatFollowUp] = s.chatFollowUp
         this[Keys.usePiper] = s.usePiper
+        this[Keys.piperVoice] = s.piperVoice.name
     }
 }
