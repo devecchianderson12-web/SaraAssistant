@@ -137,6 +137,12 @@ private fun UpdateCard(state: UpdateState, actions: SettingsActions) {
     }
 }
 
+/** Voces neuronales de Azure de Argentina y Uruguay (las «Natural» de Edge). */
+private val NATURAL_VOICES = listOf(
+    "es-AR-ElenaNeural" to "Elena · Argentina", "es-AR-TomasNeural" to "Tomás · Argentina",
+    "es-UY-ValentinaNeural" to "Valentina · Uruguay", "es-UY-MateoNeural" to "Mateo · Uruguay",
+)
+
 private val modeOptions = listOf(EngineMode.AUTOMATIC to "Automático", EngineMode.ONLINE to "Online", EngineMode.OFFLINE to "Offline")
 private val languages = listOf("es-AR" to "Rioplatense", "es-US" to "Latino (EE. UU.)", "es-MX" to "México", "es-419" to "Latinoamérica", "es-ES" to "España")
 
@@ -332,6 +338,20 @@ fun SettingsScreen(
 
         // ---------------------------------------------------------------- Voz
         SectionCard("Voz", Modifier.anchor("Voz"), "Cómo te habla Sara", SaraColors.Pink) {
+            SubHeader("Voz de Sara")
+            val azureReady = system.azureConfigured && settings.azureRegion.isNotBlank()
+            val current = if (settings.onlineVoice == OnlineVoiceType.AZURE) settings.onlineVoiceId ?: NATURAL_VOICES.first().first else null
+            OptionChips(
+                "Voces naturales (las mismas de «Leer en voz alta» de Edge)",
+                NATURAL_VOICES,
+                current,
+                subtitle = if (azureReady) "Elegí la que más te guste y tocá «Probar voz»."
+                else "Necesitan la clave de Azure Speech (gratis hasta 500.000 caracteres por mes, de sobra para Sara). Tocá «Configurar» acá abajo.",
+            ) { id ->
+                actions.update { it.copy(onlineVoice = OnlineVoiceType.AZURE, onlineVoiceId = id, voiceMode = if (it.voiceMode == EngineMode.OFFLINE) EngineMode.AUTOMATIC else it.voiceMode) }
+                if (!azureReady) azureDialog = true
+            }
+            SubHeader("Avanzado")
             OptionChips("Modo de voz", modeOptions, settings.voiceMode, "Automático: neuronal online con respaldo offline") { v ->
                 actions.update { it.copy(voiceMode = v) }
             }

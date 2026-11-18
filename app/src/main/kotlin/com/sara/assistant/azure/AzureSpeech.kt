@@ -105,7 +105,7 @@ class AzureNeuralVoiceEngine(
                         description = "${it.optString("LocaleName")} · ${if (it.optString("Gender") == "Female") "femenina" else "masculina"}",
                     )
                 }
-                .sortedWith(compareBy({ it.locale != "es-AR" }, { !it.description.contains("femenina") }, { it.name }))
+                .sortedWith(compareBy({ it.locale != "es-AR" && it.locale != "es-UY" }, { it.locale != "es-AR" }, { !it.description.contains("femenina") }, { it.name }))
         } catch (e: Exception) {
             emptyList()
         } finally {
