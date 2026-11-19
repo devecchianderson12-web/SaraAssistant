@@ -16,15 +16,16 @@ sealed class PairDialog : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(440, 620);
+        ClientSize = new Size(420, 560);
+        AutoScroll = true;
 
         var layout = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(22) };
-        layout.Controls.Add(Theme.Label("En el teléfono: Lucy Remota › «Vincular computadora» y escaneá este código.", color: Theme.Text).With(l => l.MaximumSize = new Size(390, 0)));
+        layout.Controls.Add(Theme.Label("En el teléfono abrí Lucy Remota, tocá «Escanear QR» y apuntá a este código.", color: Theme.Text).With(l => l.MaximumSize = new Size(390, 0)));
 
         using var gen = new QRCodeGenerator();
         var data = gen.CreateQrCode(window.QrPayload(store.PcId, store.PcName, store.Key.PublicSpki), QRCodeGenerator.ECCLevel.M);
         var png = new PngByteQRCode(data).GetGraphic(8, [0x12, 0x11, 0x1A], [0xFF, 0xFF, 0xFF], true);
-        var qr = new PictureBox { Image = Image.FromStream(new MemoryStream(png)), SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(380, 380), Margin = new Padding(8) };
+        var qr = new PictureBox { Image = Image.FromStream(new MemoryStream(png)), SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(300, 300), Margin = new Padding(30, 8, 8, 8) };
         layout.Controls.Add(qr);
         layout.Controls.Add(Theme.Label("¿Sin cámara? Escribí este código:", color: Theme.Muted));
         layout.Controls.Add(Theme.Label(PairingCodes.Pretty(window.ManualCode), Theme.Big, Theme.Accent));
