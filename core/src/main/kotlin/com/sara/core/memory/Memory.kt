@@ -119,7 +119,7 @@ object SmallTalk {
         fun has(vararg p: String) = p.any { t.contains(" $it ") }
         return when {
             has("que hora es", "que hora son", "hora es", "me decis la hora", "decime la hora", "dime la hora") ->
-                "Son las ${now.hour}:${now.minute.toString().padStart(2, '0')}."
+                spokenTime(now.hour, now.minute)
             has("que dia es", "que dia es hoy", "que fecha es", "fecha de hoy", "que dia estamos") -> {
                 val day = now.dayOfWeek.getDisplayName(TextStyle.FULL, LOCALE)
                 val month = now.month.getDisplayName(TextStyle.FULL, LOCALE)
@@ -138,6 +138,18 @@ object SmallTalk {
     }
 
     private val LOCALE: Locale = Locale.forLanguageTag("es-AR")
+
+    /** La hora como se dice («Son las 9 y cuarto», «Es la 1 y 5», «Son las 21 en punto»), sin «9:05». */
+    fun spokenTime(hour: Int, minute: Int): String {
+        val start = if (hour == 1 || hour == 13) "Es la" else "Son las"
+        val min = when (minute) {
+            0 -> " en punto"
+            15 -> " y cuarto"
+            30 -> " y media"
+            else -> " y $minute"
+        }
+        return "$start $hour$min."
+    }
 }
 
 /** IA conversacional (Claude): responde preguntas, recuerda cosas y puede ejecutar órdenes. */

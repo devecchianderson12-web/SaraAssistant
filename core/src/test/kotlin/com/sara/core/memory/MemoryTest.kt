@@ -49,7 +49,8 @@ class MemoryTest {
     @Test
     fun `charla local`() {
         val now = LocalDateTime.of(2026, 11, 17, 9, 5)
-        assertEquals("Son las 9:05.", SmallTalk.answer("¿qué hora es?", now))
+        assertEquals("Son las 9 y 5.", SmallTalk.answer("¿qué hora es?", now))
+        assertEquals("Es la 1 y media.", SmallTalk.spokenTime(1, 30))
         assertEquals("Hoy es martes 17 de noviembre.", SmallTalk.answer("qué día es hoy", now))
         assertEquals("Muy bien, ¿y vos?", SmallTalk.answer("¿Cómo estás?"))
         assertNull(SmallTalk.answer("¿qué tiempo hace en Córdoba?"))
