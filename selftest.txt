@@ -1,0 +1,44 @@
+OK   entiende «Lucy, reproducí música» PlayMusic(query=null, app=null)
+OK   entiende «Lucy reproduci musica» PlayMusic(query=null, app=null)
+OK   entiende «luci poné música de queen en spotify» PlayMusic(query=queen, app=spotify)
+OK   entiende «Lucy, pausá la música» Pause
+OK   entiende «Lucy, siguiente canción» Next
+OK   entiende «Lucy, subí el volumen» AdjustVolume(change=Increase(points=null))
+OK   entiende «Lucy, abrí la calculadora» OpenApp(name=calculadora)
+OK   entiende «Lucy, poné un temporizador de 5 minutos» Skill(skill=alarma, action=temporizador, args={segundos=300})
+OK   entiende «Lucy, recordame mañana a las 9 comprar pan» Skill(skill=recordatorios, action=crear, args={texto=comprar pan, cuando=2026-11-20T09:00})
+OK   entiende «Lucy, cómo va a estar el clima mañana» Skill(skill=clima, action=consultar, args={dia=manana})
+OK   entiende «¿cómo estás Lucy?» Chat(text=¿cómo estás Lucy?)
+OK   entiende «Lucy, ¿qué hora es?» Chat(text=Lucy, ¿qué hora es?)
+OK   entiende «Lucy, ¿qué está sonando?» NowPlaying
+OK   entiende «Lucy, ¿cómo se llama este tema?» NowPlaying
+OK   entiende «Lucy, ¿podés poner música?» PlayMusic(query=null, app=null)
+OK   entiende «Lucy, ¿cómo subo el volumen?» Chat(text=Lucy, ¿cómo subo el volumen?)
+OK   entiende «Lucy, bloqueá la computadora» Skill(skill=dispositivo, action=bloquear, args={})
+OK   charla «cómo estás Lucy» 
+OK   puente con Windows 
+INFO volumen sin placa de audio: Exception calling "GetVolume" with "0" argument(s): "Element not found. (Exception from HRESULT: 0x80070490)"
+OK   sesiones multimedia {"session":false}
+OK   salida Bluetooth {"bluetooth":false}
+OK   qué está sonando NowPlayingInfo(title=null, artist=null, app=null, playing=false)
+OK   apps del menú Inicio 176: 7-Zip File Manager, 7-Zip Help, Anaconda PowerShell Prompt, Anaconda Prompt, Application Stack Builder, Application Verifier (WOW), Application Verifier (X64), Azure Arc Setup
+OK   batería {"present":false}
+OK   info {"computer":"runnervmm7ud1","os":"Microsoft Windows Server 2025 Datacenter","totalMemMb":16379,"totalDiskGb":150,"freeMemMb":13063,"freeDiskGb":30.6}
+OK   radios {"present":false}
+INFO micrófono micrófono común: Failed(error=EngineError(type=AUDIO_INPUT, message=No encontré un micrófono. Revisá que esté conectado., cause=null))
+OK   cifrado de claves 
+INFO voces Microsoft David Desktop (en-US), Microsoft Zira Desktop (en-US)
+OK   modelo de voz C:\Users\runneradmin\AppData\Local\Lucy\app\1.0.116.0\model
+INFO oído «Lucy.» entendió «lo hice»; activación: false (voz en inglés: sólo orientativo)
+INFO oído «Lucy, reproducí música.» entendió «luis y yo símil seca»; activación: false (voz en inglés: sólo orientativo)
+INFO hablar sin salida de audio: Exception calling "Speak" with "1" argument(s): "Audio device error encountered. - Error Code: 0x2"
+OK   responde «¿Cómo estás, Lucy?» Muy bien, ¿y vos?
+OK   responde «Lucy, cuánto es 25 por 4» Da 100.
+OK   responde «Lucy, qué podés hacer» Música, volumen, apps, recordatorios, alarmas, listas, clima, cuentas, charla y preguntas.
+OK   responde «Lucy, agregá leche a la lista de compras» Agregué leche.
+OK   voz Daniela 2.0120635 s de audio
+INFO reconocimiento preciso cargó en 2286 ms
+OK   reconocimiento preciso «Lucy, Pwn Music at a Queen Anne Spotify.» en 545 ms (voz en inglés)
+OK   ventana y esfera captura en lucy.png
+OK   ajustes e historial abren
+RESULTADO: todo OK
