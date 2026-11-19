@@ -43,6 +43,9 @@ static class SelfTest
         var store = new MemoryPcStore("pc-autoprueba", Environment.MachineName);
         var apps = new AppsModule();
         var registry = new CommandRegistry([new AudioModule(), new MediaModule(apps), apps, new SystemModule(), new InfoModule()]);
+        var history = new History();
+        history.Clear();
+        registry.Logged += history.Add;
         await using var link = new PcLink(store, registry, s => Line("     · " + s), discoveryPort: phone.UdpPort) { BeaconInterval = TimeSpan.FromMilliseconds(200) };
         link.ExtraTargets.Add(new IPEndPoint(IPAddress.Loopback, phone.UdpPort));
         apps.Preload();
@@ -103,21 +106,31 @@ static class SelfTest
         me.Refresh();
         Info("memoria", $"{me.WorkingSet64 / 1_048_576} MB en uso, {me.PrivateMemorySize64 / 1_048_576} MB privados");
 
-        // Ventana y vinculación (captura para revisar el diseño).
-        var history = new History();
+        // Ventana, vinculación, teléfonos e historial (capturas para revisar el diseño).
+        var screen = SystemInformation.VirtualScreen;
+        void Shot(string name)
+        {
+            for (var i = 0; i < 25; i++) { Application.DoEvents(); Thread.Sleep(40); }
+            using var bmp = new Bitmap(screen.Width, screen.Height);
+            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(screen.Location, Point.Empty, screen.Size);
+            bmp.Save(Path.Combine(dir, name));
+        }
         var form = new MainForm(link, store, history, startHidden: false);
         form.Show();
+        Shot("receptor.png");
         var dialog = new PairDialog(link.StartPairing(), store);
         dialog.Show(form);
-        for (var i = 0; i < 20; i++) { Application.DoEvents(); await Task.Delay(100); }
-        var screen = SystemInformation.VirtualScreen;
-        using (var bmp = new Bitmap(screen.Width, screen.Height))
-        {
-            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(screen.Location, Point.Empty, screen.Size);
-            bmp.Save(Path.Combine(dir, "receptor.png"));
-        }
-        Ok("ventana y vinculación", "captura en receptor.png");
+        Shot("vincular.png");
         dialog.Close();
+        var phonesDialog = new PhonesDialog(link, store);
+        phonesDialog.Show(form);
+        Shot("telefonos.png");
+        phonesDialog.Close();
+        var historyDialog = new HistoryDialog(history);
+        historyDialog.Show(form);
+        Shot("historial.png");
+        historyDialog.Close();
+        Ok("ventanas", "capturas: receptor, vincular, telefonos, historial");
         form.Hide();
     }
 }

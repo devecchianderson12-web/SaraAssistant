@@ -88,7 +88,10 @@ private val Bad = Color(0xFFF87171)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        LucyRemotaService.start(this)
+        // La conexión con la PC anda aunque todavía no haya permiso de micrófono (para vincular).
+        container.startLink()
+        // El servicio usa el micrófono: Android no deja arrancarlo sin ese permiso (se cerraba la app).
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) LucyRemotaService.start(this)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Back, surface = Card)) {
                 Screen()
@@ -117,6 +120,7 @@ private fun Screen() {
 
     fun granted(p: String) = context.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
     val askPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (granted(Manifest.permission.RECORD_AUDIO)) LucyRemotaService.start(context)
         c.refreshWake(granted(Manifest.permission.RECORD_AUDIO))
     }
     val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> scanning = ok }

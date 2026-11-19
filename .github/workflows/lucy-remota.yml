@@ -174,8 +174,17 @@ jobs:
             adb wait-for-device
             for i in $(seq 1 30); do adb shell pm path android >/dev/null 2>&1 && break; sleep 2; done
             for i in 1 2 3; do adb install -r LucyRemota-*.apk && break; sleep 5; done
+            adb logcat -c
+            # Primera vez, como en un teléfono nuevo: sin permisos todavía (antes se cerraba acá).
+            adb shell am start -W -n com.lucyremota.emisor/.ui.MainActivity
+            sleep 8
+            adb exec-out screencap -p > emisor0.png || true
+            adb logcat -d > logcat0.txt
+            if grep -q "FATAL EXCEPTION" logcat0.txt; then grep -A30 "FATAL EXCEPTION" logcat0.txt | head -60; exit 1; fi
+            adb shell pidof com.lucyremota.emisor || (echo "La app se cerró al abrirla sin permisos"; exit 1)
             adb shell pm grant com.lucyremota.emisor android.permission.RECORD_AUDIO || true
             adb shell pm grant com.lucyremota.emisor android.permission.POST_NOTIFICATIONS || true
+            adb shell am force-stop com.lucyremota.emisor
             adb logcat -c
             adb shell am start -W -n com.lucyremota.emisor/.ui.MainActivity
             sleep 8

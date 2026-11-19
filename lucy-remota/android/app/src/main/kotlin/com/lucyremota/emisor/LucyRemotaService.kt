@@ -32,10 +32,17 @@ class LucyRemotaService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Lucy Remota activa", NotificationManager.IMPORTANCE_LOW))
         val c = container
-        startForeground(ID, notification("Buscando la computadora…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        // Sin permiso de micrófono Android no deja este servicio: se cierra solo en vez de cerrar la app.
+        val started = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+            runCatching { startForeground(ID, notification("Buscando la computadora…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) }
+                .onFailure { c.logger.w("Servicio", "No pude quedar en primer plano", it) }.isSuccess
+        if (!started) {
+            stopSelf()
+            return
+        }
         // Sin esto muchos teléfonos descartan los anuncios de la PC (broadcast) con la pantalla apagada.
         multicast = getSystemService(WifiManager::class.java)?.createMulticastLock("lucyremota")?.apply { setReferenceCounted(false); acquire() }
-        runCatching { c.link.start() }.onFailure { c.logger.w("Servicio", "No pude abrir la conexión", it) }
+        c.startLink()
         c.ensureModels()
         c.refreshWake(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
         watcher = c.scope.launch {
@@ -62,6 +69,7 @@ class LucyRemotaService : Service() {
     }
 
     override fun onDestroy() {
+        if (watcher == null) { super.onDestroy(); return }
         watcher?.cancel()
         runCatching { multicast?.release() }
         container.orchestrator.setWakeWordEnabled(false)
@@ -87,7 +95,7 @@ class LucyRemotaService : Service() {
         const val ACTION_STOP = "com.lucyremota.emisor.SALIR"
 
         fun start(context: Context) {
-            context.startForegroundService(Intent(context, LucyRemotaService::class.java))
+            runCatching { context.startForegroundService(Intent(context, LucyRemotaService::class.java)) }
         }
     }
 }

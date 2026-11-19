@@ -166,6 +166,15 @@ class Container(private val app: Application) {
         )
     }
 
+    @Volatile private var linkStarted = false
+
+    /** Abre la conexión con la PC (una sola vez; si el puerto falla queda en el diagnóstico). */
+    @Synchronized
+    fun startLink() {
+        if (linkStarted) return
+        runCatching { link.start() }.onSuccess { linkStarted = true }.onFailure { logger.w("Enlace", "No pude abrir la conexión", it) }
+    }
+
     /** Baja lo que falta para escuchar «Lucy» y para la voz Daniela (una vez). */
     fun ensureModels() {
         scope.launch { if (!voskModels.isInstalled()) voskModels.download() }
