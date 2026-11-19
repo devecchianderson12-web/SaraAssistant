@@ -246,8 +246,10 @@ namespace LucyWin {
   public static class Output {
     // ¿El audio sale por un parlante/auricular Bluetooth? (enumerador BTH… o nombre «Bluetooth»).
     public static bool IsBluetooth() {
-      var en = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());
-      IMMDevice dev; if (en.GetDefaultAudioEndpoint(0, 1, out dev) != 0) return false;
+      // Sin placa de sonido no hay salida predeterminada (Windows tira una excepción): no es Bluetooth.
+      IMMDevice dev;
+      try { var en = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom()); if (en.GetDefaultAudioEndpoint(0, 1, out dev) != 0 || dev == null) return false; }
+      catch { return false; }
       IntPtr p; if (dev.OpenPropertyStore(0, out p) != 0 || p == IntPtr.Zero) return false;
       try {
         var store = (IPropStore)Marshal.GetObjectForIUnknown(p);
