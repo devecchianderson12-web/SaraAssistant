@@ -281,6 +281,7 @@ class AppContainer(private val app: Application) {
         continuousConversation = continuousConversation,
         quickResponse = quickResponse,
         chatFollowUp = chatFollowUp,
+        repeatCommands = repeatCommands,
         wakeRequiresPrefix = heySara,
         onlineVoice = VoiceParams(onlineVoiceId, speechRate, voiceVolume, language),
         offlineVoice = VoiceParams(offlineVoiceId, speechRate, voiceVolume, language),

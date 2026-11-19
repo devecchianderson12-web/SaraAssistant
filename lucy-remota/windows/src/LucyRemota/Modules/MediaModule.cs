@@ -85,33 +85,42 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
             if (session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) return Outcome.Ok("Ya está sonando música.");
             if (await session.TryPlayAsync()) return Outcome.Ok("Listo, puse la música.");
         }
-        // Nada abierto: Spotify si está instalado (sigue con lo último que escuchaste).
-        if (app != "youtube" && apps.Find("spotify") is { } spotify)
+        var music = apps.MusicApp(app);
+        if (music == null)
         {
-            apps.Launch(spotify);
+            M.ShellOpen("https://music.youtube.com/");
+            return Outcome.Ok("No encontré una app de música instalada: abrí YouTube Music en el navegador.");
+        }
+        apps.Launch(music);
+        // Spotify sigue con lo último que escuchaste; las demás quedan abiertas para elegir.
+        if (music.Name.Contains("spotify", StringComparison.OrdinalIgnoreCase))
+        {
             for (var i = 0; i < 20 && !ct.IsCancellationRequested; i++)
             {
                 await Task.Delay(500, ct);
                 var s = manager.GetSessions().FirstOrDefault(x => x.SourceAppUserModelId.Contains("spotify", StringComparison.OrdinalIgnoreCase));
-                if (s != null && await s.TryPlayAsync()) return Outcome.Ok("Listo, abrí Spotify y puse música.");
+                if (s != null && await s.TryPlayAsync()) return Outcome.Ok("Listo, puse música en Spotify.", new JsonObject { ["app"] = music.Name });
             }
-            return Outcome.Ok("Abrí Spotify; tocá play si no arranca sola.");
         }
-        M.ShellOpen("https://music.youtube.com/");
-        return Outcome.Ok("Abrí YouTube Music en el navegador.");
+        return Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
     }
 
     async Task<Outcome> Search(string query, string? app, CancellationToken ct)
     {
-        if (app == "spotify" && apps.Find("spotify") != null)
+        var music = apps.MusicApp(app);
+        var isSpotify = music?.Name.Contains("spotify", StringComparison.OrdinalIgnoreCase) == true;
+        if (isSpotify)
         {
+            // Spotify no deja reproducir un resultado sin tocarlo: se abre la búsqueda.
             M.ShellOpen("spotify:search:" + Uri.EscapeDataString(query));
-            return Outcome.Ok($"Te busqué «{query}» en Spotify.");
+            return Outcome.Ok($"Te busqué «{query}» en Spotify.", new JsonObject { ["app"] = music!.Name });
         }
-        // YouTube: el primer video de la búsqueda se abre y empieza a sonar solo.
         var id = await FirstVideo(query, ct);
         if (id != null)
         {
+            // En la app de YouTube Music (la instalada desde Chrome/Edge) si está; si no, en el navegador.
+            if (music != null && apps.OpenWebAppAt(music, "https://music.youtube.com/watch?v=" + id))
+                return Outcome.Ok($"Listo, pongo «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name });
             M.ShellOpen("https://www.youtube.com/watch?v=" + id);
             return Outcome.Ok($"Listo, pongo «{query}».", new JsonObject { ["query"] = query, ["source"] = "youtube" });
         }

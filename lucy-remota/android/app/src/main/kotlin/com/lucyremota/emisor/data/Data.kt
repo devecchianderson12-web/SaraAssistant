@@ -38,6 +38,11 @@ data class Settings(
     val piperVoice: PiperVoice = PiperVoice.DANIELA,
     val quickResponse: Boolean = true,
     val chatFollowUp: Boolean = true,
+    /** «Ey Lucy» en lugar de «Lucy» sola (menos activaciones por error). */
+    val heyPrefix: Boolean = false,
+    /** «Repetir tu orden cuando la menciones»: apagado = un tono cuando la PC lo hizo. */
+    val repeatCommands: Boolean = false,
+    val speechRate: Float = 1f,
 )
 
 class SettingsStore(context: Context) {
@@ -55,13 +60,17 @@ class SettingsStore(context: Context) {
             piperVoice = runCatching { PiperVoice.valueOf(prefs.getString("voz", d.piperVoice.name)!!) }.getOrDefault(d.piperVoice),
             quickResponse = prefs.getBoolean("rapida", d.quickResponse),
             chatFollowUp = prefs.getBoolean("charla", d.chatFollowUp),
+            heyPrefix = prefs.getBoolean("ey", d.heyPrefix),
+            repeatCommands = prefs.getBoolean("repetir", d.repeatCommands),
+            speechRate = prefs.getFloat("velocidad", d.speechRate),
         )
     }
 
     fun update(change: (Settings) -> Settings) {
         val s = change(_settings.value)
         prefs.edit().putBoolean("wake", s.wakeWord).putFloat("sensibilidad", s.sensitivity).putBoolean("piper", s.usePiper)
-            .putString("voz", s.piperVoice.name).putBoolean("rapida", s.quickResponse).putBoolean("charla", s.chatFollowUp).apply()
+            .putString("voz", s.piperVoice.name).putBoolean("rapida", s.quickResponse).putBoolean("charla", s.chatFollowUp)
+            .putBoolean("ey", s.heyPrefix).putBoolean("repetir", s.repeatCommands).putFloat("velocidad", s.speechRate).apply()
         _settings.value = s
     }
 }

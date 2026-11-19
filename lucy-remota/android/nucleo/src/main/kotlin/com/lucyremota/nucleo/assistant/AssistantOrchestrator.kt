@@ -78,11 +78,19 @@ data class AssistantConfig(
     val chatFollowUp: Boolean = false,
     /** Respuesta rápida: ejecuta las órdenes completas sin esperar la pausa larga de fin de frase. */
     val quickResponse: Boolean = false,
+    /**
+     * «Repetir tu orden cuando la menciones»: true = dice lo que hizo («Poniendo X en YouTube»);
+     * false = una orden que salió bien sólo suena (un tono corto). Las respuestas a preguntas, los
+     * errores y las preguntas de confirmación se dicen siempre.
+     */
+    val repeatCommands: Boolean = true,
 )
 
 /** Señales no verbales y manejo de foco de audio, implementadas por la plataforma. */
 interface ActivationFeedback {
     suspend fun chime()
+    /** Tono de «listo, lo hice» (cuando no se repite la orden en voz alta). */
+    suspend fun done() = chime()
     fun interactionStarted()
     fun interactionEnded()
 
@@ -545,10 +553,24 @@ class AssistantOrchestrator(
         val brief = execution.success && !execution.informative && execution.needsPermission == null && intent !is CommandIntent.Cancel
         // Si la respuesta termina en pregunta («¿Querés que le mande…?»), después se escucha la respuesta.
         endedWithQuestion = !brief && execution.response.trimEnd().endsWith("?")
+        // Sin repetir la orden: si se hizo, un tono (no se dicta «Poniendo X…»).
+        val silentDone = !cfg.repeatCommands && execution.success && execution.needsPermission == null &&
+            execution.confirmation == null && execution.followUp == null && isAction(intent)
         when {
+            silentDone -> runCatching { feedback.done() }
             brief -> speak(responses.acknowledgement, cfg, cacheable = true)
             execution.response.isNotBlank() -> speak(execution.response, cfg)
         }
+    }
+
+    /** Una orden (algo que se hace), no una pregunta (algo que hay que contestar). */
+    private fun isAction(intent: CommandIntent): Boolean = when (intent) {
+        is CommandIntent.Chat, CommandIntent.RecallMemory, CommandIntent.NowPlaying, is CommandIntent.Plan,
+        CommandIntent.Cancel, is CommandIntent.Unknown -> false
+        is CommandIntent.Sequence -> intent.steps.all(::isAction)
+        is CommandIntent.Skill -> !(intent.skill in QUERY_SKILLS || intent.action in QUERY_ACTIONS ||
+            intent.action.startsWith("GET_") || "consultar" in intent.args.values)
+        else -> true
     }
 
     private suspend fun handleRecognitionFailure(error: EngineError, cfg: AssistantConfig) {
@@ -594,6 +616,12 @@ class AssistantOrchestrator(
     }
 
     private companion object {
+        /** Habilidades y acciones que contestan algo (se dicen siempre). */
+        val QUERY_SKILLS = setOf("clima", "google", "traductor", "calculadora", "gustos", "diagnostico")
+        val QUERY_ACTIONS = setOf(
+            "consultar", "ver", "leer", "bateria", "info", "buscar", "ubicacion", "ver_temporizadores", "leer_chat", "cerca",
+            "calcular", "convertir", "MEDIA_NOW_PLAYING", "LIST_APPLICATIONS",
+        )
         /** Respuesta rápida sólo para órdenes cortas. */
         const val QUICK_MAX_WORDS = 7
         val QUICK_NEVER_START = setOf(

@@ -74,6 +74,8 @@ data class SaraSettings(
     val quickResponse: Boolean = true,
     /** Charla: después de responder una pregunta sigue escuchando para conversar (no después de órdenes). */
     val chatFollowUp: Boolean = true,
+    /** «Repetir tu orden cuando la menciones»: apagado = un tono cuando la hizo (no la dicta). */
+    val repeatCommands: Boolean = false,
     /** Voz «Daniela» (Piper, Argentina, sin Internet). */
     val usePiper: Boolean = true,
     /** Cuál de las voces de Piper. */
@@ -134,6 +136,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val onlineInCar = booleanPreferencesKey("online_in_car")
         val quickResponse = booleanPreferencesKey("quick_response")
         val chatFollowUp = booleanPreferencesKey("chat_follow_up")
+        val repeatCommands = booleanPreferencesKey("repeat_commands")
         val usePiper = booleanPreferencesKey("use_piper")
         val piperVoice = stringPreferencesKey("piper_voice")
     }
@@ -175,6 +178,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
             onlineInCar = this[Keys.onlineInCar] ?: d.onlineInCar,
             quickResponse = this[Keys.quickResponse] ?: d.quickResponse,
             chatFollowUp = this[Keys.chatFollowUp] ?: d.chatFollowUp,
+            repeatCommands = this[Keys.repeatCommands] ?: d.repeatCommands,
             usePiper = this[Keys.usePiper] ?: d.usePiper,
             piperVoice = this[Keys.piperVoice].toEnum(d.piperVoice),
         )
@@ -212,6 +216,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         this[Keys.onlineInCar] = s.onlineInCar
         this[Keys.quickResponse] = s.quickResponse
         this[Keys.chatFollowUp] = s.chatFollowUp
+        this[Keys.repeatCommands] = s.repeatCommands
         this[Keys.usePiper] = s.usePiper
         this[Keys.piperVoice] = s.piperVoice.name
     }

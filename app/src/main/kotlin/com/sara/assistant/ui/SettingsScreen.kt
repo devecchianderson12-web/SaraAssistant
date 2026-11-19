@@ -258,6 +258,11 @@ fun SettingsScreen(
                 settings.chatFollowUp,
             ) { v -> actions.update { it.copy(chatFollowUp = v) } }
             SwitchRow(
+                "Repetir tu orden cuando la menciones",
+                "Encendido: dice lo que hizo («Poniendo… en YouTube»). Apagado: cuando la hace suena un tono corto. Las respuestas a tus preguntas las dice siempre.",
+                settings.repeatCommands,
+            ) { v -> actions.update { it.copy(repeatCommands = v) } }
+            SwitchRow(
                 "Conversación continua",
                 "Después de responder sigue escuchando unos segundos sin que la llames (apagado: hace la orden y se calla)",
                 settings.continuousConversation,

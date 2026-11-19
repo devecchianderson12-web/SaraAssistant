@@ -159,10 +159,11 @@ class Container(private val app: Application) {
             recognitionMode = EngineMode.AUTOMATIC,
             voiceMode = EngineMode.OFFLINE,
             languageTag = "es-AR",
-            wakeRequiresPrefix = false,
+            wakeRequiresPrefix = s.heyPrefix,
             quickResponse = s.quickResponse,
             chatFollowUp = s.chatFollowUp,
-            offlineVoice = VoiceParams(null, 1f, 1f, "es-AR"),
+            repeatCommands = s.repeatCommands,
+            offlineVoice = VoiceParams(null, s.speechRate, 1f, "es-AR"),
         )
     }
 

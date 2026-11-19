@@ -50,7 +50,8 @@ class AudioFocusHelper(context: Context) {
 }
 
 /** Señal sonora breve (dos notas suaves) generada en memoria: sin archivos ni dependencias. */
-class ChimePlayer {
+/** Tono corto. Por defecto el de «te escucho»; [DONE] es el de «listo, lo hice». */
+class ChimePlayer(private val notes: List<Pair<Double, Double>> = LISTEN) {
     private val pcm: ShortArray by lazy { synthesize() }
 
     suspend fun play() = withContext(Dispatchers.Default) {
@@ -83,7 +84,6 @@ class ChimePlayer {
     }
 
     private fun synthesize(): ShortArray {
-        val notes = listOf(880.0 to 0.09, 1318.5 to 0.14)
         val out = ArrayList<Short>()
         for ((frequency, seconds) in notes) {
             val count = (SAMPLE_RATE * seconds).toInt()
@@ -98,8 +98,11 @@ class ChimePlayer {
         return out.toShortArray()
     }
 
-    private companion object {
-        const val SAMPLE_RATE = 24_000
+    companion object {
+        private const val SAMPLE_RATE = 24_000
+        val LISTEN = listOf(880.0 to 0.09, 1318.5 to 0.14)
+        /** Más agudo y corto: se distingue del de escuchar. */
+        val DONE = listOf(1318.5 to 0.06, 1760.0 to 0.11)
     }
 }
 
@@ -111,6 +114,10 @@ class AndroidActivationFeedback(
     @Volatile private var request: android.media.AudioFocusRequest? = null
 
     override suspend fun chime() = chimePlayer.play()
+
+    private val doneTone = ChimePlayer(ChimePlayer.DONE)
+
+    override suspend fun done() { runCatching { doneTone.play() } }
 
     override fun interactionStarted() {
         request = runCatching { focus.requestSpeech() }.getOrNull()

@@ -53,6 +53,7 @@ class AssistantOrchestratorTest {
         config: AssistantConfig = AssistantConfig(),
         assistant: com.sara.core.memory.ConversationalAssistant? = null,
         interpreter: com.sara.core.interpreter.CommandInterpreter = RuleBasedCommandInterpreter(),
+        feedback: ActivationFeedback = ActivationFeedback.None,
     ) {
         val media = FakeMedia(MediaActionResult.Done("Música"))
         val volume = FakeVolume(VolumeState(6, 0, 15))
@@ -65,6 +66,7 @@ class AssistantOrchestratorTest {
             executor = DefaultCommandExecutor(media, volume, ResponseCatalog(Random(0)), assistant = assistant),
             connectivity = FakeConnectivity(true),
             configProvider = { config },
+            feedback = feedback,
             history = object : CommandHistory {
                 override suspend fun record(entry: HistoryEntry) {
                     history += entry
@@ -159,6 +161,32 @@ class AssistantOrchestratorTest {
 
         assertEquals(listOf(MediaAction.PLAY to null), h.media.calls)
         assertEquals(3, offline.calls) // no siguió escuchando después de «poné música»
+    }
+
+    @Test
+    fun `sin repetir la orden suena un tono y las preguntas se contestan igual`() = runTest {
+        val offline = FakeRecognizer("vosk", false).willReturn("poné música").willReturn("¿qué hora es?")
+        val voice = FakeVoice("tts", false)
+        var tones = 0
+        val feedback = object : ActivationFeedback {
+            override suspend fun chime() = Unit
+            override suspend fun done() { tones++ }
+            override fun interactionStarted() = Unit
+            override fun interactionEnded() = Unit
+        }
+        val h = Harness(
+            this, FakeEngineProvider(offline = offline, offlineVoiceEngine = voice),
+            AssistantConfig(recognitionMode = EngineMode.OFFLINE, voiceMode = EngineMode.OFFLINE, acknowledgement = Acknowledgement.NONE, repeatCommands = false),
+            feedback = feedback,
+        )
+        h.orchestrator.activate()
+        advanceUntilIdle()
+        assertEquals(1, tones)
+        assertTrue(voice.spoken.isEmpty())
+        h.orchestrator.activate()
+        advanceUntilIdle()
+        assertEquals(1, tones)
+        assertTrue(voice.spoken.single().startsWith("Son las"))
     }
 
     @Test

@@ -68,6 +68,21 @@ class LucyRemotaService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Como Sara: Lucy funciona con la app abierta o en Recientes. Si la sacás de Recientes, se apaga
+     * todo (deja de escuchar, se desconecta de la PC y el proceso termina).
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val c = container
+        c.logger.d("Servicio", "Lucy Remota se cerró desde Recientes: se apaga todo")
+        c.orchestrator.setWakeWordEnabled(false)
+        runCatching { c.link.close() }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
     override fun onDestroy() {
         if (watcher == null) { super.onDestroy(); return }
         watcher?.cancel()

@@ -336,14 +336,48 @@ private fun SwitchRow(title: String, detail: String, checked: Boolean, onChange:
 
 @Composable
 private fun SettingsPanel() {
-    val c = androidx.compose.ui.platform.LocalContext.current.container
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val c = ctx.container
     val s by c.settings.settings.collectAsState()
     var key by remember { mutableStateOf(if (c.secrets.get(SecretStore.GEMINI_KEY) != null) "••••••••" else "") }
     Panel {
-        SwitchRow("Voz Daniela", "Natural y sin Internet (se baja una vez). Apagado: la voz del teléfono.", s.usePiper) { on ->
-            c.settings.update { it.copy(usePiper = on) }
-            c.ensureModels()
+        Text("Voz de Lucy", color = TextMain)
+        Text("Las mismas de Sara: naturales y sin Internet (se bajan una vez).", color = Muted, fontSize = 13.sp)
+        Spacer(Modifier.height(6.dp))
+        val choices = com.lucyremota.nucleo.voice.PiperVoice.entries.map { it.name to "${it.label} (${it.country})" } + ("TELEFONO" to "Voz del teléfono")
+        choices.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (id, label) ->
+                    val selected = if (id == "TELEFONO") !s.usePiper else s.usePiper && s.piperVoice.name == id
+                    val onClick = {
+                        c.settings.update { st ->
+                            if (id == "TELEFONO") st.copy(usePiper = false)
+                            else st.copy(usePiper = true, piperVoice = com.lucyremota.nucleo.voice.PiperVoice.valueOf(id))
+                        }
+                        c.ensureModels()
+                    }
+                    if (selected) Button(onClick = onClick) { Text(label, fontSize = 13.sp) } else OutlinedButton(onClick = onClick) { Text(label, fontSize = 13.sp) }
+                }
+            }
         }
+        Spacer(Modifier.height(6.dp))
+        Text("Velocidad de la voz: ${(s.speechRate * 100).toInt()} %", color = TextMain)
+        androidx.compose.material3.Slider(value = s.speechRate, onValueChange = { v -> c.settings.update { it.copy(speechRate = v) } }, valueRange = 0.7f..1.4f)
+        Spacer(Modifier.height(10.dp))
+        SwitchRow("Repetir tu orden cuando la menciones", "Encendido: dice lo que hizo la computadora («Volumen al 30 %»). Apagado: cuando la hace suena un tono corto. Las respuestas a tus preguntas las dice siempre.", s.repeatCommands) { on ->
+            c.settings.update { it.copy(repeatCommands = on) }
+        }
+        Spacer(Modifier.height(10.dp))
+        SwitchRow("Pedir «Ey Lucy»", "En lugar de «Lucy» sola: menos activaciones por error.", s.heyPrefix) { on ->
+            c.settings.update { it.copy(heyPrefix = on) }
+            c.orchestrator.setWakeWordEnabled(false)
+            c.refreshWake(androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Sensibilidad para escuchar «Lucy»: ${(s.sensitivity * 100).toInt()} %", color = TextMain)
+        Text("Más = te escucha desde más lejos, pero se activa más por error.", color = Muted, fontSize = 13.sp)
+        androidx.compose.material3.Slider(value = s.sensitivity, onValueChange = { v -> c.settings.update { it.copy(sensitivity = v) } }, valueRange = 0.1f..0.9f,
+            onValueChangeFinished = { c.orchestrator.setWakeWordEnabled(false); c.refreshWake(true) })
         Spacer(Modifier.height(10.dp))
         SwitchRow("Respuesta rápida", "Hace las órdenes cortas apenas las entiende.", s.quickResponse) { on -> c.settings.update { it.copy(quickResponse = on) } }
         Spacer(Modifier.height(10.dp))
