@@ -200,12 +200,18 @@ object Chime {
  * un parlante). [mode] 0 = automático (sube la voz baja sin subir el ruido de fondo), 100 = normal,
  * 200…800 = fijo (×2…×8). Un limitador suave evita que se sature.
  */
-class BoostedSource(private val inner: AudioSource, private val mode: () -> Int) : AudioSource {
+class BoostedSource(
+    private val inner: AudioSource,
+    private val mode: () -> Int,
+    /** Con el audio saliendo por Bluetooth (parlante lejos de la compu) la voz se refuerza al doble, como en Sara. */
+    private val bluetoothBoost: () -> Boolean = { false },
+) : AudioSource {
     override suspend fun capture(onChunk: (ByteArray, Int) -> Boolean): CaptureOutcome {
         val agc = AutoGain()
+        val extra = if (bluetoothBoost()) 2f else 1f
         return inner.capture { buf, len ->
             val m = mode()
-            val gain = if (m <= 0) agc.next(buf, len) else m / 100f
+            val gain = (if (m <= 0) agc.next(buf, len) else m / 100f) * extra
             if (gain <= 1.01f) onChunk(buf, len) else {
                 val out = ByteArray(len)
                 boost(buf, len, gain, out)

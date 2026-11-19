@@ -74,6 +74,11 @@ class SelfTest(private val dir: File) {
             "Lucy, cómo va a estar el clima mañana" to CommandIntent.Skill::class,
             "¿cómo estás Lucy?" to CommandIntent.Chat::class,
             "Lucy, ¿qué hora es?" to CommandIntent.Chat::class,
+            "Lucy, ¿qué está sonando?" to CommandIntent.NowPlaying::class,
+            "Lucy, ¿cómo se llama este tema?" to CommandIntent.NowPlaying::class,
+            "Lucy, ¿podés poner música?" to CommandIntent.PlayMusic::class,
+            "Lucy, ¿cómo subo el volumen?" to CommandIntent.Chat::class,
+            "Lucy, bloqueá la computadora" to CommandIntent.Skill::class,
         )
         for ((text, expected) in cases) {
             val intent = interpreter.interpret(text).intent
@@ -86,6 +91,8 @@ class SelfTest(private val dir: File) {
         if (app.system.call("ping") == "pong") ok("puente con Windows") else fail("puente con Windows", "no respondió")
         runCatching { app.system.obj("volume") }.fold({ ok("volumen", it.toString()) }, { info("volumen", "sin placa de audio: ${it.message}") })
         runCatching { app.system.obj("mediaInfo") }.fold({ ok("sesiones multimedia", it.toString()) }, { fail("sesiones multimedia", it.toString()) })
+        runCatching { app.system.obj("btOutput") }.fold({ ok("salida Bluetooth", it.toString()) }, { fail("salida Bluetooth", it.toString()) })
+        runCatching { runBlocking { app.media.nowPlaying() } }.fold({ ok("qué está sonando", it.toString()) }, { fail("qué está sonando", it.toString()) })
         val apps = app.appLauncher.installed()
         if (apps.isNotEmpty()) ok("apps del menú Inicio", "${apps.size}: " + apps.take(8).joinToString { it.label }) else fail("apps del menú Inicio", "vacío")
         runCatching { app.system.obj("battery") }.fold({ ok("batería", it.toString()) }, { fail("batería", it.toString()) })

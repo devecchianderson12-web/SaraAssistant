@@ -229,7 +229,39 @@ namespace LucyWin {
     int GetMute(out bool m);
   }
   [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IMMDevice { int Activate(ref Guid id, int ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o); }
+  interface IMMDevice {
+    int Activate(ref Guid id, int ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+    [PreserveSig] int OpenPropertyStore(int access, out IntPtr store);
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PKey { public Guid fmtid; public int pid; }
+  [StructLayout(LayoutKind.Explicit, Size = 24)]
+  public struct PVar { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr ptr; }
+  [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IPropStore {
+    [PreserveSig] int GetCount(out int c);
+    [PreserveSig] int GetAt(int i, out PKey k);
+    [PreserveSig] int GetValue(ref PKey k, out PVar v);
+  }
+  public static class Output {
+    // ¿El audio sale por un parlante/auricular Bluetooth? (enumerador BTH… o nombre «Bluetooth»).
+    public static bool IsBluetooth() {
+      var en = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());
+      IMMDevice dev; if (en.GetDefaultAudioEndpoint(0, 1, out dev) != 0) return false;
+      IntPtr p; if (dev.OpenPropertyStore(0, out p) != 0 || p == IntPtr.Zero) return false;
+      try {
+        var store = (IPropStore)Marshal.GetObjectForIUnknown(p);
+        foreach (var pid in new[] { 24, 14 }) {
+          var key = new PKey { fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), pid = pid }; PVar v;
+          if (store.GetValue(ref key, out v) == 0 && v.vt == 31 && v.ptr != IntPtr.Zero) {
+            var t = (Marshal.PtrToStringUni(v.ptr) ?? "").ToLowerInvariant();
+            if (t.StartsWith("bth") || t.Contains("bluetooth") || t.Contains("hands-free")) return true;
+          }
+        }
+        return false;
+      } catch { return false; } finally { Marshal.Release(p); }
+    }
+  }
   [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
   interface IMMDeviceEnumerator { int f(); int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice d); }
   [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorCom { }
@@ -483,6 +515,7 @@ while ($true) {
       'openApp'    { Start-Process ("shell:AppsFolder\" + $a.id); @{ opened = $true } }
       'open'       { Start-Process $a.target; @{ opened = $true } }
       'battery'    { Battery }
+      'btOutput'   { @{ bluetooth = [LucyWin.Output]::IsBluetooth() } }
       'lock'       { Start-Process rundll32.exe -ArgumentList 'user32.dll,LockWorkStation'; @{ locked = $true } }
       'radio'      { Radio $a.kind $a.state }
       'brightness' { Brightness $a.percent }

@@ -120,7 +120,7 @@ object SkillParser {
         }
         // «Bloqueá la pantalla», «apagá la pantalla», «desbloqueá el celular».
         if (has("desbloquea", "desbloqueame", "desbloquear", "desbloqueá", "destraba", "destrabame")) return skill("dispositivo", "desbloquear")
-        if (has("bloquea", "bloqueame", "bloquear", "traba", "trabame") && has("pantalla", "celular", "telefono", "movil") ||
+        if (has("bloquea", "bloqueame", "bloquear", "traba", "trabame") && has("pantalla", "celular", "telefono", "movil", "computadora", "compu", "pc", "equipo", "notebook", "laptop") ||
             Regex("^(?:bloquea|bloqueate|bloquear)$").matches(n) ||
             has("apaga la pantalla", "apagame la pantalla", "apagar la pantalla")
         ) return skill("dispositivo", "bloquear")

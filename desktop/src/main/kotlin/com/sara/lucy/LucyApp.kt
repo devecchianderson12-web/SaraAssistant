@@ -103,7 +103,18 @@ class LucyApp {
         settings.current.microphone
     }
     /** Lo que escuchan la palabra «Lucy» y las órdenes: el micrófono con el potenciador. */
-    private val listeningSource = com.sara.lucy.audio.BoostedSource(microphone) { settings.current.micBoost }
+    private val listeningSource = com.sara.lucy.audio.BoostedSource(microphone, { settings.current.micBoost }) { bluetoothOutput() }
+
+    @Volatile private var bluetoothCheck = 0L to false
+
+    /** ¿El sonido sale por Bluetooth? (se consulta cada 20 s como mucho). */
+    private fun bluetoothOutput(): Boolean {
+        val (at, value) = bluetoothCheck
+        if (System.currentTimeMillis() - at < 20_000) return value
+        val now = runCatching { system.obj("btOutput", timeoutMillis = 3_000).optBoolean("bluetooth") }.getOrDefault(false)
+        bluetoothCheck = System.currentTimeMillis() to now
+        return now
+    }
     val models = VoskModels(logger)
     val history = FileCommandHistory(File(LucyPaths.home, "history.json")) { settings.current.saveHistory }
     val memory = FileMemoryStore(File(LucyPaths.home, "memory.json"))
