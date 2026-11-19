@@ -51,7 +51,7 @@ sealed class MainForm : LucyForm
         Text = $"Lucy Remota · V{version.Split('.').Last()}";
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
         MinimumSize = new Size(420, 560);
-        Size = new Size(470, 660);
+        Size = new Size(540, 680);
         StartPosition = FormStartPosition.CenterScreen;
 
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, Padding = new Padding(20, 16, 20, 0), BackColor = Color.Transparent, WrapContents = false };
