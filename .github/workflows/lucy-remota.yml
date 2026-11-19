@@ -82,3 +82,158 @@ jobs:
           name: LucyRemota-Receptor
           path: lucy-remota/windows/LucyRemota-Receptor-Windows-*.exe
           if-no-files-found: error
+
+  emisor:
+    name: Emisor para Android (APK) y pruebas del protocolo
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: lucy-remota/android
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar .NET 8 (PC simulada para probar el teléfono contra Windows)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Configurar Gradle (con caché)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Pruebas del teléfono contra el Receptor real (.NET)
+        run: |
+          chmod +x gradlew
+          dotnet build ../windows/tools/PcSim -c Release -o pcsim -v q
+          rm -f qr.txt qr2.txt
+          (dotnet pcsim/PcSim.dll qr.txt 240 > pcsim.log 2>&1 &)
+          LUCY_INTEROP_QR=$PWD/qr.txt ./gradlew --no-daemon :protocolo:test --tests '*interoperabilidad*'
+          (dotnet pcsim/PcSim.dll qr2.txt 240 > pcsim2.log 2>&1 &)
+          LUCY_INTEROP_QR=$PWD/qr2.txt ./gradlew --no-daemon :protocolo:test :remoto:test
+          echo "--- PC simulada"; cat pcsim.log pcsim2.log
+
+      - name: Compilar APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Nombre del archivo
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "LucyRemota-Emisor-Android-v1.0.${{ github.run_number }}.apk"
+          ls -la LucyRemota-Emisor-Android-*.apk
+
+      - name: Guardar el APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LucyRemota-Emisor
+          path: lucy-remota/android/LucyRemota-Emisor-Android-*.apk
+          if-no-files-found: error
+
+  emisor-emulador:
+    name: Emisor en emulador contra la PC simulada
+    needs: emisor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+      - name: Descargar el APK
+        uses: actions/download-artifact@v4
+        with:
+          name: LucyRemota-Emisor
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: PC simulada
+        run: dotnet build lucy-remota/windows/tools/PcSim -c Release -o pcsim -v q
+      - name: Habilitar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # La app real en Android: se vincula con la PC simulada (por adb, con el QR) y manda órdenes de voz
+      # escritas. Si se cierra o no conecta, no se publica.
+      - name: Abrir la app, vincular y mandar órdenes
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb wait-for-device
+            for i in $(seq 1 30); do adb shell pm path android >/dev/null 2>&1 && break; sleep 2; done
+            for i in 1 2 3; do adb install -r LucyRemota-Emisor-Android-*.apk && break; sleep 5; done
+            adb shell pm grant com.lucyremota.emisor android.permission.RECORD_AUDIO || true
+            adb shell pm grant com.lucyremota.emisor android.permission.POST_NOTIFICATIONS || true
+            adb logcat -c
+            adb shell am start -W -n com.lucyremota.emisor/.ui.MainActivity
+            sleep 8
+            adb exec-out screencap -p > emisor1.png || true
+            adb forward tcp:47800 tcp:47800
+            nohup dotnet pcsim/PcSim.dll qr.txt 200 --direct 127.0.0.1:47800 > pcsim.log 2>&1 &
+            for i in $(seq 1 30); do [ -f qr.txt ] && break; sleep 1; done
+            adb shell am broadcast -a com.lucyremota.emisor.DEBUG -p com.lucyremota.emisor --es qr "'$(cat qr.txt)'"
+            for i in $(seq 1 30); do grep -q "Conectada" pcsim.log && break; sleep 2; done; cat pcsim.log
+            grep -q "Conectada" pcsim.log
+            adb exec-out screencap -p > emisor2.png || true
+            adb shell am broadcast -a com.lucyremota.emisor.DEBUG -p com.lucyremota.emisor --es text "'poné el volumen al 30'"
+            sleep 10
+            adb shell am broadcast -a com.lucyremota.emisor.DEBUG -p com.lucyremota.emisor --es text "'subí el volumen'"
+            sleep 10
+            adb exec-out screencap -p > emisor3.png || true
+            adb logcat -d | grep -E "LucyRemota/|AndroidRuntime|FATAL" | tail -40 || true
+            adb logcat -d > logcat.txt
+            if grep -q "FATAL EXCEPTION" logcat.txt; then grep -A30 "FATAL EXCEPTION" logcat.txt | head -60; exit 1; fi
+            adb logcat -d | grep -q "Volumen al 40" || (echo "No llegó la respuesta de la PC"; exit 1)
+      - name: Publicar capturas (manual)
+        if: always() && github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir capturas && cp emisor*.png pcsim.log capturas/ 2>/dev/null; cd capturas
+          git init -q && git checkout -q -b capturas-lucy-remota-android
+          git -c user.name=ci -c user.email=ci@example.invalid add .
+          git -c user.name=ci -c user.email=ci@example.invalid commit -qm "Capturas del Emisor ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" capturas-lucy-remota-android
+
+  publicar:
+    name: Publicar en el release SaraAssistant
+    needs: [receptor, emisor, emisor-emulador]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-saraassistant
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar el .exe
+        uses: actions/download-artifact@v4
+        with:
+          name: LucyRemota-Receptor
+      - name: Descargar el APK
+        uses: actions/download-artifact@v4
+        with:
+          name: LucyRemota-Emisor
+      # Mismo release que Sara y Lucy: se reemplazan sólo los archivos de Lucy Remota (el tag no cambia,
+      # así el teléfono con Sara no cree que hay una versión nueva de Sara).
+      - name: Subir Lucy Remota al release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          TAG=$(gh api "repos/$REPO/releases/latest" -q .tag_name)
+          echo "Release: $TAG"
+          for a in $(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name' | grep -E '^LucyRemota-' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
+          gh release upload "$TAG" LucyRemota-Receptor-Windows-*.exe LucyRemota-Emisor-Android-*.apk -R "$REPO" --clobber
+          FILES=$(gh api "repos/$REPO/releases/tags/$TAG" -q '[.assets[].name] | join("\n- ")')
+          printf 'Sara para Android, Lucy para Windows y Lucy Remota (el teléfono controla la computadora).\n\n- %s\n\nSara: SaraAssistant-…apk (Android).\nLucy: Lucy-Windows-…exe (Windows).\nLucy Remota: LucyRemota-Emisor-…apk en el teléfono + LucyRemota-Receptor-…exe en la computadora.\n' "$FILES" > notas.md
+          gh release edit "$TAG" -R "$REPO" --title "SaraAssistant" --notes-file notas.md

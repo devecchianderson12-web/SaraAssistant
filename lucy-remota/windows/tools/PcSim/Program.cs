@@ -3,10 +3,13 @@ using System.Text.Json.Nodes;
 using LucyRemota.Core.Commands;
 using LucyRemota.Core.Link;
 
-// Uso: PcSim <archivo-para-el-QR> [segundos]
+// Uso: PcSim <archivo-para-el-QR> [segundos] [--direct host:puerto]
 // Abre una vinculación, escribe el contenido del QR en el archivo y atiende al teléfono un rato.
+// «--direct»: además de anunciarse, se conecta directo a esa dirección (emulador con «adb forward»).
 var qrFile = args.Length > 0 ? args[0] : "qr.txt";
-var seconds = args.Length > 1 ? int.Parse(args[1]) : 60;
+var seconds = args.Length > 1 && int.TryParse(args[1], out var sec) ? sec : 60;
+var directAt = Array.IndexOf(args, "--direct");
+IPEndPoint? direct = directAt >= 0 ? IPEndPoint.Parse(args[directAt + 1]) : null;
 var store = new MemoryPcStore("pc-simulada", "PC simulada");
 var module = new SimModule();
 await using var link = new PcLink(store, new CommandRegistry([module]), s => Console.WriteLine("[pc] " + s)) { BeaconInterval = TimeSpan.FromMilliseconds(300) };
@@ -15,7 +18,13 @@ var w = link.StartPairing();
 File.WriteAllText(qrFile + ".tmp", w.QrPayload(store.PcId, store.PcName, store.Key.PublicSpki));
 File.Move(qrFile + ".tmp", qrFile, true);
 link.Start();
-await Task.Delay(TimeSpan.FromSeconds(seconds));
+var until = DateTime.UtcNow.AddSeconds(seconds);
+Task attempt = Task.CompletedTask;
+while (DateTime.UtcNow < until)
+{
+    if (direct != null && link.Connected.Count == 0 && attempt.IsCompleted) attempt = link.ConnectAsync(direct, CancellationToken.None);
+    await Task.Delay(1500);
+}
 Console.WriteLine($"[pc] ejecuciones: {module.Executions}, volumen final: {module.Volume}");
 
 sealed class SimModule : ISkillModule

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lucy Remota</string>
+    <color name="lr_background">#FF12111A</color>
+    <style name="Theme.LucyRemota" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/lr_background</item>
+        <item name="android:statusBarColor">@color/lr_background</item>
+        <item name="android:navigationBarColor">@color/lr_background</item>
+    </style>
+</resources>
