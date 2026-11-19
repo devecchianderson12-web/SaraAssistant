@@ -1,0 +1,13 @@
+{
+  // Relé de Lucy Remota (Cloudflare Workers, plan gratis).
+  "name": "lucy-remota-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2025-10-01",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  // Las salas con SQLite son las que entran en el plan gratis.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "observability": { "enabled": false }
+}

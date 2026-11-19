@@ -92,7 +92,7 @@ class RemotoTest {
         assumeTrue("sin PC simulada", qrFile != null)
         val file = File(qrFile!!)
         withTimeout(30_000) { while (!file.exists()) delay(200) }
-        val link = PhoneLink(MemStore(), SoftwareIdentity(), { println("[tel] $it") })
+        val link = PhoneLink(MemStore(), SoftwareIdentity(), { println("[tel] $it") }, relayUrl = null)
         link.start()
         link.pairWithQr(PairingQr.parse(file.readText().trim())!!)
         withTimeout(15_000) { while (link.state.value !is LinkState.Connected || link.catalog.value.isEmpty()) delay(100) }

@@ -40,6 +40,13 @@ static class Program
         var registry = new CommandRegistry([new AudioModule(), new MediaModule(apps), apps, new SystemModule(), new InfoModule()]);
         registry.Logged += history.Add;
         var link = new PcLink(store, registry, Log.Write);
+        // «relay.txt» junto a los datos: otra dirección del relé, o «no» para usar sólo la red local.
+        if (File.Exists(Paths.File("relay.txt")))
+        {
+            var r = File.ReadAllText(Paths.File("relay.txt")).Trim();
+            link.RelayUrl = r.Equals("no", StringComparison.OrdinalIgnoreCase) ? null : r.Length > 0 ? r : link.RelayUrl;
+        }
+        Log.Write(link.RelayUrl != null ? "Relé para redes distintas: " + link.RelayUrl : "Relé desactivado (sólo red local)");
         apps.Preload();
         link.Start();
 

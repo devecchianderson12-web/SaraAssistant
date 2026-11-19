@@ -52,7 +52,8 @@ public sealed class PhoneSimulator : IAsyncDisposable
             UdpReceiveResult r;
             try { r = await udp.ReceiveAsync(stop.Token); } catch { return; }
             var msg = Wire.ParseObject(r.Buffer);
-            if (msg.Str("t") != "beacon" || !AnswerBeacons || stream != null) continue;
+            // Conectado por el relé sí contesta: si la PC está en la misma red, se pasa a la directa.
+            if (msg.Str("t") != "beacon" || !AnswerBeacons || (stream != null && stream is not RelayStream)) continue;
             var pc = msg.Str("pc");
             var interested = Paired?.pcId == pc || PendingQr?.pcId == pc || (PendingCode != null && msg.Bool("pairing") == true);
             if (!interested) continue;
@@ -67,13 +68,30 @@ public sealed class PhoneSimulator : IAsyncDisposable
         {
             TcpClient c;
             try { c = await listener.AcceptTcpClientAsync(stop.Token); } catch { return; }
-            _ = Task.Run(() => Handle(c));
+            _ = Task.Run(() => Handle(c.GetStream(), c.Close));
         }
     }
 
-    async Task Handle(TcpClient c)
+    /// <summary>
+    /// Se conecta al relé como lo hace el teléfono cuando está en otra red (ya vinculado) y atiende a
+    /// la PC por ahí hasta que se cancele.
+    /// </summary>
+    public async Task RunRelayAsync(string relayUrl, CancellationToken ct)
     {
-        var s = c.GetStream();
+        var (_, pcKey) = Paired ?? throw new InvalidOperationException("primero hay que vincular");
+        var uri = RelayClient.RoomUri(relayUrl, RelayClient.RoomId(pcKey, Key.PublicSpki), "dev");
+        using var both = CancellationTokenSource.CreateLinkedTokenSource(ct, stop.Token);
+        await using var relay = await RelayClient.ConnectAsync(uri, both.Token);
+        while (await relay.NextPeerAsync(both.Token) is { } peer)
+        {
+            var s = peer;
+            _ = Task.Run(() => Handle(s, s.Dispose));
+        }
+    }
+
+    async Task Handle(Stream s, Action close)
+    {
+        var c = new Closer(close);
         try
         {
             var hello = Wire.ParseObject(await Wire.ReadFrameAsync(s, stop.Token));
@@ -135,8 +153,10 @@ public sealed class PhoneSimulator : IAsyncDisposable
             }
         }
         catch (Exception) { }
-        finally { stream = null; }
+        finally { if (stream == s) stream = null; }
     }
+
+    sealed class Closer(Action close) { public void Close() => close(); }
 
     public async Task<bool> WaitConnectedAsync(TimeSpan timeout) => await connected.WaitAsync(timeout);
 

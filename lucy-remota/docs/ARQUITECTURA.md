@@ -36,8 +36,12 @@ Voz → Reconocimiento → Interpretación → Intención → Orden estructurada
   nada instalado.
 - **La PC se conecta al teléfono**: Windows no muestra el aviso del firewall (que pide
   administrador) para conexiones salientes. Funciona también con el hotspot del teléfono.
-- **Sin servidores externos**: todo pasa en la red local; sin Internet sigue andando (salvo el
-  reconocimiento de Google y las preguntas a la IA, que caen a Vosk/Wikipedia o avisan).
+- **Red local primero**: en la misma red no pasa nada por Internet; sin Internet sigue andando (salvo
+  el reconocimiento de Google y las preguntas a la IA, que caen a Vosk/Wikipedia o avisan).
+- **Relé sólo para redes distintas** (`relay/`, Cloudflare Workers gratis): los dos se conectan
+  hacia afuera (sin abrir puertos ni pedir administrador) y el relé reenvía bytes ya cifrados de
+  punta a punta. Se eligió en lugar de un relé MQTT público (sin control ni garantías) o de una VPN
+  como Tailscale (hay que instalarla y tenerla prendida en los dos).
 - **Cifrado propio con primitivas estándar** (ECDH, ECDSA, HKDF, AES-GCM) en lugar de TLS con
   certificados: la autenticación mutua con claves fijadas al vincular es más simple de hacer bien
   en los dos lados y se prueba de punta a punta.
@@ -51,3 +55,6 @@ Voz → Reconocimiento → Interpretación → Intención → Orden estructurada
 - Windows real (autoprueba del `.exe`): teléfono simulado + órdenes reales (hora, sistema, apps,
   capturas, ventanas, abrir/cerrar el Bloc de notas, seguridad, duplicados) y captura de la ventana.
 - Emulador Android: la app real se vincula con la PC simulada y manda órdenes.
+- Relé: el código del Worker corre con `wrangler dev` en la compilación; se prueban sus avisos y el
+  reenvío, la PC de .NET contra el teléfono simulado (y el paso a la conexión directa) y el teléfono
+  de Kotlin contra la PC de .NET, los dos por el relé.

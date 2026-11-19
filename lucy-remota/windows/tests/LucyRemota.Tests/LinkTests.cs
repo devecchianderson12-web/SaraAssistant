@@ -49,6 +49,7 @@ public class LinkTests
         var link = new PcLink(store, new CommandRegistry([module]), s => logs?.Add(s), discoveryPort: phone.UdpPort)
         {
             BeaconInterval = TimeSpan.FromMilliseconds(100),
+            RelayUrl = null,
         };
         link.ExtraTargets.Add(new IPEndPoint(IPAddress.Loopback, phone.UdpPort));
         return (link, store, module);
@@ -80,6 +81,50 @@ public class LinkTests
         Assert.Equal(["received", "processing", "success"], statuses.Select(s => s.Str("status")!));
         Assert.Equal(70, statuses[^1]["result"]!["level"]!.GetValue<int>());
         Assert.Equal(70, module.Volume);
+    }
+
+    /// <summary>
+    /// Redes distintas: se vinculan en la misma red y después se encuentran en el relé (el de verdad,
+    /// corriendo con «wrangler dev»: LUCY_RELAY_URL). Al volver a la misma red pasan a la directa.
+    /// </summary>
+    [Fact]
+    public async Task Por_el_rele_cuando_estan_en_redes_distintas_y_vuelve_a_la_directa()
+    {
+        var relay = Environment.GetEnvironmentVariable("LUCY_RELAY_URL");
+        if (string.IsNullOrEmpty(relay)) return; // sin relé local (se prueba en la compilación en la nube)
+        await using var phone = new PhoneSimulator();
+        var (pairLink, store, module) = NewPc(phone);
+        ScanQr(phone, pairLink, store);
+        pairLink.Start();
+        Assert.True(await phone.WaitConnectedAsync(TimeSpan.FromSeconds(5)));
+        await pairLink.DisposeAsync();
+
+        // Ahora el teléfono está «en datos móviles»: no ve los anuncios de la PC.
+        phone.AnswerBeacons = false;
+        var logs = new List<string>();
+        await using var link = new PcLink(store, new CommandRegistry([module]), s => { lock (logs) logs.Add(s); }, discoveryPort: phone.UdpPort)
+        {
+            BeaconInterval = TimeSpan.FromMilliseconds(100), RelayUrl = relay,
+        };
+        link.ExtraTargets.Add(new IPEndPoint(IPAddress.Loopback, phone.UdpPort));
+        using var cts = new CancellationTokenSource();
+        var phoneRelay = phone.RunRelayAsync(relay, cts.Token);
+        link.Start();
+        Assert.True(await phone.WaitConnectedAsync(TimeSpan.FromSeconds(15)), string.Join("\n", logs));
+        Assert.True(link.Connected.Single().ViaRelay);
+        var statuses = await phone.CommandAsync("SET_VOLUME", new JsonObject { ["level"] = 33 });
+        Assert.Equal("success", statuses[^1].Str("status"));
+        Assert.Equal(33, module.Volume);
+
+        // De vuelta en la misma red: la PC pasa a la conexión directa.
+        phone.AnswerBeacons = true;
+        Assert.True(await phone.WaitConnectedAsync(TimeSpan.FromSeconds(10)));
+        for (var i = 0; i < 50 && link.Connected.FirstOrDefault()?.ViaRelay != false; i++) await Task.Delay(100);
+        Assert.False(link.Connected.Single().ViaRelay);
+        statuses = await phone.CommandAsync("SET_VOLUME", new JsonObject { ["level"] = 44 });
+        Assert.Equal("success", statuses[^1].Str("status"));
+        cts.Cancel();
+        try { await phoneRelay; } catch (OperationCanceledException) { }
     }
 
     [Fact]

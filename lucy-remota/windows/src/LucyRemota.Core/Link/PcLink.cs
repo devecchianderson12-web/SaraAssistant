@@ -12,7 +12,7 @@ using LucyRemota.Core.Security;
 namespace LucyRemota.Core.Link;
 
 /// <summary>Un teléfono conectado ahora.</summary>
-public sealed record ConnectedPhone(string Id, string Name, string Address, DateTimeOffset Since, long LatencyMs);
+public sealed record ConnectedPhone(string Id, string Name, string Address, DateTimeOffset Since, long LatencyMs, bool ViaRelay = false);
 
 /// <summary>
 /// Conexión de la PC con los teléfonos vinculados.
@@ -21,6 +21,10 @@ public sealed record ConnectedPhone(string Id, string Name, string Address, Date
 /// anuncia por UDP que está («beacon»), el teléfono contesta con su puerto y la PC se conecta a él.
 /// Después: negociación con claves (ver PROTOCOLO.md), mensajes cifrados, latido cada 15 s y
 /// reconexión sola si se corta.
+///
+/// Si el teléfono está en otra red (datos móviles), se encuentran en el relé de Internet
+/// (<see cref="RelayUrl"/>): la misma negociación y el mismo cifrado de punta a punta, por otro camino.
+/// En cuanto vuelven a estar en la misma red, se pasa a la conexión directa.
 /// </summary>
 public sealed class PcLink : IAsyncDisposable
 {
@@ -30,6 +34,7 @@ public sealed class PcLink : IAsyncDisposable
     readonly TimeProvider clock;
     readonly ConcurrentDictionary<string, Session> sessions = new();
     readonly ConcurrentDictionary<string, byte> connecting = new();
+    readonly ConcurrentDictionary<string, Task> relays = new();
     readonly CancellationTokenSource stop = new();
     readonly int discoveryPort;
     UdpClient? udp;
@@ -41,6 +46,8 @@ public sealed class PcLink : IAsyncDisposable
     public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(45);
     /// <summary>Direcciones extra a las que anunciarse (pruebas, o la última IP conocida).</summary>
     public List<IPEndPoint> ExtraTargets { get; } = new();
+    /// <summary>Relé para redes distintas (null: sólo red local).</summary>
+    public string? RelayUrl { get; set; } = RelayClient.DefaultUrl;
 
     public event Action? ConnectionsChanged;
     public event Action? DevicesChanged;
@@ -72,7 +79,7 @@ public sealed class PcLink : IAsyncDisposable
     public void Start()
     {
         udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0)) { EnableBroadcast = true };
-        discoveryTask = Task.WhenAll(BeaconLoop(stop.Token), ReplyLoop(stop.Token));
+        discoveryTask = Task.WhenAll(BeaconLoop(stop.Token), ReplyLoop(stop.Token), RelaySupervisor(stop.Token));
     }
 
     /// <summary>Desvincula un teléfono: se borra su clave y, si está conectado, se le avisa y se corta.</summary>
@@ -96,7 +103,8 @@ public sealed class PcLink : IAsyncDisposable
             try
             {
                 // Sólo hace falta anunciarse si falta conectar algún teléfono (o se está vinculando uno).
-                var missing = Pairing != null || store.Devices.Any(d => !sessions.ContainsKey(d.Id));
+                // También si está conectado por el relé: si aparece en la red local, se pasa a la conexión directa.
+                var missing = Pairing != null || store.Devices.Any(d => !HasDirect(d.Id));
                 if (missing && udp != null)
                 {
                     var beacon = Encoding.UTF8.GetBytes(new JsonObject
@@ -163,7 +171,7 @@ public sealed class PcLink : IAsyncDisposable
             var port = (int)(msg.Long("port") ?? Proto.PhonePort);
             if (port is < 1024 or > 65535) continue;
             var dev = msg.Str("dev");
-            if (dev != null && sessions.ContainsKey(dev)) continue;
+            if (dev != null && HasDirect(dev)) continue;
             var endpoint = new IPEndPoint(r.RemoteEndPoint.Address, port);
             // Un teléfono puede contestar por varias redes a la vez: una sola conexión por teléfono.
             var key = dev ?? endpoint.ToString();
@@ -189,25 +197,7 @@ public sealed class PcLink : IAsyncDisposable
                 c.CancelAfter(TimeSpan.FromSeconds(4));
                 await tcp.ConnectAsync(endpoint, c.Token);
             }
-            var stream = tcp.GetStream();
-            Session? session;
-            using (var c = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                c.CancelAfter(TimeSpan.FromSeconds(8));
-                session = await HandshakeAsync(stream, endpoint.Address.ToString(), c.Token);
-            }
-            if (session == null) return;
-            if (sessions.TryRemove(session.Info.Id, out var old)) old.Close();
-            sessions[session.Info.Id] = session;
-            ConnectionsChanged?.Invoke();
-            log($"Conectada con {session.Info.Name} ({endpoint.Address})");
-            try { await session.RunAsync(ct); }
-            finally
-            {
-                sessions.TryRemove(new KeyValuePair<string, Session>(session.Info.Id, session));
-                ConnectionsChanged?.Invoke();
-                log($"Se cortó la conexión con {session.Info.Name}");
-            }
+            await RunSessionAsync(tcp.GetStream(), endpoint.Address.ToString(), null, ct);
         }
         catch (Exception e) when (e is SocketException or IOException or OperationCanceledException or ProtocolException)
         {
@@ -215,12 +205,111 @@ public sealed class PcLink : IAsyncDisposable
         }
     }
 
-    async Task<Session?> HandshakeAsync(Stream stream, string address, CancellationToken ct)
+    /// <summary>Negocia por <paramref name="stream"/> y atiende la sesión. <paramref name="relayDevice"/>: viene por el relé (sólo ese teléfono, sin vincular).</summary>
+    async Task RunSessionAsync(Stream stream, string address, string? relayDevice, CancellationToken ct)
+    {
+        Session? session;
+        using (var c = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            c.CancelAfter(TimeSpan.FromSeconds(relayDevice != null ? 15 : 8));
+            session = await HandshakeAsync(stream, address, relayDevice, c.Token);
+        }
+        if (session == null) return;
+        if (sessions.TryRemove(session.Info.Id, out var old)) old.Close();
+        sessions[session.Info.Id] = session;
+        ConnectionsChanged?.Invoke();
+        log($"Conectada con {session.Info.Name} ({address})");
+        try { await session.RunAsync(ct); }
+        finally
+        {
+            sessions.TryRemove(new KeyValuePair<string, Session>(session.Info.Id, session));
+            ConnectionsChanged?.Invoke();
+            log($"Se cortó la conexión con {session.Info.Name}");
+        }
+    }
+
+    bool HasDirect(string deviceId) => sessions.TryGetValue(deviceId, out var s) && !s.Info.ViaRelay;
+
+    // ------------------------------------------------------------------ Relé (redes distintas)
+
+    /// <summary>Mantiene una conexión con el relé por cada teléfono vinculado que no esté en la red local.</summary>
+    async Task RelaySupervisor(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            if (RelayUrl is { } url)
+            {
+                foreach (var d in store.Devices)
+                {
+                    if (HasDirect(d.Id) || relays.ContainsKey(d.Id)) continue;
+                    var device = d;
+                    relays[d.Id] = Task.Run(async () =>
+                    {
+                        try { await RelayLoop(url, device, ct); }
+                        finally { relays.TryRemove(device.Id, out _); }
+                    }, ct);
+                }
+            }
+            try { await Task.Delay(TimeSpan.FromSeconds(2), clock, ct); } catch (OperationCanceledException) { return; }
+        }
+    }
+
+    bool StillPaired(PairedDevice d) => store.Devices.Any(x => x.Id == d.Id && x.PublicKey.AsSpan().SequenceEqual(d.PublicKey));
+
+    async Task RelayLoop(string url, PairedDevice device, CancellationToken ct)
+    {
+        var uri = RelayClient.RoomUri(url, RelayClient.RoomId(store.Key.PublicSpki, device.PublicKey), "pc");
+        var failures = 0;
+        while (!ct.IsCancellationRequested && StillPaired(device) && !HasDirect(device.Id) && RelayUrl != null)
+        {
+            RelayClient? relay = null;
+            using var leave = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            try
+            {
+                relay = await RelayClient.ConnectAsync(uri, ct);
+                if (failures > 0) log("Relé de Internet disponible otra vez");
+                failures = 0;
+                // Si aparece en la red local (o se desvincula), se deja el relé.
+                _ = Task.Run(async () =>
+                {
+                    while (!leave.IsCancellationRequested)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(1), clock, leave.Token);
+                        if (HasDirect(device.Id) || !StillPaired(device)) { leave.Cancel(); return; }
+                    }
+                }, leave.Token);
+                while (await relay.NextPeerAsync(leave.Token) is { } stream)
+                {
+                    try { await RunSessionAsync(stream, "Internet", device.Id, leave.Token); }
+                    catch (Exception e) when (e is IOException or ProtocolException or OperationCanceledException)
+                    {
+                        if (!leave.IsCancellationRequested) log($"Relé: no se pudo negociar con {device.Name}: {e.Message}");
+                    }
+                    finally { stream.Dispose(); }
+                }
+            }
+            catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or IOException or OperationCanceledException or HttpRequestException)
+            {
+                if (!leave.IsCancellationRequested && failures++ == 0) log($"Relé de Internet no disponible: {e.Message}");
+            }
+            finally
+            {
+                leave.Cancel();
+                if (relay != null) await relay.DisposeAsync();
+            }
+            // Reintento con espera creciente (hasta 30 s) para no gastar si el relé no anda.
+            var wait = TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(failures, 5)));
+            try { await Task.Delay(wait, clock, ct); } catch (OperationCanceledException) { return; }
+        }
+    }
+
+    async Task<Session?> HandshakeAsync(Stream stream, string address, string? relayDevice, CancellationToken ct)
     {
         using var eph = new EphemeralKey();
         var nonce = RandomNumberGenerator.GetBytes(32);
         var pcKey = store.Key.PublicSpki;
-        var window = Pairing;
+        // Por el relé no se vincula: sólo el teléfono de esa sala, ya vinculado en persona.
+        var window = relayDevice == null ? Pairing : null;
         await Wire.WriteFrameAsync(stream, Wire.Json(new JsonObject
         {
             ["t"] = "hello", ["v"] = Proto.Major, ["minor"] = Proto.Minor, ["pc"] = store.PcId, ["name"] = store.PcName,
@@ -241,6 +330,11 @@ public sealed class PcLink : IAsyncDisposable
         var sig = auth.B64("sig");
         if (devId is null || devId.Length is < 8 or > 64 || devKey is null || devEph is null || devNonce is not { Length: 32 } || sig is null)
             throw new ProtocolException("«auth» incompleto");
+        if (relayDevice != null && devId != relayDevice)
+        {
+            await Fail(stream, "unauthorized", ct);
+            return null;
+        }
         var transcript = Transcript.Hash(store.PcId, pcKey, eph.PublicSpki, nonce, devId, devKey, devEph, devNonce);
         if (!IdentityKey.Verify(devKey, Transcript.Role("dev", transcript), sig))
         {
@@ -288,10 +382,10 @@ public sealed class PcLink : IAsyncDisposable
         }
         else
         {
-            store.Upsert(known! with { Name = devName, LastSeen = now, LastAddress = address });
+            store.Upsert(known! with { Name = devName, LastSeen = now, LastAddress = relayDevice == null ? address : known.LastAddress });
         }
         var offset = auth.Long("now") is { } phoneNow ? now.ToUnixTimeMilliseconds() - phoneNow : 0;
-        var info = new ConnectedPhone(devId, devName, address, now, 0);
+        var info = new ConnectedPhone(devId, devName, address, now, 0, relayDevice != null);
         return new Session(this, stream, new SessionCipher(pcToDev, devToPc), info, offset);
     }
 

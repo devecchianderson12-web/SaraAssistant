@@ -69,7 +69,8 @@ class ProtocoloTest {
         withTimeout(30_000) { while (!file.exists()) delay(200) }
         val qr = PairingQr.parse(file.readText().trim())!!
         val store = MemStore()
-        val link = PhoneLink(store, SoftwareIdentity(), { println("[tel] $it") })
+        val identity = SoftwareIdentity()
+        val link = PhoneLink(store, identity, { println("[tel] $it") }, relayUrl = null)
         link.start()
         link.pairWithQr(qr)
         withTimeout(15_000) { while (link.state.value !is LinkState.Connected) delay(100) }
@@ -86,8 +87,25 @@ class ProtocoloTest {
         assertEquals(CommandStatus.UNSUPPORTED, link.send("FORMAT_DISK").status)
         assertEquals(CommandStatus.NEEDS_CONFIRMATION, link.send("SHUTDOWN").status)
         assertEquals(CommandStatus.SUCCESS, link.send("SHUTDOWN", confirmed = true).status)
-        link.unpair()
-        assertEquals(null, store.pairedPc)
+
+        val relay = System.getenv("LUCY_RELAY_URL")
+        if (relay == null) {
+            link.unpair()
+            assertEquals(null, store.pairedPc)
+            link.close()
+            return@runBlocking
+        }
+        // Redes distintas: el teléfono ya no oye los anuncios de la PC; se encuentran en el relé.
         link.close()
+        val far = PhoneLink(store, identity, { println("[tel-relé] $it") }, discoveryPort = 47_999, tcpPort = 0, relayUrl = relay)
+        far.start()
+        withTimeout(30_000) { while ((far.state.value as? LinkState.Connected)?.address != "Internet") delay(100) }
+        withTimeout(5_000) { while (far.catalog.value.isEmpty()) delay(50) }
+        val viaRelay = far.send("SET_VOLUME", JSONObject().put("level", 55))
+        assertEquals(CommandStatus.SUCCESS, viaRelay.status)
+        assertEquals(55, viaRelay.result!!.getInt("level"))
+        far.unpair()
+        assertEquals(null, store.pairedPc)
+        far.close()
     }
 }

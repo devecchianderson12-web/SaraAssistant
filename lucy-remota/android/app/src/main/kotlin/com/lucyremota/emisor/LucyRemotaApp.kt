@@ -174,6 +174,18 @@ class Container(private val app: Application) {
     fun startLink() {
         if (linkStarted) return
         runCatching { link.start() }.onSuccess { linkStarted = true }.onFailure { logger.w("Enlace", "No pude abrir la conexión", it) }
+        // Al cambiar de red (Wi‑Fi ↔ datos móviles) se rehace enseguida la conexión con el relé.
+        runCatching {
+            val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                private var currentNetwork: android.net.Network? = null
+                override fun onAvailable(network: android.net.Network) {
+                    if (currentNetwork != null && currentNetwork != network) link.networkChanged()
+                    currentNetwork = network
+                }
+                override fun onLost(network: android.net.Network) { link.networkChanged() }
+            })
+        }.onFailure { logger.w("Enlace", "Sin aviso de cambios de red", it) }
     }
 
     /** Baja lo que falta para escuchar «Lucy» y para la voz Daniela (una vez). */

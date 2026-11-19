@@ -35,8 +35,21 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Pruebas del núcleo (protocolo, seguridad, vinculación)
-        run: dotnet test tests/LucyRemota.Tests -c Release
+      - name: Configurar Node (relé local para las pruebas)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pruebas del núcleo (protocolo, seguridad, vinculación y relé)
+        shell: bash
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          # El relé de verdad (el mismo código que corre en Cloudflare), en esta máquina.
+          (cd ../relay && npm ci --no-audit --no-fund && (npx wrangler dev --port 8787 > ../wrangler.log 2>&1 &))
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/ && break; sleep 2; done
+          (cd ../relay && node test/relay.test.mjs)
+          LUCY_RELAY_URL=http://127.0.0.1:8787 dotnet test tests/LucyRemota.Tests -c Release
 
       - name: Compilar Lucy Remota (un solo .exe portable)
         run: dotnet publish src/LucyRemota -c Release -o publicado -p:Version=1.0.${{ github.run_number }}
@@ -108,13 +121,28 @@ jobs:
       - name: Configurar Gradle (con caché)
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Configurar Node (relé local para las pruebas)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Relé local (el mismo código que corre en Cloudflare)
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          cd ../relay && npm ci --no-audit --no-fund
+          (npx wrangler dev --port 8787 > ../wrangler.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/ && break; sleep 2; done
+          node test/relay.test.mjs
+
       - name: Pruebas del teléfono contra el Receptor real (.NET)
         run: |
           chmod +x gradlew
           dotnet build ../windows/tools/PcSim -c Release -o pcsim -v q
           rm -f qr.txt qr2.txt
-          (dotnet pcsim/PcSim.dll qr.txt 240 > pcsim.log 2>&1 &)
-          LUCY_INTEROP_QR=$PWD/qr.txt ./gradlew --no-daemon :protocolo:test
+          # Se vinculan en la «misma red» y después se encuentran en el relé («redes distintas»).
+          (dotnet pcsim/PcSim.dll qr.txt 240 --relay http://127.0.0.1:8787 > pcsim.log 2>&1 &)
+          LUCY_RELAY_URL=http://127.0.0.1:8787 LUCY_INTEROP_QR=$PWD/qr.txt ./gradlew --no-daemon :protocolo:test
           # Cada prueba completa usa su propia PC simulada (el QR es de un solo uso).
           (dotnet pcsim/PcSim.dll qr2.txt 240 > pcsim2.log 2>&1 &)
           LUCY_INTEROP_QR=$PWD/qr2.txt ./gradlew --no-daemon :remoto:test

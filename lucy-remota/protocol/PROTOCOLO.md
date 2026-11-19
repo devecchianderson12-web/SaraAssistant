@@ -81,7 +81,29 @@ Android; la de la PC está cifrada con el usuario de Windows). En cada conexión
 `invalid` (parámetros mal), `expired` (llegó tarde), `needs_confirmation` (acción sensible sin
 `confirmed`), `unauthorized`, `busy`. El teléfono **no anuncia que se hizo** hasta recibir `success`.
 
-## 5. Reglas
+## 5. Relé (redes distintas)
+
+Si no se encuentran en la red local (por ejemplo, el teléfono con datos móviles y la PC por cable),
+usan un relé en Internet: un Worker de Cloudflare (`relay/`, plan gratis) que **sólo reenvía bytes**.
+La negociación de la sección 3 y el cifrado de la sección 4 son los mismos, así que el relé no puede
+leer, cambiar ni inventar órdenes.
+
+- **Sala:** `sala = hex(SHA-256("lucy-remota/relay/1" ‖ pc_key ‖ dev_key))[0:40]` (claves SPKI).
+  Sólo la PC y el teléfono vinculados la conocen.
+- **Conexión:** cada lado abre un WebSocket saliente a `wss://<relé>/v1/<sala>?role=pc|dev`. Una
+  conexión nueva del mismo lado reemplaza a la vieja (el teléfono cambió de red).
+- **Avisos del relé** (texto): `peer:1` el otro lado está (cada vez que llega uno, la PC empieza una
+  negociación nueva con `hello`), `peer:0` el otro se fue. Cada marco de la sección 2 viaja en un
+  mensaje binario.
+- **Latido:** cada lado manda el texto `ping` cada 25 s; el relé contesta `pong` sin despertar a la
+  sala (no gasta cuota). Sin nada en 70 s, se reconecta.
+- **Reglas extra:** por el relé no se vincula (sólo un teléfono ya vinculado en persona); la PC sólo
+  acepta al teléfono de esa sala, y el teléfono no borra la vinculación por un rechazo que llegue
+  por el relé.
+- **Preferencia:** en cuanto vuelven a verse en la red local, la PC se conecta directo, la sesión
+  directa reemplaza a la del relé y los dos dejan el relé.
+
+## 6. Reglas
 
 - **Duplicados:** la PC recuerda cada `command_id` 10 minutos; si llega de nuevo devuelve el mismo
   resultado sin ejecutar. El teléfono reintenta con el mismo id si se cortó antes de `received`.

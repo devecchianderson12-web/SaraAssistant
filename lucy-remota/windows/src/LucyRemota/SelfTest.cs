@@ -46,7 +46,7 @@ static class SelfTest
         var history = new History();
         history.Clear();
         registry.Logged += history.Add;
-        await using var link = new PcLink(store, registry, s => Line("     · " + s), discoveryPort: phone.UdpPort) { BeaconInterval = TimeSpan.FromMilliseconds(200) };
+        await using var link = new PcLink(store, registry, s => Line("     · " + s), discoveryPort: phone.UdpPort) { BeaconInterval = TimeSpan.FromMilliseconds(200), RelayUrl = null };
         link.ExtraTargets.Add(new IPEndPoint(IPAddress.Loopback, phone.UdpPort));
         apps.Preload();
 

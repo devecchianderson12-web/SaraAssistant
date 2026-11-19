@@ -223,7 +223,7 @@ private fun Panel(content: @Composable () -> Unit) {
 private fun ConnectionPanel(link: LinkState, onScan: () -> Unit, onCode: () -> Unit, onCancel: () -> Unit, onUnpair: () -> Unit) {
     Panel {
         val (dot, title, detail) = when (link) {
-            is LinkState.Connected -> Triple(Good, "Conectada con ${link.pcName}", "${link.address}" + if (link.latencyMs > 0) " · ${link.latencyMs} ms" else "")
+            is LinkState.Connected -> Triple(Good, "Conectada con ${link.pcName}", (if (link.address == "Internet") "Por Internet" else link.address) + if (link.latencyMs > 0) " · ${link.latencyMs} ms" else "")
             is LinkState.Searching -> Triple(Warn, "Buscando ${link.pcName}…", "Abrí Lucy Remota en la computadora. Tienen que estar en la misma red Wi-Fi (o la PC conectada al hotspot del teléfono).")
             is LinkState.Pairing -> Triple(Sky, "Vinculando…", "Esperando a ${link.pcName ?: "la computadora"}. Dejá abierta la ventana del QR en la PC.")
             is LinkState.PairingFailed -> Triple(Bad, "No se pudo vincular", link.reason)

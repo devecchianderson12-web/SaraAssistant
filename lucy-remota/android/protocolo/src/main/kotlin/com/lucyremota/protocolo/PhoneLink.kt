@@ -15,6 +15,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Closeable
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
@@ -72,6 +74,10 @@ data class CommandStatus(val commandId: String, val status: String, val message:
  * La PC anuncia por UDP que está; el teléfono contesta con su puerto y la PC se conecta a él (así la
  * PC no necesita permisos de administrador para el firewall). Después: negociación con claves,
  * mensajes cifrados, latido y reconexión sola.
+ *
+ * Si están en redes distintas (datos móviles), se encuentran en el relé de Internet ([relayUrl]):
+ * la misma negociación y el mismo cifrado de punta a punta, por otro camino. En cuanto vuelven a
+ * estar en la misma red, la PC se conecta directo y se deja el relé.
  */
 class PhoneLink(
     private val store: PhoneStore,
@@ -79,6 +85,8 @@ class PhoneLink(
     private val log: (String) -> Unit = {},
     private val discoveryPort: Int = Proto.DISCOVERY_PORT,
     private val tcpPort: Int = Proto.PHONE_PORT,
+    /** Relé para redes distintas (null: sólo red local). */
+    private val relayUrl: String? = RelayClient.DEFAULT_URL,
 ) : Closeable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow<LinkState>(LinkState.Unpaired)
@@ -94,6 +102,7 @@ class PhoneLink(
     private var udp: DatagramSocket? = null
     private var server: ServerSocket? = null
     private val waiters = ConcurrentHashMap<String, (CommandStatus) -> Unit>()
+    @Volatile private var relay: RelayClient? = null
 
     /** Puerto TCP en el que escucha (el habitual, u otro si estaba ocupado). */
     val listeningPort: Int get() = server?.localPort ?: -1
@@ -105,7 +114,8 @@ class PhoneLink(
         udp = DatagramSocket(null).apply { reuseAddress = true; broadcast = true; bind(InetSocketAddress(discoveryPort)) }
         scope.launch { acceptLoop() }
         scope.launch { beaconLoop() }
-        log("Escuchando la PC (UDP $discoveryPort, TCP $listeningPort)")
+        if (relayUrl != null) scope.launch { relayLoop(relayUrl) }
+        log("Escuchando la PC (UDP $discoveryPort, TCP $listeningPort)" + if (relayUrl != null) " y por el relé" else "")
     }
 
     private fun refreshState() {
@@ -159,8 +169,9 @@ class PhoneLink(
             val packet = DatagramPacket(buf, buf.size)
             try { socket.receive(packet) } catch (e: SocketException) { return } catch (e: Exception) { continue }
             val msg = runCatching { JSONObject(String(packet.data, 0, packet.length)) }.getOrNull() ?: continue
-            // Ya conectada o conectándose: no se contesta (una sola conexión con la PC).
-            if (msg.optString("t") != "beacon" || session != null || System.currentTimeMillis() - handshakeAt < 8_000) continue
+            // Ya conectada o conectándose: no se contesta (una sola conexión con la PC). Por el relé sí:
+            // si la PC está en la misma red, se pasa a la conexión directa.
+            if (msg.optString("t") != "beacon" || session?.viaRelay == false || System.currentTimeMillis() - handshakeAt < 8_000) continue
             val pc = msg.optString("pc")
             val interested = store.pairedPc?.id == pc || pendingQr?.pcId == pc || (pendingCode != null && msg.optBoolean("pairing"))
             if (!interested) continue
@@ -176,18 +187,88 @@ class PhoneLink(
         val srv = server ?: return
         while (scope.isActive) {
             val socket = try { srv.accept() } catch (e: SocketException) { return } catch (e: Exception) { continue }
-            scope.launch { handle(socket) }
+            scope.launch { handle(TcpConn(socket)) }
         }
     }
 
-    private suspend fun handle(socket: Socket) {
+    // ------------------------------------------------------------------ Relé (redes distintas)
+
+    /** Con la PC vinculada y sin conexión directa, espera a la PC en el relé. */
+    private suspend fun relayLoop(url: String) {
+        var failures = 0
+        while (scope.isActive) {
+            val pc = store.pairedPc
+            if (pc == null || session?.viaRelay == false || pendingQr != null || pendingCode != null) { delay(2_000); continue }
+            val client = RelayClient.connect(RelayClient.roomUrl(url, RelayClient.roomId(pc.publicKey, identity.publicKeySpki), "dev"))
+            relay = client
+            try {
+                if (!client.awaitOpen(12_000)) throw java.io.IOException("no se pudo conectar")
+                if (failures > 0) log("Relé de Internet disponible otra vez")
+                failures = 0
+                // Si la PC aparece en la red local (o se desvincula), se deja el relé.
+                val watcher = scope.launch {
+                    while (isActive) {
+                        delay(1_000)
+                        if (session?.viaRelay == false || store.pairedPc?.id != pc.id) { client.close(); break }
+                    }
+                }
+                try {
+                    while (true) {
+                        val peer = client.nextPeer() ?: break
+                        scope.launch { handle(RelayConn(peer)) }
+                    }
+                } finally { watcher.cancel() }
+            } catch (e: Exception) {
+                if (failures++ == 0) log("Relé de Internet no disponible: ${e.message}")
+            } finally {
+                client.close()
+                if (relay === client) relay = null
+            }
+            // Reintento con espera creciente (hasta 30 s) para no gastar datos si el relé no anda.
+            delay(1_000L * minOf(30, 1 shl minOf(failures, 5)))
+        }
+    }
+
+    /** Cambió la red del teléfono (Wi‑Fi ↔ datos): se rehace la conexión con el relé enseguida. */
+    fun networkChanged() {
+        relay?.close()
+    }
+
+    private interface Conn {
+        val input: InputStream
+        val output: OutputStream
+        val address: String
+        val viaRelay: Boolean
+        fun setTimeout(ms: Int)
+        fun close()
+    }
+
+    private class TcpConn(private val socket: Socket) : Conn {
+        override val input: InputStream = socket.getInputStream().buffered()
+        override val output: OutputStream = socket.getOutputStream()
+        override val address: String = socket.inetAddress.hostAddress ?: ""
+        override val viaRelay = false
+        init { socket.tcpNoDelay = true }
+        override fun setTimeout(ms: Int) { socket.soTimeout = ms }
+        override fun close() { runCatching { socket.close() } }
+    }
+
+    private class RelayConn(private val stream: RelayStream) : Conn {
+        override val input: InputStream = stream.input
+        override val output: OutputStream = stream.output
+        override val address = "Internet"
+        override val viaRelay = true
+        override fun setTimeout(ms: Int) { stream.readTimeoutMs = ms }
+        override fun close() = stream.close()
+    }
+
+    private suspend fun handle(socket: Conn) {
         // Otra conexión de la misma PC negociando ahora: ésta sobra.
-        if (System.currentTimeMillis() - handshakeAt < 8_000 && session == null) { runCatching { socket.close() }; return }
+        if (System.currentTimeMillis() - handshakeAt < 8_000 && session == null) { socket.close(); return }
         handshakeAt = System.currentTimeMillis()
-        socket.tcpNoDelay = true
-        socket.soTimeout = 10_000
-        val input = socket.getInputStream().buffered()
-        val output = socket.getOutputStream()
+        socket.setTimeout(if (socket.viaRelay) 15_000 else 10_000)
+        val input = socket.input
+        val output = socket.output
         try {
             val hello = JSONObject(String(Wire.read(input)))
             if (hello.optString("t") != "hello") throw ProtocolException("se esperaba «hello»")
@@ -207,6 +288,8 @@ class PhoneLink(
                     log("Rechazada: la clave de la PC cambió (¿otra computadora con el mismo nombre?)")
                     socket.close(); return
                 }
+                // Por el relé no se vincula: sólo la PC ya vinculada en persona.
+                socket.viaRelay -> { socket.close(); return }
                 qr != null && qr.pcId == pcId -> {
                     if (!Crypto.constantEquals(Crypto.sha256(pcKey), qr.fingerprint)) {
                         log("Rechazada: la PC no coincide con el QR")
@@ -234,8 +317,9 @@ class PhoneLink(
                     // Código equivocado o vencido: se deja de intentar (no gasta los intentos de la PC).
                     pendingQr = null; pendingCode = null
                     _state.value = LinkState.PairingFailed(if (mode == "code") "El código no coincide o venció." else "El QR venció. Generá uno nuevo en la PC.")
-                } else if (reason == "unauthorized" && paired?.id == pcId) {
-                    // La PC ya no nos tiene vinculados (la desvincularon desde allá).
+                } else if (reason == "unauthorized" && paired?.id == pcId && !socket.viaRelay) {
+                    // La PC ya no nos tiene vinculados (la desvincularon desde allá). Por el relé no se
+                    // le cree (un rechazo sin firma no alcanza para borrar la vinculación).
                     store.pairedPc = null
                     refreshState()
                 }
@@ -252,8 +336,8 @@ class PhoneLink(
                 pendingQr = null; pendingCode = null
                 log("Vinculada con $pcName")
             }
-            socket.soTimeout = 0
-            val s = Session(socket, input, output, SessionCipher(devToPc, pcToDev), pcName, socket.inetAddress.hostAddress ?: "")
+            socket.setTimeout(0)
+            val s = Session(socket, SessionCipher(devToPc, pcToDev), pcName)
             session?.close()
             session = s
             handshakeAt = 0L
@@ -266,7 +350,7 @@ class PhoneLink(
             }
         } catch (e: Exception) {
             log("Conexión fallida: ${e.message}")
-            runCatching { socket.close() }
+            socket.close()
         } finally {
             handshakeAt = 0L
         }
@@ -326,13 +410,14 @@ class PhoneLink(
     // ------------------------------------------------------------------ Sesión
 
     private inner class Session(
-        private val socket: Socket,
-        private val input: java.io.InputStream,
-        private val output: java.io.OutputStream,
+        private val socket: Conn,
         private val cipher: SessionCipher,
         val pcName: String,
-        val address: String,
     ) {
+        private val input = socket.input
+        private val output = socket.output
+        val address: String get() = socket.address
+        val viaRelay: Boolean get() = socket.viaRelay
         @Volatile var latencyMs = 0L
         private var pingJob: Job? = null
         private var lastPingAt = 0L
@@ -341,11 +426,11 @@ class PhoneLink(
 
         fun close() {
             pingJob?.cancel()
-            runCatching { socket.close() }
+            socket.close()
         }
 
         fun run() {
-            socket.soTimeout = 45_000 // sin nada en 45 s (la PC manda un latido cada 15 s): se corta y se reconecta
+            socket.setTimeout(45_000) // sin nada en 45 s (la PC manda un latido cada 15 s): se corta y se reconecta
             pingJob = scope.launch {
                 while (isActive) {
                     delay(20_000)
@@ -391,6 +476,7 @@ class PhoneLink(
 
     override fun close() {
         session?.close()
+        relay?.close()
         runCatching { udp?.close() }
         runCatching { server?.close() }
         scope.coroutineContext[Job]?.cancel()

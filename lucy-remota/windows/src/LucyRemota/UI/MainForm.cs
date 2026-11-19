@@ -190,7 +190,7 @@ sealed class MainForm : LucyForm
         else if (connected.Count > 0)
         {
             var c = connected[0];
-            status.Text = "Conectada con " + string.Join(", ", connected.Select(x => x.Name));
+            status.Text = "Conectada con " + string.Join(", ", connected.Select(x => x.ViaRelay ? x.Name + " (por Internet)" : x.Name));
             status.ForeColor = Theme.Ok;
             sphere.Energy = 0.65f;
         }

@@ -15,6 +15,8 @@ kotlin {
 
 dependencies {
     api(libs.kotlinx.coroutines.core)
+    // WebSocket para el relé (redes distintas).
+    implementation(libs.okhttp)
     // org.json la trae Android; en las pruebas se agrega.
     compileOnly(libs.org.json)
     testImplementation(libs.org.json)
@@ -25,6 +27,7 @@ dependencies {
 tasks.test {
     // Prueba contra el Receptor de Windows real (.NET): la activa la compilación en la nube.
     System.getenv("LUCY_INTEROP_QR")?.let { environment("LUCY_INTEROP_QR", it) }
+    System.getenv("LUCY_RELAY_URL")?.let { environment("LUCY_RELAY_URL", it) }
     System.getenv("LUCY_INTEROP_UDP")?.let { environment("LUCY_INTEROP_UDP", it) }
     testLogging { events("passed", "failed", "skipped"); showStandardStreams = true }
 }

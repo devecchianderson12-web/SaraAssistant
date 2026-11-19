@@ -3,7 +3,7 @@
 Tu teléfono es el micrófono y la voz; tu computadora Windows hace las cosas.
 
 Decís «Lucy, poné música» en el teléfono → el teléfono entiende la orden → se la manda cifrada a
-la PC por la red local → la PC la valida y la hace → le contesta al teléfono → Lucy te dice
+la PC (por la red local, o por Internet si estás en otra red) → la PC la valida y la hace → le contesta al teléfono → Lucy te dice
 «Listo, puse la música».
 
 Es un proyecto **independiente**: no reemplaza ni modifica a Sara ni a la Lucy de Windows que ya
@@ -22,11 +22,26 @@ existe. Las tres apps pueden convivir.
 2. Tocá **«Vincular teléfono»**: aparece un QR y un código de 8 letras (valen 5 minutos).
 3. **En el teléfono:** instalá `LucyRemota-…apk`, abrilo, dale permiso al micrófono y
    tocá **«Escanear QR»** (o «Escribir código» si no querés usar la cámara).
-4. Listo: en los dos aparece «Conectada». Desde ahí se reconectan solos cada vez que estén en la
-   misma red.
+4. Listo: en los dos aparece «Conectada». Desde ahí se reconectan solos.
 
-El teléfono y la PC tienen que estar en **la misma red Wi-Fi**, o la PC conectada al **hotspot del
-teléfono** (sirve sin Internet, por ejemplo en viajes).
+Para vincularlos, el teléfono y la PC tienen que estar en **la misma red Wi-Fi** (o la PC en el
+**hotspot del teléfono**). Después también funcionan en **redes distintas** (el teléfono con datos
+móviles y la PC por cable, por ejemplo) a través del relé de Internet; en la PC aparece «(por
+Internet)» y en el teléfono «Por Internet». Si vuelven a estar en la misma red, pasan solos a la
+conexión directa.
+
+### Relé para redes distintas (una sola vez)
+
+El relé es un Worker de Cloudflare gratis en tu cuenta, con el código de [`relay/`](relay/):
+
+1. En Cloudflare: **Workers & Pages › Create › Import a repository**, elegí este repositorio.
+2. Nombre del proyecto `lucy-remota-relay`, carpeta raíz (*Root directory*) `lucy-remota/relay`,
+   rama `main`. **Deploy**.
+3. Abrí `https://lucy-remota-relay.<tu-subdominio>.workers.dev/`: tiene que decir
+   `lucy-remota-relay ok`.
+
+Las apps usan `https://lucy-remota-relay.devecchianderson12.workers.dev`. Para usar otra dirección
+en la PC, escribila en `LucyRemota-datos/relay.txt` (o `no` para usar sólo la red local).
 
 ## Usarla
 
