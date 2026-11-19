@@ -120,7 +120,7 @@ class UpdateManager(private val context: Context, private val logger: SaraLogger
             val version = UpdatePolicy.versionFromTag(tag) ?: return null
             val assets = json.getJSONArray("assets")
             val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
-                .firstOrNull { it.getString("name").endsWith(".apk") } ?: return null
+                .firstOrNull { it.getString("name").let { n -> n.startsWith("SaraAssistant-") && n.endsWith(".apk") } } ?: return null
             return ReleaseInfo(
                 tag = tag,
                 versionCode = version,

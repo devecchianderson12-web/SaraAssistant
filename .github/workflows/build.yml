@@ -370,7 +370,7 @@ jobs:
             gh release upload "$TAG" Lucy-Windows-*.exe -R "$REPO" --clobber
           fi
           if [ "$ANDROID" = "true" ]; then
-            for a in $(echo "$ASSETS" | grep -E '\.apk$' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
+            for a in $(echo "$ASSETS" | grep -E '^SaraAssistant-.*\.apk$' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
             gh release upload "$TAG" SaraAssistant-*.apk -R "$REPO" --clobber
             NEW="SaraAssistantV$RUN"
             gh release edit "$TAG" -R "$REPO" --tag "$NEW" --target "$SHA" --latest
