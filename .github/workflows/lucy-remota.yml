@@ -114,9 +114,10 @@ jobs:
           dotnet build ../windows/tools/PcSim -c Release -o pcsim -v q
           rm -f qr.txt qr2.txt
           (dotnet pcsim/PcSim.dll qr.txt 240 > pcsim.log 2>&1 &)
-          LUCY_INTEROP_QR=$PWD/qr.txt ./gradlew --no-daemon :protocolo:test --tests '*interoperabilidad*'
+          LUCY_INTEROP_QR=$PWD/qr.txt ./gradlew --no-daemon :protocolo:test
+          # Cada prueba completa usa su propia PC simulada (el QR es de un solo uso).
           (dotnet pcsim/PcSim.dll qr2.txt 240 > pcsim2.log 2>&1 &)
-          LUCY_INTEROP_QR=$PWD/qr2.txt ./gradlew --no-daemon :protocolo:test :remoto:test
+          LUCY_INTEROP_QR=$PWD/qr2.txt ./gradlew --no-daemon :remoto:test
           echo "--- PC simulada"; cat pcsim.log pcsim2.log
 
       - name: Compilar APK
