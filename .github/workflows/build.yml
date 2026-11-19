@@ -137,6 +137,14 @@ jobs:
             for i in $(seq 1 100); do adb logcat -d | grep -q "Voz Daniela instalada\|No pude bajar la voz Daniela" && break; sleep 3; done; adb logcat -d | grep "Sara/Piper" | tail -5 || true
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es say "'Hola, soy Sara. ¿En qué te ayudo?'" || true
             for i in $(seq 1 40); do adb logcat -d | grep -q "Sara/Debug" && break; sleep 3; done; adb logcat -d | grep -E "Sara/Piper|Sara/Debug" | tail -8 || true
+            # Preguntas con la voz Daniela: la hora y qué está sonando (antes la hora la cerraba).
+            adb logcat -c || true
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'Ey Sara, ¿qué hora es?'" || true
+            sleep 15
+            adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --es text "'¿qué está sonando?'" || true
+            sleep 12
+            adb logcat -d | grep -E "Sara/|AndroidRuntime|Fatal signal|has died|ANR in" | grep -v "Sara/Wake" | tail -40 || true
+            adb shell pidof com.sara.assistant || echo "SARA SE CERRÓ"
             # Llamado («Sara»): cuánto tarda en saludar y abrir el micrófono (dos veces: la segunda con todo cargado).
             adb shell am broadcast -a com.sara.assistant.DEBUG_COMMAND -p com.sara.assistant --ez wake true || true
             sleep 12

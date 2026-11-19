@@ -140,7 +140,10 @@ class GeminiAssistant(
             JSONArray(history + turn)
         }
         try {
-            val response = generateWithFallback(key, contents)
+            val started = System.currentTimeMillis()
+            val search = needsFreshInfo(text)
+            val response = generateWithFallback(key, contents, searchWanted = search)
+            logger.d(TAG, "Respondió en ${System.currentTimeMillis() - started} ms (búsqueda: $search)")
             val candidate = response.optJSONArray("candidates")?.optJSONObject(0)
                 ?: return@withContext blockedReply(response)
             val content = candidate.optJSONObject("content") ?: return@withContext "No encontré una respuesta."
@@ -178,7 +181,7 @@ class GeminiAssistant(
      * cuota 0, o la búsqueda de Google no está incluida). Ante un 429/404 se prueba con la búsqueda
      * desactivada y con otros Gemini Flash de la cuenta, y se recuerda el primero que funcione.
      */
-    private fun generateWithFallback(key: String, contents: JSONArray, functions: JSONArray? = null): JSONObject {
+    private fun generateWithFallback(key: String, contents: JSONArray, functions: JSONArray? = null, searchWanted: Boolean = true): JSONObject {
         var lastError: ApiError? = null
         val tried = mutableSetOf<String>()
         fun attempt(candidate: String, search: Boolean): JSONObject? {
@@ -187,7 +190,7 @@ class GeminiAssistant(
                 generate(key, candidate, contents, search, functions).also {
                     if (candidate != model || search != useSearch) logger.d(TAG, "Usando $candidate (búsqueda: $search)")
                     model = candidate
-                    if (functions == null) useSearch = search
+                    if (functions == null && searchWanted) useSearch = search
                 }
             } catch (e: ApiError) {
                 logger.w(TAG, "$candidate (búsqueda: $search) -> ${e.code}: ${e.message?.take(300)}")
@@ -202,10 +205,12 @@ class GeminiAssistant(
             for (candidate in listModels(key).take(MAX_MODEL_TRIES)) attempt(candidate, false)?.let { return it }
             throw lastError ?: ApiError(404, "Sin modelos disponibles")
         }
-        attempt(model, useSearch)?.let { return it }
-        if (useSearch) attempt(model, false)?.let { return it }
+        // La búsqueda de Google suma 2–4 s: sólo para lo que cambia (noticias, precios, resultados, hoy…).
+        val search = useSearch && searchWanted
+        attempt(model, search)?.let { return it }
+        if (search) attempt(model, false)?.let { return it }
         for (candidate in listModels(key).take(MAX_MODEL_TRIES)) {
-            attempt(candidate, true)?.let { return it }
+            if (searchWanted) attempt(candidate, true)?.let { return it }
             attempt(candidate, false)?.let { return it }
         }
         throw lastError ?: ApiError(404, "Sin modelos disponibles")
@@ -295,6 +300,12 @@ class GeminiAssistant(
         JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", text)))
 
     /** Fecha, hora, zona y recuerdos: van con cada pregunta para responder «hoy», «acá», etc. */
+    /** Preguntas sobre cosas que cambian: ahí sí hace falta buscar en Google. */
+    internal fun needsFreshInfo(text: String): Boolean {
+        val n = " " + com.sara.core.interpreter.TextNormalizer.normalize(text) + " "
+        return FRESH.any { n.contains(" $it ") } || Regex(" 20[2-3][0-9] ").containsMatchIn(n)
+    }
+
     private fun contextLine(): String {
         val now = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM yyyy, HH:mm", Locale.forLanguageTag("es-AR")))
         val memories = memory.all().entries.joinToString("; ") { "${it.key} = ${it.value}" }.ifBlank { "nada todavía" }
@@ -308,6 +319,13 @@ class GeminiAssistant(
         const val BASE = "https://generativelanguage.googleapis.com/v1beta"
         const val DEFAULT_MODEL = "gemini-flash-lite-latest"
         const val MAX_HISTORY = 30
+        val FRESH = listOf(
+            "hoy", "ahora", "ayer", "manana", "esta semana", "este mes", "este ano", "ultimo", "ultima", "ultimos", "ultimas", "actual", "actualmente",
+            "noticias", "noticia", "paso", "pasando", "precio", "precios", "cuesta", "vale", "dolar", "euro", "cotizacion", "bitcoin", "inflacion",
+            "partido", "partidos", "gano", "gana", "perdio", "resultado", "resultados", "tabla", "campeonato", "mundial", "elecciones", "presidente",
+            "clima", "temperatura", "llueve", "pronostico", "estreno", "estrenos", "salio", "sale", "lanzamiento", "nuevo", "nueva", "abierto", "horario",
+            "busca", "buscame", "googlea", "internet",
+        )
         const val CONVERSATION_IDLE_MS = 15 * 60_000L
         val EXCLUDED = listOf("image", "tts", "audio", "live", "embedding", "thinking-exp", "8b", "computer")
         /** 429 (sin cuota para ese modelo o la búsqueda), 404 (modelo inexistente), 400 (herramienta no admitida). */

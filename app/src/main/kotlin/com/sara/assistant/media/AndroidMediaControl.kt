@@ -196,6 +196,23 @@ class AndroidMediaControl(
         }
     }
 
+    override suspend fun nowPlaying(): com.sara.core.execution.NowPlayingInfo? {
+        val controllers = activeControllers() ?: return null
+        val withSong = controllers.filter { it.packageName != context.packageName && !it.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() }
+        // Al hablarle a Sara la música se pausa sola: cuenta como sonando lo que sonaba hace un momento.
+        val recent = usage.recentlyPlaying()
+        fun playing(x: MediaController) = x.playbackState?.state in PLAYING_STATES || x.packageName == recent
+        val c = withSong.firstOrNull { playing(it) } ?: withSong.firstOrNull()
+            ?: return com.sara.core.execution.NowPlayingInfo(null, null, null, false)
+        val m = c.metadata!!
+        val artist = m.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+            ?: m.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+            ?: m.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+        return com.sara.core.execution.NowPlayingInfo(
+            m.getString(android.media.MediaMetadata.METADATA_KEY_TITLE), artist, appName(c), playing(c),
+        )
+    }
+
     private fun activeControllers(): List<MediaController>? {
         if (!hasNotificationAccess()) return null
         return try {

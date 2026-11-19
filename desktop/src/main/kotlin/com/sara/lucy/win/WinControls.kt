@@ -203,6 +203,13 @@ class WinMediaControl(
 
     private fun spotifyInstalled() = apps.hasApp("Spotify")
 
+    override suspend fun nowPlaying(): com.sara.core.execution.NowPlayingInfo? = withContext(Dispatchers.IO) {
+        val info = runCatching { bridge.obj("mediaInfo", timeoutMillis = 8_000) }.getOrNull() ?: return@withContext null
+        if (!info.optBoolean("session")) return@withContext com.sara.core.execution.NowPlayingInfo(null, null, null, false)
+        // Mientras Lucy escucha, la música sigue (sólo se baja): «playing» es confiable.
+        com.sara.core.execution.NowPlayingInfo(info.optString("title").ifBlank { null }, info.optString("artist").ifBlank { null }, friendly(info.optString("app")), info.optBoolean("playing"))
+    }
+
     override suspend fun perform(action: MediaAction, query: String?, app: String?): MediaActionResult = withContext(Dispatchers.IO) {
         when (action) {
             MediaAction.PLAY -> play(query?.trim()?.ifBlank { null }, app)

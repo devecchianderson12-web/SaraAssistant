@@ -41,6 +41,9 @@ sealed interface CommandIntent {
     data class Forget(val key: String) : CommandIntent
     data object RecallMemory : CommandIntent
 
+    /** «¿Qué está sonando?», «¿cómo se llama este tema?»: dice la canción, sin tocar la música. */
+    data object NowPlaying : CommandIntent
+
     /** Preguntas y charla («¿cómo estás?», «¿qué tiempo hace?»): local o con IA. */
     data class Chat(val text: String) : CommandIntent
 
@@ -78,6 +81,7 @@ fun CommandIntent.label(): String = when (this) {
     is CommandIntent.Remember -> "Recordar: $key = $value"
     is CommandIntent.Forget -> "Olvidar: $key"
     CommandIntent.RecallMemory -> "Qué recuerdo"
+    CommandIntent.NowPlaying -> "Qué está sonando"
     is CommandIntent.Chat -> "Pregunta: $text"
     is CommandIntent.Skill -> "$skill.$action" + if (args.isEmpty()) "" else " " + args.entries.joinToString(", ") { "${it.key}=${it.value}" }
     is CommandIntent.Sequence -> steps.joinToString(" → ") { it.label() }

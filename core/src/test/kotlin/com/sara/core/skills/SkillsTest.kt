@@ -26,6 +26,21 @@ class SkillsTest {
     private fun intentOf(text: String) = RuleBasedCommandInterpreter().interpretNow(text).intent
 
     @Test
+    fun `preguntas no son ordenes`() {
+        for (q in listOf("Ey Sara, ¿qué está sonando?", "ey sara que musica esta sonando", "¿cuál es el nombre de la música que está sonando?",
+                "qué canción es esta", "quién canta esta canción", "cómo se llama este tema")) {
+            assertEquals(q, CommandIntent.NowPlaying, intentOf(q))
+        }
+        assertTrue(intentOf("cómo subo el volumen") is CommandIntent.Unknown)
+        assertTrue(intentOf("¿la música está muy fuerte?") is CommandIntent.Unknown)
+        assertEquals(CommandIntent.PlayMusic(null, null), intentOf("¿puedes poner música?"))
+        assertEquals(CommandIntent.Next, intentOf("¿podés pasar la canción?"))
+        assertTrue(intentOf("¿me podrías bajar el volumen?") is CommandIntent.AdjustVolume)
+        assertTrue(intentOf("Ey Sara, ¿qué hora es?") is CommandIntent.Chat)
+        assertEquals(CommandIntent.Next, intentOf("pasá la canción"))
+    }
+
+    @Test
     fun `formas de tu y errores del reconocedor`() {
         assertEquals("recordatorios", (intentOf("Recuérdame mañana a las nueve llamar a mi mamá.") as CommandIntent.Skill).skill)
         assertEquals("alarma", (intentOf("Despiértame a las 7.") as CommandIntent.Skill).skill)

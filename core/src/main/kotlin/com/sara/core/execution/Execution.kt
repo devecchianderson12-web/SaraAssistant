@@ -115,7 +115,13 @@ sealed interface MediaActionResult {
 interface MediaControl {
     /** [app]: app de música pedida («en Spotify»), o `null` para la que esté sonando. */
     suspend fun perform(action: MediaAction, query: String? = null, app: String? = null): MediaActionResult
+
+    /** Qué está sonando (o lo último que sonó), o `null` si no se puede saber. */
+    suspend fun nowPlaying(): NowPlayingInfo? = null
 }
+
+/** Canción actual de la app de música. */
+data class NowPlayingInfo(val title: String?, val artist: String?, val app: String?, val playing: Boolean)
 
 sealed interface AppLaunchResult {
     data class Opened(val label: String, val deviceLocked: Boolean) : AppLaunchResult
@@ -246,6 +252,7 @@ class DefaultCommandExecutor(
         is CommandIntent.Remember -> remember(intent)
         is CommandIntent.Forget -> forget(intent.key)
         CommandIntent.RecallMemory -> recall().copy(informative = true)
+        CommandIntent.NowPlaying -> nowPlaying().copy(informative = true)
         is CommandIntent.Chat -> chat(intent.text)
         is CommandIntent.Skill -> runSkill(intent)
         is CommandIntent.Sequence -> runSequence(intent.steps, 0, emptyList())
@@ -349,6 +356,17 @@ class DefaultCommandExecutor(
         is com.sara.core.skills.SkillResult.Partial -> ExecutionResult(true, message)
         is com.sara.core.skills.SkillResult.NeedsPermission -> ExecutionResult(false, message, ErrorKind.PERMISSION_MISSING, needsPermission = kind)
         is com.sara.core.skills.SkillResult.Failed -> ExecutionResult(false, message, ErrorKind.EXECUTION_FAILED)
+    }
+
+    private suspend fun nowPlaying(): ExecutionResult {
+        val info = runCatching { media.nowPlaying() }.getOrNull()
+            ?: return ExecutionResult(false, "No puedo ver qué está sonando: activá el acceso a notificaciones.", ErrorKind.EXECUTION_FAILED, needsPermission = PermissionKind.NOTIFICATION_ACCESS)
+        val title = info.title?.takeIf { it.isNotBlank() }
+        val artist = info.artist?.takeIf { it.isNotBlank() }
+        if (title == null) return ExecutionResult(true, "No está sonando nada ahora.")
+        val song = "«$title»" + (artist?.let { " de $it" } ?: "")
+        val where = info.app?.takeIf { it.isNotBlank() }?.let { " en $it" }.orEmpty()
+        return ExecutionResult(true, if (info.playing) "Está sonando $song$where." else "Lo último que sonó fue $song$where; ahora está en pausa.")
     }
 
     private suspend fun chat(text: String): ExecutionResult = chatAnswer(text).copy(informative = true)

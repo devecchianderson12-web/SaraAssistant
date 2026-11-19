@@ -101,6 +101,30 @@ fun looksLikeQuestion(normalized: String): Boolean {
     return tokens.first() in QUESTION_START || tokens.any { it in QUESTION_WORDS }
 }
 
+/** Pedidos amables que igual son órdenes: «¿podés poner música?», «¿me subís el volumen?». */
+private val POLITE_START = setOf("podes", "puedes", "podrias", "podria", "puede", "pueden", "me", "queres", "quieres", "quisieras", "necesito", "quiero")
+
+/** Palabras que hacen que no sea «qué está sonando» (gustos, la app de música, recomendaciones). */
+private val NOT_NOW_PLAYING = setOf("gusta", "gustan", "gustos", "app", "aplicacion", "recomenda", "recomendame", "recomiendas", "favorita", "favorito", "pone", "poneme", "reproduci", "busca")
+
+/**
+ * Pregunta y no orden: lo marca la entonación (el reconocedor pone «¿…?») o que empiece con «qué»,
+ * «cómo», «cuál»… Los pedidos amables («¿podés subir el volumen?») siguen siendo órdenes.
+ */
+internal fun isQuestion(raw: String, tokens: List<String>): Boolean {
+    val words = tokens.dropWhile { it == "y" || it == "ey" || it == "hey" || it == "oye" || it in WAKE_NAMES }
+    if (words.isEmpty() || words.first() in POLITE_START) return false
+    val marked = '¿' in raw || raw.trimEnd().endsWith("?")
+    return marked || words.first() in QUESTION_START
+}
+
+/** Intenciones que cambian algo (música, volumen, apps): una pregunta no las debe disparar. */
+private fun CommandIntent.changesSomething(): Boolean = when (this) {
+    is CommandIntent.PlayMusic, CommandIntent.Pause, CommandIntent.Resume, CommandIntent.Next, CommandIntent.Previous,
+    CommandIntent.StopMusic, is CommandIntent.AdjustVolume, is CommandIntent.OpenApp, CommandIntent.CloseBackgroundApps -> true
+    else -> false
+}
+
 /** Intérprete local por reglas: intenciones, entidades (porcentaje, búsqueda) y expresiones equivalentes. */
 class RuleBasedCommandInterpreter : CommandInterpreter {
 
@@ -114,7 +138,8 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
         val ctx = Context(normalized, tokens)
         MemoryParser.parse(text)?.let { return InterpretationResult(it, 0.9f, normalized, "memory") }
         MessageParser.parse(text)?.let { return InterpretationResult(it, 0.9f, normalized, "send-message") }
-        return detectCancel(ctx)
+        if (isNowPlayingQuestion(tokens)) return ctx.result(CommandIntent.NowPlaying, 0.9f, "now-playing")
+        val result = detectCancel(ctx)
             ?: SmallTalk.answer(text)?.let { ctx.result(CommandIntent.Chat(text), 0.8f, "smalltalk") }
             ?: com.sara.core.skills.SkillParser.parse(text)?.let { ctx.result(it, 0.85f, "skill") }
             ?: detectCloseApps(ctx)
@@ -122,6 +147,22 @@ class RuleBasedCommandInterpreter : CommandInterpreter {
             ?: detectVolume(ctx)
             ?: detectMedia(ctx)
             ?: InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "no-match")
+        // Una pregunta («¿cómo subo el volumen?», «¿qué música es esa?») no es una orden: no se ejecuta,
+        // la contesta la charla.
+        if (result.intent.changesSomething() && isQuestion(text, tokens)) {
+            return InterpretationResult(CommandIntent.Unknown(text), 0f, normalized, "question-not-order")
+        }
+        return result
+    }
+
+    /** «¿Qué está sonando?», «¿cómo se llama este tema?», «¿quién canta?», «nombre de la canción que suena». */
+    private fun isNowPlayingQuestion(tokens: List<String>): Boolean {
+        val words = tokens.toSet()
+        if (tokens.isEmpty() || words.any { it in NOT_NOW_PLAYING }) return false
+        val asks = tokens.first() in QUESTION_START || tokens.first() in setOf("nombre", "decime", "dime", "sabes", "esta", "hay")
+        val media = words.any { it in setOf("sonando", "suena", "tocando", "escuchando", "escucho", "canta", "cancion", "tema", "musica", "artista", "cantante", "temazo") }
+        val current = words.any { it in setOf("sonando", "suena", "tocando", "escuchando", "escucho", "canta", "este", "esta", "esto", "esa", "ese", "llama", "nombre", "ahora") }
+        return asks && media && current
     }
 
     // -----------------------------------------------------------------------------------------

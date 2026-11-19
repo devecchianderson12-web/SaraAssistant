@@ -53,7 +53,28 @@ object SpokenForms {
         Regex("^((?:(?:${com.sara.core.model.AssistantIdentity.NAMES})[,.]?\\s+)?)ponen\\b", RegexOption.IGNORE_CASE) to "$1poné",
     )
 
-    fun rewrite(text: String): String = rules.fold(text) { t, (r, to) -> r.replace(t, to) }
+    /** «¿Podés poner música?», «¿me podrías bajar el volumen?»: un pedido amable es una orden. */
+    private val polite = Regex(
+        "^((?:(?:${com.sara.core.model.AssistantIdentity.NAMES}|ey|hey|oye)[,.]?\\s+)*)¿?\\s*(me\\s+)?(?:pod[eé]s|puedes|podr[ií]as|podr[ií]a|puede|quer[eé]s|quieres)\\s+(?:me\\s+)?(\\p{L}+?)(ar|er|ir)(me|le|lo|la|nos)?\\b(.*)$",
+        RegexOption.IGNORE_CASE,
+    )
+    private val IRREGULAR = mapOf("decir" to "deci", "hacer" to "hace", "poner" to "pone", "salir" to "sali", "tener" to "tene", "venir" to "veni")
+
+    private fun politeToOrder(text: String): String {
+        val m = polite.find(text.trim()) ?: return text
+        val (lead, me, stem, ending, clitic, rest) = m.destructured
+        val inf = (stem + ending).lowercase()
+        val accented = when (ending.lowercase()) { "ar" -> "á"; "er" -> "é"; else -> "í" }
+        // Con pronombre pegado no lleva tilde: «pasame», «decime», «poneme».
+        val pron = clitic.ifEmpty { if (me.isNotBlank()) "me" else "" }
+        val verb = when {
+            pron.isNotEmpty() -> (IRREGULAR[inf] ?: (stem + ending.first())) + pron
+            else -> stem + accented
+        }
+        return lead + verb + rest.trimEnd().trimEnd('?', '!').trimEnd()
+    }
+
+    fun rewrite(text: String): String = rules.fold(politeToOrder(text)) { t, (r, to) -> r.replace(t, to) }
 }
 
 /** Números en español (dígitos o palabras) del 0 al 100. */

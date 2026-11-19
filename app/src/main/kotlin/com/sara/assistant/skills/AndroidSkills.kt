@@ -227,7 +227,43 @@ class RoutineSkill(private val scheduler: Scheduler) : Skill {
 // =============================================================================================
 
 class LocationProvider(private val context: Context) {
+    private companion object { const val SAVED_MAX_AGE_MS = 3L * 3600 * 1000 }
     fun hasPermission() = granted(context, Manifest.permission.ACCESS_COARSE_LOCATION) || granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
+
+    private val prefs = context.getSharedPreferences("ubicacion", Context.MODE_PRIVATE)
+
+    /** Lugar para el clima: lat, lon, nombre y si es aproximado (por la conexión). */
+    data class Place(val lat: Double, val lon: Double, val name: String?, val approximate: Boolean)
+
+    /**
+     * Dónde estás, siempre que se pueda: el GPS/red del teléfono; si Android no la da (Sara en segundo
+     * plano, ubicación apagada), la última conocida (se guarda cada vez que se obtiene); y si no hay,
+     * la aproximada por la conexión a Internet.
+     */
+    suspend fun place(): Place? {
+        current()?.let { loc ->
+            val name = cityName(loc)
+            prefs.edit().putString("lat", loc.latitude.toString()).putString("lon", loc.longitude.toString())
+                .putString("nombre", name.orEmpty()).putLong("cuando", System.currentTimeMillis()).apply()
+            return Place(loc.latitude, loc.longitude, name, false)
+        }
+        val saved = prefs.getString("lat", null)?.toDoubleOrNull()?.let { lat ->
+            prefs.getString("lon", null)?.toDoubleOrNull()?.let { lon -> Place(lat, lon, prefs.getString("nombre", null)?.ifBlank { null }, false) }
+        }
+        if (saved != null && System.currentTimeMillis() - prefs.getLong("cuando", 0) < SAVED_MAX_AGE_MS) return saved
+        return byConnection() ?: saved
+    }
+
+    private suspend fun byConnection(): Place? = withContext(Dispatchers.IO) {
+        listOf("https://ipwho.is/?lang=es", "https://ipapi.co/json/").firstNotNullOfOrNull { url ->
+            runCatching {
+                val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply { connectTimeout = 4_000; readTimeout = 4_000 }
+                val j = org.json.JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                if (!j.optBoolean("success", true)) null
+                else Place(j.getDouble("latitude"), j.getDouble("longitude"), j.optString("city").ifBlank { null }, true)
+            }.getOrNull()
+        }
+    }
 
     @Suppress("MissingPermission")
     suspend fun current(): Location? {
@@ -290,11 +326,10 @@ class WeatherSkill(private val location: LocationProvider) : Skill {
             val r = geo.optJSONArray("results")?.optJSONObject(0) ?: return@withContext SkillResult.Failed("No encontré $place.")
             Triple(r.getDouble("latitude"), r.getDouble("longitude"), r.optString("name", place))
         } else {
-            if (!location.hasPermission()) {
-                return@withContext SkillResult.NeedsPermission(PermissionKind.LOCATION, "Decime la ciudad o activá la ubicación. Te dejé el botón.")
-            }
-            val loc = location.current() ?: return@withContext SkillResult.Failed("No sé dónde estás. Decime la ciudad.")
-            Triple(loc.latitude, loc.longitude, location.cityName(loc))
+            val here = location.place()
+                ?: return@withContext if (!location.hasPermission()) SkillResult.NeedsPermission(PermissionKind.LOCATION, "Para el clima de donde estás activá la ubicación. Te dejé el botón.")
+                else SkillResult.Failed("No pude saber dónde estás. Decime la ciudad.")
+            Triple(here.lat, here.lon, here.name)
         }
         val data = get(
             "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&timezone=auto&forecast_days=3" +
