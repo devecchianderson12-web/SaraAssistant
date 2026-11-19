@@ -103,6 +103,14 @@ class AppContainer(private val app: Application) {
     /** IA: Google para preguntas con datos actuales; Claude (si hay clave) para planificar. */
     val ai = com.sara.core.ai.AiRouter({ settings.settings.value.aiProvider }, gemini, claude)
 
+    /** Hace [action] cuando Sara termina de hablar y se cierra la esfera (p. ej. bloquear la pantalla). */
+    private suspend fun waitForIdleThen(action: suspend () -> Unit) {
+        kotlinx.coroutines.delay(300)
+        kotlinx.coroutines.withTimeoutOrNull(20_000) { while (orchestrator.isInteractionActive) kotlinx.coroutines.delay(150) }
+        kotlinx.coroutines.delay(700)
+        action()
+    }
+
     /** Todas las habilidades que Sara (y la IA) pueden usar. */
     val skills: com.sara.core.skills.SkillRegistry by lazy {
         com.sara.core.skills.SkillRegistry(
@@ -115,7 +123,7 @@ class AppContainer(private val app: Application) {
                 com.sara.assistant.skills.ReminderSkill(scheduler),
                 com.sara.assistant.skills.RoutineSkill(scheduler),
                 com.sara.assistant.skills.WeatherSkill(location),
-                com.sara.assistant.skills.DeviceSkill(app, activityStarter),
+                com.sara.assistant.skills.DeviceSkill(app, activityStarter) { action -> scope.launch { waitForIdleThen(action) } },
                 com.sara.assistant.skills.CallsSkill(app, activityStarter),
                 com.sara.assistant.skills.CalendarSkill(app, activityStarter),
                 com.sara.assistant.skills.MapsSkill(activityStarter, location),
@@ -160,10 +168,9 @@ class AppContainer(private val app: Application) {
     val voskWake = VoskWakeWordEngine(voskModels, microphone, logger)
     private val porcupineWake = PorcupineWakeWordEngine(app, secrets, porcupineFiles, microphone)
     val voskRecognizer = VoskSpeechRecognitionEngine(voskModels, microphone) { settings.settings.value.voiceBoost }
-    private val onDeviceRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = true, levels, null)
-    /** Con Bluetooth el reconocedor de Google recibe el audio ya reforzado (Android 13+; si no lo acepta, graba él). */
-    private val boostedFeed = com.sara.assistant.speech.ExternalAudio(app, microphone, logger) { micRouter.bluetoothAudioConnected() }
-    private val systemRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = false, levels, boostedFeed)
+    private val onDeviceRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = true, levels)
+    // El reconocedor de Google graba él mismo (pasarle el audio de Sara lo hacía fallar en algunos teléfonos).
+    private val systemRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = false, levels)
     private val azureRecognizer = AzureSpeechRecognitionEngine(azure, microphone)
     val offlineTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = false)
     val systemNetworkTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = true)

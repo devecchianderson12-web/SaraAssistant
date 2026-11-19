@@ -105,7 +105,7 @@ object SkillParser {
         if (has("wifi", "wi fi", "wifi", "wi-fi")) return skill("dispositivo", "wifi", "estado" to when { off -> "apagar"; on -> "prender"; else -> "consultar" })
         // «Conectate a los auriculares JBL», «conectá el bluetooth al auto».
         Regex("^(?:conecta|conectate|conectame|conectar|vincula|vinculate|enlaza)\\s+(?:el\\s+(?:bluetooth|blutu|celular|telefono)\\s+)?(?:a|al|con|a los|a las|a la|con el|con los|con la)\\s+(.+)$").find(n)?.let { m ->
-            val target = originalTail(text, m.groupValues[1]).replace(Regex("^(?:(?:a|al|con|mis|mi|los|las|el|la)\\s+)+", RegexOption.IGNORE_CASE), "").replace(Regex("\\s+por bluetooth$", RegexOption.IGNORE_CASE), "")
+            val target = originalTail(text, m.groupValues[1]).replace(Regex("^(?:(?:a|al|con|mis|mi|los|las|el|la)\\s+)+", RegexOption.IGNORE_CASE), "").replace(Regex("\\s+(?:por|en|desde|con)\\s+(?:el\\s+|la\\s+)?(?:(?:apartado|menu|ajuste|ajustes|configuracion|configuración|seccion|sección|opcion|opción|parte)\\s+(?:de|del)\\s+(?:el\\s+)?)?(?:bluetooth|blutu)$", RegexOption.IGNORE_CASE), "")
             if (target.isNotBlank() && !target.equals("internet", true) && !target.lowercase().startsWith("wifi")) {
                 // «Conectate a mi Bluetooth»: no nombra un dispositivo; prender y esperar a que se conecte solo.
                 if (TextNormalizer.normalize(target) in GENERIC_BLUETOOTH) return skill("dispositivo", "bluetooth", "estado" to "conectar")

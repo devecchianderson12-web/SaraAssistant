@@ -33,8 +33,6 @@ class AndroidSpeechRecognitionEngine(
     private val context: Context,
     private val onDevice: Boolean,
     private val levels: AudioLevelMeter,
-    /** Audio grabado por Sara (reforzado) para el reconocedor; null = graba él. */
-    private val external: ExternalAudio? = null,
 ) : SpeechRecognitionEngine {
     override val id = if (onDevice) "android-on-device" else "android-system"
     override val displayName = if (onDevice) "Android en el dispositivo (offline)" else "Servicio de voz del sistema (online)"
@@ -74,22 +72,14 @@ class AndroidSpeechRecognitionEngine(
 
     override suspend fun recognize(request: RecognitionRequest, onPartial: (String) -> Unit): RecognitionResult {
         val hardLimit = request.noSpeechTimeoutMillis + request.maxSpeechMillis + 5_000
-        return withTimeoutOrNull(hardLimit) {
-            val useExternal = external?.shouldUse() == true
-            recognizeOnMain(request, onPartial, useExternal)
-                // No aceptó el audio de Sara: se recuerda y graba él (como siempre).
-                ?: recognizeOnMain(request, onPartial, false)!!
-        } ?: RecognitionResult.Failure(EngineError(EngineErrorType.SERVER, "El reconocimiento tardó demasiado."), id)
+        return withTimeoutOrNull(hardLimit) { recognizeOnMain(request, onPartial) }
+            ?: RecognitionResult.Failure(EngineError(EngineErrorType.SERVER, "El reconocimiento tardó demasiado."), id)
     }
 
-    /** null = el reconocedor rechazó el audio externo apenas empezó (hay que reintentar sin él). */
-    private suspend fun recognizeOnMain(request: RecognitionRequest, onPartial: (String) -> Unit, useExternal: Boolean): RecognitionResult? =
+    private suspend fun recognizeOnMain(request: RecognitionRequest, onPartial: (String) -> Unit): RecognitionResult =
         withContext(Dispatchers.Main) {
             val requestedAt = System.currentTimeMillis()
-            var feed: kotlinx.coroutines.Job? = null
-            var ready = false
-            var heardAnything = false
-            suspendCancellableCoroutine<RecognitionResult?> { cont ->
+            suspendCancellableCoroutine { cont ->
                 val recognizer = if (onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
                 } else {
@@ -98,9 +88,8 @@ class AndroidSpeechRecognitionEngine(
                     else SpeechRecognizer.createSpeechRecognizer(context)
                 }
 
-                fun finish(result: RecognitionResult?) {
+                fun finish(result: RecognitionResult) {
                     if (!cont.isActive) return
-                    feed?.cancel()
                     levels.reset()
                     recognizer.destroy()
                     cont.resume(result)
@@ -108,28 +97,23 @@ class AndroidSpeechRecognitionEngine(
 
                 recognizer.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
-                        ready = true
                         android.util.Log.d("Sara/Recognizer", "Listo para escuchar en ${System.currentTimeMillis() - requestedAt} ms")
                     }
                     override fun onBeginningOfSpeech() = Unit
-                    override fun onRmsChanged(rmsdB: Float) {
-                        if (rmsdB > 0f) heardAnything = true
-                        if (feed == null) levels.update((rmsdB + 2f) / 12f)
-                    }
+                    override fun onRmsChanged(rmsdB: Float) = levels.update((rmsdB + 2f) / 12f)
                     override fun onBufferReceived(buffer: ByteArray?) = Unit
                     override fun onEndOfSpeech() = Unit
                     override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
                     override fun onPartialResults(partialResults: Bundle?) {
                         partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                            ?.takeIf { it.isNotBlank() }?.let { heardAnything = true; onPartial(it) }
+                            ?.takeIf { it.isNotBlank() }?.let(onPartial)
                     }
 
                     override fun onResults(results: Bundle?) {
                         val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                         val scores = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
                         val best = texts.firstOrNull { it.isNotBlank() }
-                        if (best != null && feed != null) external?.worked()
                         finish(
                             if (best != null) RecognitionResult.Success(best, scores?.firstOrNull()?.takeIf { it >= 0f }, id)
                             else RecognitionResult.Failure(EngineError(EngineErrorType.NO_MATCH, "No entendí lo que dijiste."), id),
@@ -137,18 +121,6 @@ class AndroidSpeechRecognitionEngine(
                     }
 
                     override fun onError(error: Int) {
-                        // Con el audio de Sara: si falla enseguida (no lo acepta), se deja de usar.
-                        val early = System.currentTimeMillis() - requestedAt < 2_500 || !ready
-                        if (feed != null && !heardAnything && early && error in EXTERNAL_REJECTED) {
-                            android.util.Log.w("Sara/Recognizer", "El reconocedor no acepta el audio de Sara (error $error): graba él")
-                            external?.unsupported = true
-                            finish(null)
-                            return
-                        }
-                        // Si ignoró el audio de Sara (y grabó silencio) aunque hablaste: después de dos veces se deja de usar.
-                        if (feed != null && !heardAnything && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) &&
-                            (external?.voicePeak ?: 0) > 3_000
-                        ) external?.strike()
                         finish(RecognitionResult.Failure(mapError(error), id))
                     }
                 })
@@ -165,9 +137,7 @@ class AndroidSpeechRecognitionEngine(
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1_500L)
                     if (onDevice) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 }
-                if (useExternal) feed = external?.attach(intent)
                 cont.invokeOnCancellation {
-                    feed?.cancel()
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         runCatching { recognizer.cancel() }
                         runCatching { recognizer.destroy() }
@@ -203,7 +173,5 @@ class AndroidSpeechRecognitionEngine(
         const val ERROR_SERVER_DISCONNECTED = 11
         const val ERROR_LANGUAGE_NOT_SUPPORTED = 12
         const val ERROR_LANGUAGE_UNAVAILABLE = 13
-        /** Errores con los que un reconocedor rechaza el audio externo (cliente, audio, no soportado). */
-        val EXTERNAL_REJECTED = setOf(SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_AUDIO, 14, 15)
     }
 }

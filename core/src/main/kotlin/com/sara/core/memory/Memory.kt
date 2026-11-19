@@ -60,9 +60,31 @@ object MemoryParser {
     private val APP_BEFORE = Regex(
         "^(?:(?:siempre|de ahora en m[aá]s|a partir de ahora)\\s*,?\\s+)?(?:us[aá]|abr[ií]|pon[eé])\\s+(?:la\\s+app\\s+(?:de\\s+)?)?(.+?)\\s+(?:para|con)\\s+(?:la\\s+|las\\s+|los\\s+)?(?:m[uú]sica|canciones|temas)",
     )
+    private val TRIGGER_START = "^(?:cada\\s+vez\\s+que|cada\\s+que|siempre\\s+que|cuando|si)\\s+(?:yo\\s+)?(?:te\\s+)?(?:diga|digo)\\s+(?:que\\s+)?"
+    /** «Cuando te diga X, hacé Y», «cada que te diga "X" quiero que Y», «si te digo X tenés que Y». */
     private val ROUTINE = Regex(
-        "^cuando\\s+(?:te\\s+)?diga\\s+[\"«“]?(.+?)[\"»”]?\\s*,?\\s*(?:hac[eé]|haz|que\\s+hagas|quiero\\s+que)\\s+(.+)$",
+        TRIGGER_START + "[\"«“]?(.+?)[\"»”]?\\s*,?\\s*(?:hac[eé]|haz|que\\s+hagas|quiero\\s+que|necesito\\s+que|ten[eé]s\\s+que|tienes\\s+que|deb[eé]s|vos)\\s+(.+)$",
     )
+    /** Con la frase entre comillas no hace falta «quiero que»: «cada vez que te diga "buenas noches" sacá la música». */
+    private val ROUTINE_QUOTED = Regex(TRIGGER_START + "[\"«“](.+?)[\"»”]\\s*,?\\s*(.+)$")
+
+    /** «te conectes a…» → «conectate a…», «me pongas…» → «poneme…» (lo que se va a ejecutar es una orden). */
+    private val SUBJUNCTIVE = mapOf(
+        "conectes" to "conecta", "desconectes" to "desconecta", "pongas" to "pone", "abras" to "abri", "cierres" to "cerra", "subas" to "subi",
+        "bajes" to "baja", "prendas" to "prende", "apagues" to "apaga", "pases" to "pasa", "saques" to "saca", "mandes" to "manda", "llames" to "llama",
+        "digas" to "deci", "leas" to "lee", "avises" to "avisa", "busques" to "busca", "reproduzcas" to "reproduci", "actives" to "activa",
+        "desactives" to "desactiva", "silencies" to "silencia", "pauses" to "pausa", "sigas" to "segui", "cambies" to "cambia", "pares" to "para",
+        "recuerdes" to "recorda", "anotes" to "anota", "agregues" to "agrega", "hagas" to "hace", "vayas" to "anda",
+    )
+    private val ACCENTED = mapOf('a' to 'á', 'e' to 'é', 'i' to 'í')
+
+    internal fun toOrder(action: String): String {
+        val m = Regex("^(?:(te|me|lo|la|le)\\s+)?(\\p{L}+)(.*)$", RegexOption.IGNORE_CASE).find(action.trim()) ?: return action
+        val (clitic, verb, rest) = m.destructured
+        val stem = SUBJUNCTIVE[verb.lowercase()] ?: return action
+        val head = if (clitic.isNotEmpty()) stem + clitic.lowercase() else stem.dropLast(1) + ACCENTED.getValue(stem.last())
+        return head + rest
+    }
     private val NOTE = Regex("^(?:acordate|record[aá]|record[aá]te|anot[aá]|guard[aá])\\s+(?:de\\s+)?que\\s+(.+)$")
     private val FORGET_MUSIC = Regex("(?:olvid|borr|sac|quit)[a-záéíóú]*.*(?:app|aplicaci[oó]n).*m[uú]sica|m[uú]sica.*(?:por defecto|predeterminad|de siempre)")
     private val CHANGE_MUSIC = Regex("^cambi[aá]\\s+(?:la\\s+)?(?:app|aplicaci[oó]n)\\s+(?:de\\s+(?:la\\s+)?)?m[uú]sica\\s+(?:a|por)\\s+(?:la\\s+)?(?:app\\s+(?:de\\s+)?)?(.+)$")
@@ -74,8 +96,8 @@ object MemoryParser {
         val body = lower.substring(LEAD.find(lower)?.value?.length ?: 0).trimStart('¿', '¡')
 
         if (RECALL.containsMatchIn(body)) return CommandIntent.RecallMemory
-        ROUTINE.find(body)?.let { m ->
-            return CommandIntent.Remember(MemoryKeys.routineKey(m.groupValues[1].trim()), clean(m.groupValues[2]))
+        (ROUTINE.find(body) ?: ROUTINE_QUOTED.find(body))?.let { m ->
+            return CommandIntent.Remember(MemoryKeys.routineKey(clean(m.groupValues[1])), toOrder(clean(m.groupValues[2])))
         }
         if (FORGET_MUSIC.containsMatchIn(body) && !WHEN.containsMatchIn(body)) return CommandIntent.Forget(MemoryKeys.MUSIC_APP)
 

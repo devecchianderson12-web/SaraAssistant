@@ -74,7 +74,28 @@ object SpokenForms {
         return lead + verb + rest.trimEnd().trimEnd('?', '!').trimEnd()
     }
 
-    fun rewrite(text: String): String = rules.fold(politeToOrder(text)) { t, (r, to) -> r.replace(t, to) }
+    /** Verbos de órdenes que a veces se dicen en infinitivo («cambiar la música», «bloquear pantalla»). */
+    private val ORDER_VERBS = setOf(
+        "poner", "cambiar", "pasar", "subir", "bajar", "abrir", "cerrar", "apagar", "prender", "encender", "pausar", "parar", "reproducir",
+        "bloquear", "desbloquear", "conectar", "desconectar", "llamar", "mandar", "leer", "buscar", "activar", "desactivar", "silenciar",
+        "sacar", "quitar", "borrar", "agregar", "anotar", "continuar", "seguir", "saltar", "repetir", "detener",
+    )
+    private val infinitive = Regex(
+        "^((?:(?:${com.sara.core.model.AssistantIdentity.NAMES}|ey|hey|oye)[,.]?\\s+)*)(\\p{L}+?)(ar|er|ir)(me|le|lo|la|nos)?\\b(.*)$",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun infinitiveToOrder(text: String): String {
+        val m = infinitive.find(text.trim()) ?: return text
+        val (lead, stem, ending, clitic, rest) = m.destructured
+        val inf = (stem + ending).lowercase()
+        if (inf !in ORDER_VERBS) return text
+        val verb = if (clitic.isNotEmpty()) (IRREGULAR[inf] ?: (stem + ending.first())) + clitic
+        else stem + when (ending.lowercase()) { "ar" -> "á"; "er" -> "é"; else -> "í" }
+        return lead + verb + rest
+    }
+
+    fun rewrite(text: String): String = rules.fold(infinitiveToOrder(politeToOrder(text))) { t, (r, to) -> r.replace(t, to) }
 }
 
 /** Números en español (dígitos o palabras) del 0 al 100. */

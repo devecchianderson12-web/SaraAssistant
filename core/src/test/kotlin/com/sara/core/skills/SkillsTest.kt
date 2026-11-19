@@ -26,6 +26,16 @@ class SkillsTest {
     private fun intentOf(text: String) = RuleBasedCommandInterpreter().interpretNow(text).intent
 
     @Test
+    fun `rutinas largas e infinitivos`() {
+        val r = intentOf("Sara, cada que te diga \"conectate al auto\" quiero que te conectes a mi gol g3 en el apartado de bluetooth")
+        assertEquals(CommandIntent.Remember("rutina: conectate al auto", "conectate a mi gol g3 en el apartado de bluetooth"), r)
+        assertEquals(CommandIntent.Skill("dispositivo", "bluetooth", mapOf("estado" to "conectar", "dispositivo" to "gol g3")), intentOf("conectate a mi gol g3 en el apartado de bluetooth"))
+        assertEquals(CommandIntent.Remember("rutina: buenas noches", "sacá la música"), intentOf("cada vez que te diga \"buenas noches\" sacá la música"))
+        assertEquals(CommandIntent.Next, intentOf("cambiar la música"))
+        assertEquals("bloquear", (intentOf("Sara, bloquear pantalla") as CommandIntent.Skill).action)
+    }
+
+    @Test
     fun `preguntas no son ordenes`() {
         for (q in listOf("Ey Sara, ¿qué está sonando?", "ey sara que musica esta sonando", "¿cuál es el nombre de la música que está sonando?",
                 "qué canción es esta", "quién canta esta canción", "cómo se llama este tema")) {

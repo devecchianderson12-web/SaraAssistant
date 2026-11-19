@@ -228,6 +228,17 @@ class AndroidMediaControl(
      * Como último recurso, la tecla «play» al último reproductor.
      */
     private suspend fun startFromNothing(): MediaActionResult {
+        // Con la pantalla bloqueada no se puede abrir una app: «play» al último reproductor (lo hace
+        // el sistema, funciona bloqueado) y sólo si no arranca se abre la app.
+        val locked = context.getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+        if (locked) {
+            dispatchKey(KeyEvent.KEYCODE_MEDIA_PLAY)
+            repeat(14) {
+                delay(150)
+                activeControllers()?.firstOrNull { it.isPlaying() }?.let { return MediaActionResult.Done(appName(it)) }
+            }
+            logger.d(TAG, "Bloqueado: «play» no arrancó la música; abro la app")
+        }
         val preferred = preferredMusicApp()
         if (preferred != null) {
             val pm = context.packageManager

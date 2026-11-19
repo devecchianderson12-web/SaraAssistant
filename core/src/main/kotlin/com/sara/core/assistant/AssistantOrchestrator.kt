@@ -429,6 +429,9 @@ class AssistantOrchestrator(
 
     /** Cuánto silencio alcanza para dar por terminada esta orden (o «nunca» si no está completa). */
     private suspend fun quickWait(partial: String): Long {
+        // Frases largas o que anuncian algo más («cada vez que te diga…», «recordame…»): se espera la pausa.
+        val words = com.sara.core.interpreter.TextNormalizer.tokens(com.sara.core.interpreter.TextNormalizer.normalize(partial))
+        if (words.size > QUICK_MAX_WORDS || words.firstOrNull() in QUICK_NEVER_START) return Long.MAX_VALUE
         val intent = runCatching { interpreter.interpret(partial).intent }.getOrNull() ?: return Long.MAX_VALUE
         return when (intent) {
             CommandIntent.Pause, CommandIntent.Resume, CommandIntent.Next, CommandIntent.Previous,
@@ -591,6 +594,12 @@ class AssistantOrchestrator(
     }
 
     private companion object {
+        /** Respuesta rápida sólo para órdenes cortas. */
+        const val QUICK_MAX_WORDS = 7
+        val QUICK_NEVER_START = setOf(
+            "cada", "cuando", "siempre", "si", "acordate", "recorda", "recordame", "anota", "anotame", "mandale", "manda", "decile",
+            "escribile", "avisame", "quiero", "necesito", "agenda", "agendame", "explicame", "contame", "busca", "buscame",
+        )
         const val TAG = "Orchestrator"
         const val QUICK_POLL_MS = 100L
         /** Silencio mínimo antes de mirar si la orden está completa. */

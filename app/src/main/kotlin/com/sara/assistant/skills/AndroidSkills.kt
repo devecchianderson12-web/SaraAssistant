@@ -390,7 +390,12 @@ internal fun get(url: String): JSONObject {
 // Ajustes del teléfono
 // =============================================================================================
 
-class DeviceSkill(private val context: Context, private val starter: ActivityStarter) : Skill {
+class DeviceSkill(
+    private val context: Context,
+    private val starter: ActivityStarter,
+    /** Hace algo cuando termina la interacción (si bloquea mientras la esfera está, la esfera prende la pantalla). */
+    private val afterInteraction: (suspend () -> Unit) -> Unit = {},
+) : Skill {
     override val id = "dispositivo"
     override val description = "Linterna, brillo, Wi-Fi, Bluetooth, No molestar, batería e información del teléfono."
     private val state = Param("estado", ParamType.STRING, "Qué hacer.", options = listOf("prender", "apagar", "consultar"))
@@ -466,12 +471,17 @@ class DeviceSkill(private val context: Context, private val starter: ActivitySta
 
     private suspend fun lockScreen(): SkillResult {
         val power = context.getSystemService(android.os.PowerManager::class.java)
-        if (!power.isInteractive) return SkillResult.Done("La pantalla ya está bloqueada.")
-        val done = com.sara.assistant.apps.SaraAccessibilityService.lockScreen(context)
-            ?: return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para bloquear la pantalla necesito Accesibilidad. Te dejé el botón.")
-        if (!done) return SkillResult.Failed("El teléfono no me dejó bloquear la pantalla.")
-        repeat(10) { if (!power.isInteractive) return SkillResult.Done("") ; delay(150) }
-        return SkillResult.Done("", verified = false)
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        if (!power.isInteractive && keyguard.isKeyguardLocked) return SkillResult.Done("La pantalla ya está bloqueada.")
+        if (!com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) {
+            return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para bloquear la pantalla necesito Accesibilidad. Te dejé el botón.")
+        }
+        // Se bloquea cuando Sara termina: si no, la esfera (que se muestra sobre el bloqueo) vuelve a prender la pantalla.
+        afterInteraction {
+            val done = com.sara.assistant.apps.SaraAccessibilityService.lockScreen(context)
+            android.util.Log.d("Sara/Device", "Bloquear pantalla: $done")
+        }
+        return SkillResult.Done("")
     }
 
     private suspend fun unlockScreen(): SkillResult {
