@@ -91,7 +91,7 @@ public class LinkTests
         var w = link.StartPairing();
         wrong.PendingCode = "ZZZZZZZZ";
         link.Start();
-        await Task.Delay(1500);
+        for (var i = 0; i < 40 && wrong.LastFailure == null; i++) await Task.Delay(100);
         Assert.Empty(store.Devices);
         Assert.Equal("bad_pairing_code", wrong.LastFailure);
 
@@ -118,6 +118,8 @@ public class LinkTests
         impostor.Paired = phone.Paired;
         impostor.Id = phone.Id;
         await link.ConnectAsyncForTest(impostor);
+        // El teléfono lee el rechazo un instante después de que la PC lo manda.
+        for (var i = 0; i < 40 && impostor.LastFailure == null; i++) await Task.Delay(50);
         Assert.Equal("unauthorized", impostor.LastFailure);
     }
 
