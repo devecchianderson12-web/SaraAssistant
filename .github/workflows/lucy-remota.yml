@@ -1,0 +1,84 @@
+name: Lucy Remota
+
+# Proyecto independiente: sólo se compila cuando cambia lucy-remota/ (no toca a Sara ni a la Lucy actual).
+on:
+  push:
+    branches: [main]
+    paths: ["lucy-remota/**", ".github/workflows/lucy-remota.yml"]
+  pull_request:
+    paths: ["lucy-remota/**", ".github/workflows/lucy-remota.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lucy-remota-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  receptor:
+    name: Receptor para Windows (.exe)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: lucy-remota/windows
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Pruebas del núcleo (protocolo, seguridad, vinculación)
+        run: dotnet test tests/LucyRemota.Tests -c Release
+
+      - name: Compilar Lucy Remota (un solo .exe portable)
+        run: dotnet publish src/LucyRemota -c Release -o publicado -p:Version=1.0.${{ github.run_number }}
+
+      - name: Nombre del archivo
+        shell: pwsh
+        run: |
+          $name = "LucyRemota-Receptor-Windows-v1.0.${{ github.run_number }}.exe"
+          Copy-Item publicado/LucyRemota.exe $name
+          "{0}: {1:N1} MB" -f $name, ((Get-Item $name).Length / 1MB)
+
+      - name: Autoprueba en Windows (teléfono simulado, órdenes reales)
+        shell: pwsh
+        run: |
+          $dir = Join-Path $PWD "autoprueba"
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $p = Start-Process -FilePath "LucyRemota-Receptor-Windows-v1.0.${{ github.run_number }}.exe" -ArgumentList "--autoprueba", "`"$dir`"" -Wait -PassThru
+          "Arranque + autoprueba: $($sw.ElapsedMilliseconds) ms"
+          Get-Content (Join-Path $dir "autoprueba.txt")
+          if ($p.ExitCode -ne 0) { throw "La autoprueba falló ($($p.ExitCode))" }
+
+      - name: Guardar autoprueba
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoprueba-receptor
+          path: lucy-remota/windows/autoprueba/
+          if-no-files-found: ignore
+
+      - name: Publicar captura (manual)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          mkdir capturas && cp autoprueba/*.png autoprueba/autoprueba.txt capturas/ 2>/dev/null; cd capturas
+          git init -q && git checkout -q -b capturas-lucy-remota
+          git -c user.name=ci -c user.email=ci@example.invalid add .
+          git -c user.name=ci -c user.email=ci@example.invalid commit -qm "Capturas de Lucy Remota ${{ github.sha }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" capturas-lucy-remota
+
+      - name: Guardar el .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: LucyRemota-Receptor
+          path: lucy-remota/windows/LucyRemota-Receptor-Windows-*.exe
+          if-no-files-found: error

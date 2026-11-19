@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Núcleo sin Windows: protocolo, seguridad, vinculación, validación de comandos y conexión.
+       Se prueba en cualquier sistema (también en Linux, en la compilación en la nube). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>LucyRemota.Core</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LucyRemota.Tests" />
+  </ItemGroup>
+</Project>

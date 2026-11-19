@@ -1,0 +1,11 @@
+# .NET
+bin/
+obj/
+publicado/
+autoprueba/
+*.user
+# Android / Gradle
+.gradle/
+build/
+local.properties
+android/app/libs/*.aar
