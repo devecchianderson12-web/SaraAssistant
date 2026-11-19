@@ -57,6 +57,8 @@ import kotlinx.coroutines.launch
  * Inyección de dependencias manual: un único grafo de objetos por proceso. Se eligió en lugar de
  * un framework porque el grafo es pequeño y así se evita procesamiento de anotaciones.
  */
+private const val BLUETOOTH_VOICE_GAIN = 2f
+
 class AppContainer(private val app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -69,7 +71,10 @@ class AppContainer(private val app: Application) {
     val connectivity = ConnectivityMonitor(app)
     /** Micrófono de las órdenes con Bluetooth conectado (auto, auriculares). */
     val micRouter = com.sara.assistant.audio.MicRouter(app, { settings.settings.value.micChoice }, logger)
-    val microphone = MicrophoneSource(app, levels, { settings.settings.value.echoCancellation }) { micRouter.captureDevice() }
+    // Con Bluetooth (el auto) el teléfono queda lejos: la voz se refuerza al doble.
+    val microphone = MicrophoneSource(app, levels, { settings.settings.value.echoCancellation }, { micRouter.captureDevice() }) {
+        if (micRouter.bluetoothAudioConnected()) BLUETOOTH_VOICE_GAIN else 1f
+    }
     private val phraseCache = com.sara.assistant.voice.PhraseCache(app)
     val voskModels = VoskModelManager(app, logger)
     val porcupineFiles = PorcupineFiles(app)
@@ -155,8 +160,10 @@ class AppContainer(private val app: Application) {
     val voskWake = VoskWakeWordEngine(voskModels, microphone, logger)
     private val porcupineWake = PorcupineWakeWordEngine(app, secrets, porcupineFiles, microphone)
     val voskRecognizer = VoskSpeechRecognitionEngine(voskModels, microphone) { settings.settings.value.voiceBoost }
-    private val onDeviceRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = true, levels)
-    private val systemRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = false, levels)
+    private val onDeviceRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = true, levels, null)
+    /** Con Bluetooth el reconocedor de Google recibe el audio ya reforzado (Android 13+; si no lo acepta, graba él). */
+    private val boostedFeed = com.sara.assistant.speech.ExternalAudio(app, microphone, logger) { micRouter.bluetoothAudioConnected() }
+    private val systemRecognizer = AndroidSpeechRecognitionEngine(app, onDevice = false, levels, boostedFeed)
     private val azureRecognizer = AzureSpeechRecognitionEngine(azure, microphone)
     val offlineTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = false)
     val systemNetworkTts = AndroidTtsVoiceEngine(app, tts, focus, phraseCache, networkVoices = true)

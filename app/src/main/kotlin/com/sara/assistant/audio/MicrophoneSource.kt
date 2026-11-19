@@ -38,6 +38,8 @@ class MicrophoneSource(
     private val echoCancellationEnabled: () -> Boolean = { true },
     /** Micrófono a usar (del teléfono o del Bluetooth); null = el que elija Android. */
     private val preferredDevice: suspend () -> android.media.AudioDeviceInfo? = { null },
+    /** Refuerzo de la voz (×2 con Bluetooth conectado: en el auto el teléfono queda lejos). */
+    private val gain: () -> Float = { 1f },
 ) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
 
@@ -111,6 +113,8 @@ class MicrophoneSource(
                     allSilent = false
                 }
                 _silenced.value = silentChunks >= SILENCED_AFTER_CHUNKS
+                val g = gain()
+                if (g > 1.01f) boost(buffer, read, g)
                 levels.update(AudioLevelMeter.levelOfPcm16(buffer, read))
                 if (!onChunk(buffer, read)) break
             }
@@ -132,6 +136,21 @@ class MicrophoneSource(
         }
         if (NoiseSuppressor.isAvailable()) {
             runCatching { NoiseSuppressor.create(sessionId)?.apply { enabled = true } }.getOrNull()?.let(::add)
+        }
+    }
+
+    /** Sube el volumen en el lugar, con un limitador suave (comprime en vez de recortar). */
+    private fun boost(pcm: ByteArray, length: Int, gain: Float) {
+        val knee = 0.7f
+        var i = 0
+        while (i + 1 < length) {
+            val v = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort() / 32768f * gain
+            val a = kotlin.math.abs(v)
+            val limited = if (a <= knee) v else kotlin.math.sign(v) * (knee + (1 - knee) * kotlin.math.tanh((a - knee) / (1 - knee)))
+            val out = (limited * 32767f).toInt().coerceIn(-32768, 32767)
+            pcm[i] = out.toByte()
+            pcm[i + 1] = (out shr 8).toByte()
+            i += 2
         }
     }
 
