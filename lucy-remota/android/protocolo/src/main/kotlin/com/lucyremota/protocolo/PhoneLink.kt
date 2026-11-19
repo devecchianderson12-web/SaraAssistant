@@ -1,0 +1,398 @@
+package com.lucyremota.protocolo
+
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.Closeable
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.SocketException
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+
+/** La PC vinculada: su clave pública queda fija (nadie más puede hacerse pasar por ella). */
+data class PairedPc(val id: String, val name: String, val publicKey: ByteArray)
+
+/** Dónde guarda el teléfono su identidad y la PC vinculada. */
+interface PhoneStore {
+    val deviceId: String
+    val deviceName: String
+    var pairedPc: PairedPc?
+}
+
+/** Una intención que la PC sabe hacer (del catálogo que manda al conectarse). */
+data class RemoteIntent(val name: String, val module: String, val description: String, val risk: String, val params: Set<String>)
+
+sealed interface LinkState {
+    data object Unpaired : LinkState
+    /** Esperando que la PC (con el QR o el código) se conecte. */
+    data class Pairing(val pcName: String?) : LinkState
+    data class PairingFailed(val reason: String) : LinkState
+    /** Vinculada, buscando la PC en la red. */
+    data class Searching(val pcName: String) : LinkState
+    data class Connected(val pcName: String, val address: String, val latencyMs: Long) : LinkState
+}
+
+/** Estado de una orden (los mismos que la PC). */
+data class CommandStatus(val commandId: String, val status: String, val message: String, val result: JSONObject?, val code: String?) {
+    val final: Boolean get() = status != RECEIVED && status != PROCESSING
+
+    companion object {
+        const val RECEIVED = "received"
+        const val PROCESSING = "processing"
+        const val SUCCESS = "success"
+        const val ERROR = "error"
+        const val UNSUPPORTED = "unsupported"
+        const val INVALID = "invalid"
+        const val EXPIRED = "expired"
+        const val NEEDS_CONFIRMATION = "needs_confirmation"
+        /** Del lado del teléfono: no se pudo mandar (sin conexión) o la PC no contestó. */
+        const val NOT_CONNECTED = "not_connected"
+        const val NO_ANSWER = "no_answer"
+    }
+}
+
+/**
+ * Conexión del teléfono (Emisor) con la PC (Receptor).
+ *
+ * La PC anuncia por UDP que está; el teléfono contesta con su puerto y la PC se conecta a él (así la
+ * PC no necesita permisos de administrador para el firewall). Después: negociación con claves,
+ * mensajes cifrados, latido y reconexión sola.
+ */
+class PhoneLink(
+    private val store: PhoneStore,
+    private val identity: DeviceIdentity,
+    private val log: (String) -> Unit = {},
+    private val discoveryPort: Int = Proto.DISCOVERY_PORT,
+    private val tcpPort: Int = Proto.PHONE_PORT,
+) : Closeable {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _state = MutableStateFlow<LinkState>(LinkState.Unpaired)
+    val state: StateFlow<LinkState> = _state.asStateFlow()
+    private val _catalog = MutableStateFlow<List<RemoteIntent>>(emptyList())
+    /** Lo que sabe hacer la PC conectada. */
+    val catalog: StateFlow<List<RemoteIntent>> = _catalog.asStateFlow()
+
+    @Volatile private var pendingQr: PairingQr? = null
+    @Volatile private var pendingCode: String? = null
+    @Volatile private var session: Session? = null
+    @Volatile private var handshakeAt = 0L
+    private var udp: DatagramSocket? = null
+    private var server: ServerSocket? = null
+    private val waiters = ConcurrentHashMap<String, (CommandStatus) -> Unit>()
+
+    /** Puerto TCP en el que escucha (el habitual, u otro si estaba ocupado). */
+    val listeningPort: Int get() = server?.localPort ?: -1
+
+    fun start() {
+        refreshState()
+        server = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(tcpPort)) } }
+            .getOrElse { ServerSocket(0) }
+        udp = DatagramSocket(null).apply { reuseAddress = true; broadcast = true; bind(InetSocketAddress(discoveryPort)) }
+        scope.launch { acceptLoop() }
+        scope.launch { beaconLoop() }
+        log("Escuchando la PC (UDP $discoveryPort, TCP $listeningPort)")
+    }
+
+    private fun refreshState() {
+        val pc = store.pairedPc
+        val s = session
+        _state.value = when {
+            s != null -> LinkState.Connected(s.pcName, s.address, s.latencyMs)
+            pendingQr != null -> LinkState.Pairing(pendingQr?.pcName)
+            pendingCode != null -> LinkState.Pairing(null)
+            pc != null -> LinkState.Searching(pc.name)
+            else -> LinkState.Unpaired
+        }
+    }
+
+    /** Escaneaste el QR de la PC: queda esperando que se conecte (la PC lo hace sola). */
+    fun pairWithQr(qr: PairingQr) {
+        pendingCode = null
+        pendingQr = qr
+        session?.close()
+        refreshState()
+    }
+
+    /** Escribiste el código que muestra la PC. */
+    fun pairWithCode(code: String) {
+        pendingQr = null
+        pendingCode = PairingCodes.normalizeManual(code)
+        session?.close()
+        refreshState()
+    }
+
+    fun cancelPairing() {
+        pendingQr = null
+        pendingCode = null
+        refreshState()
+    }
+
+    /** Desvincula: avisa a la PC (si está conectada) y borra su clave. */
+    suspend fun unpair() {
+        session?.let { runCatching { it.send(JSONObject().put("t", "unpair")) }; it.close() }
+        store.pairedPc = null
+        _catalog.value = emptyList()
+        refreshState()
+    }
+
+    // ------------------------------------------------------------------ Anuncios de la PC
+
+    private fun beaconLoop() {
+        val buf = ByteArray(2048)
+        val socket = udp ?: return
+        while (scope.isActive) {
+            val packet = DatagramPacket(buf, buf.size)
+            try { socket.receive(packet) } catch (e: SocketException) { return } catch (e: Exception) { continue }
+            val msg = runCatching { JSONObject(String(packet.data, 0, packet.length)) }.getOrNull() ?: continue
+            // Ya conectada o conectándose: no se contesta (una sola conexión con la PC).
+            if (msg.optString("t") != "beacon" || session != null || System.currentTimeMillis() - handshakeAt < 8_000) continue
+            val pc = msg.optString("pc")
+            val interested = store.pairedPc?.id == pc || pendingQr?.pcId == pc || (pendingCode != null && msg.optBoolean("pairing"))
+            if (!interested) continue
+            val reply = JSONObject().put("lr", Proto.MAJOR).put("t", "here").put("pc", pc).put("dev", store.deviceId).put("port", listeningPort)
+                .toString().toByteArray()
+            runCatching { socket.send(DatagramPacket(reply, reply.size, packet.socketAddress)) }
+        }
+    }
+
+    // ------------------------------------------------------------------ Conexión de la PC
+
+    private fun acceptLoop() {
+        val srv = server ?: return
+        while (scope.isActive) {
+            val socket = try { srv.accept() } catch (e: SocketException) { return } catch (e: Exception) { continue }
+            scope.launch { handle(socket) }
+        }
+    }
+
+    private suspend fun handle(socket: Socket) {
+        // Otra conexión de la misma PC negociando ahora: ésta sobra.
+        if (System.currentTimeMillis() - handshakeAt < 8_000 && session == null) { runCatching { socket.close() }; return }
+        handshakeAt = System.currentTimeMillis()
+        socket.tcpNoDelay = true
+        socket.soTimeout = 10_000
+        val input = socket.getInputStream().buffered()
+        val output = socket.getOutputStream()
+        try {
+            val hello = JSONObject(String(Wire.read(input)))
+            if (hello.optString("t") != "hello") throw ProtocolException("se esperaba «hello»")
+            if (hello.optInt("v") != Proto.MAJOR) throw ProtocolException("versión de protocolo incompatible")
+            val pcId = hello.getString("pc")
+            val pcName = hello.optString("name", "Computadora")
+            val pcKey = B64.dec(hello.getString("pc_key"))
+            val pcEph = B64.dec(hello.getString("eph"))
+            val pcNonce = B64.dec(hello.getString("nonce"))
+            val paired = store.pairedPc
+            val qr = pendingQr
+            val code = pendingCode
+            var mode: String? = null
+            var token: ByteArray? = null
+            when {
+                paired != null && paired.id == pcId -> if (!Crypto.constantEquals(paired.publicKey, pcKey)) {
+                    log("Rechazada: la clave de la PC cambió (¿otra computadora con el mismo nombre?)")
+                    socket.close(); return
+                }
+                qr != null && qr.pcId == pcId -> {
+                    if (!Crypto.constantEquals(Crypto.sha256(pcKey), qr.fingerprint)) {
+                        log("Rechazada: la PC no coincide con el QR")
+                        socket.close(); return
+                    }
+                    mode = "qr"; token = qr.token
+                }
+                code != null -> { mode = "code"; token = PairingCodes.manualToken(code) }
+                else -> { socket.close(); return }
+            }
+            val eph = EphemeralKey()
+            val nonce = Crypto.randomBytes(32)
+            val transcript = Transcript.hash(pcId, pcKey, pcEph, pcNonce, store.deviceId, identity.publicKeySpki, eph.publicSpki, nonce)
+            val auth = JSONObject().put("t", "auth").put("v", Proto.MAJOR).put("minor", Proto.MINOR).put("dev", store.deviceId)
+                .put("name", store.deviceName).put("dev_key", B64.enc(identity.publicKeySpki)).put("eph", B64.enc(eph.publicSpki))
+                .put("nonce", B64.enc(nonce)).put("now", System.currentTimeMillis())
+                .put("sig", B64.enc(identity.sign(Transcript.role("dev", transcript))))
+            if (token != null) auth.put("pair", B64.enc(Transcript.pairProof(token, "dev", transcript))).put("pair_mode", mode)
+            Wire.write(output, auth.toString().toByteArray())
+            val answer = JSONObject(String(Wire.read(input)))
+            if (answer.optString("t") != "auth_ok") {
+                val reason = answer.optString("reason", "rechazada")
+                log("La PC rechazó la conexión: $reason")
+                if (reason == "bad_pairing_code" || (reason == "unauthorized" && token != null)) {
+                    // Código equivocado o vencido: se deja de intentar (no gasta los intentos de la PC).
+                    pendingQr = null; pendingCode = null
+                    _state.value = LinkState.PairingFailed(if (mode == "code") "El código no coincide o venció." else "El QR venció. Generá uno nuevo en la PC.")
+                } else if (reason == "unauthorized" && paired?.id == pcId) {
+                    // La PC ya no nos tiene vinculados (la desvincularon desde allá).
+                    store.pairedPc = null
+                    refreshState()
+                }
+                socket.close(); return
+            }
+            if (!Crypto.verify(pcKey, Transcript.role("pc", transcript), B64.dec(answer.getString("sig")))) throw ProtocolException("firma de la PC inválida")
+            if (mode == "code") {
+                val proof = answer.optString("pair").takeIf { it.isNotEmpty() }?.let(B64::dec)
+                if (proof == null || !Crypto.constantEquals(proof, Transcript.pairProof(token!!, "pc", transcript))) throw ProtocolException("la PC no conoce el código")
+            }
+            val (pcToDev, devToPc) = Transcript.sessionKeys(eph.agree(pcEph), transcript)
+            if (token != null) {
+                store.pairedPc = PairedPc(pcId, pcName, pcKey)
+                pendingQr = null; pendingCode = null
+                log("Vinculada con $pcName")
+            }
+            socket.soTimeout = 0
+            val s = Session(socket, input, output, SessionCipher(devToPc, pcToDev), pcName, socket.inetAddress.hostAddress ?: "")
+            session?.close()
+            session = s
+            handshakeAt = 0L
+            refreshState()
+            log("Conectada con $pcName (${s.address})")
+            try { s.run() } finally {
+                if (session === s) session = null
+                refreshState()
+                log("Se cortó la conexión con $pcName")
+            }
+        } catch (e: Exception) {
+            log("Conexión fallida: ${e.message}")
+            runCatching { socket.close() }
+        } finally {
+            handshakeAt = 0L
+        }
+    }
+
+    // ------------------------------------------------------------------ Órdenes
+
+    /**
+     * Manda una orden y espera el resultado final. [onStatus] recibe cada estado (recibida, en
+     * curso…). Si la conexión se corta antes de que la PC la reciba, se reintenta con el mismo id
+     * mientras no venza (la PC no la ejecuta dos veces).
+     */
+    suspend fun send(
+        intent: String,
+        params: JSONObject = JSONObject(),
+        confirmed: Boolean = false,
+        expiresMs: Int = 10_000,
+        onStatus: (CommandStatus) -> Unit = {},
+    ): CommandStatus {
+        val id = UUID.randomUUID().toString()
+        val sentAt = System.currentTimeMillis()
+        val cmd = JSONObject().put("t", "command").put("v", Proto.MAJOR).put("command_id", id).put("intent", intent)
+            .put("params", params).put("sent_at", sentAt).put("expires_ms", expiresMs).put("confirmed", confirmed)
+        val final = CompletableDeferred<CommandStatus>()
+        var received = false
+        waiters[id] = { st ->
+            if (st.status == CommandStatus.RECEIVED) received = true
+            onStatus(st)
+            if (st.final) final.complete(st)
+        }
+        try {
+            while (!final.isCompleted) {
+                val s = session ?: awaitSession(sentAt + expiresMs - System.currentTimeMillis())
+                if (s == null) return CommandStatus(id, CommandStatus.NOT_CONNECTED, "La computadora no está conectada.", null, null)
+                runCatching { s.send(cmd) }
+                // Si la PC la recibió, se espera el resultado (la ejecución puede tardar).
+                val answer = withTimeoutOrNull(if (received) 30_000 else 4_000) { final.await() }
+                if (answer != null) return answer
+                if (received) return CommandStatus(id, CommandStatus.NO_ANSWER, "La computadora no contestó.", null, null)
+                if (System.currentTimeMillis() - sentAt > expiresMs) return CommandStatus(id, CommandStatus.NO_ANSWER, "La computadora no contestó.", null, null)
+                // No llegó: se reintenta con el mismo id (si llegó y se perdió la respuesta, la PC devuelve el resultado guardado).
+            }
+            return final.await()
+        } finally {
+            waiters.remove(id)
+        }
+    }
+
+    private suspend fun awaitSession(maxMs: Long): Session? {
+        if (store.pairedPc == null || maxMs <= 0) return null
+        return withTimeoutOrNull(maxMs.coerceAtMost(6_000)) {
+            while (session == null) delay(100)
+            session
+        }
+    }
+
+    // ------------------------------------------------------------------ Sesión
+
+    private inner class Session(
+        private val socket: Socket,
+        private val input: java.io.InputStream,
+        private val output: java.io.OutputStream,
+        private val cipher: SessionCipher,
+        val pcName: String,
+        val address: String,
+    ) {
+        @Volatile var latencyMs = 0L
+        private var pingJob: Job? = null
+        private var lastPingAt = 0L
+
+        fun send(msg: JSONObject) = synchronized(this) { Wire.write(output, cipher.seal(msg.toString().toByteArray())) }
+
+        fun close() {
+            pingJob?.cancel()
+            runCatching { socket.close() }
+        }
+
+        fun run() {
+            socket.soTimeout = 45_000 // sin nada en 45 s (la PC manda un latido cada 15 s): se corta y se reconecta
+            pingJob = scope.launch {
+                while (isActive) {
+                    delay(20_000)
+                    lastPingAt = System.currentTimeMillis()
+                    runCatching { send(JSONObject().put("t", "ping").put("at", lastPingAt)) }
+                }
+            }
+            try {
+                while (true) {
+                    val msg = JSONObject(String(cipher.open(Wire.read(input))))
+                    when (msg.optString("t")) {
+                        "capabilities" -> _catalog.value = parseCatalog(msg.optJSONArray("intents"))
+                        "status" -> {
+                            val st = CommandStatus(
+                                msg.optString("command_id"), msg.optString("status"), msg.optString("message"),
+                                msg.optJSONObject("result"), msg.optString("code").ifEmpty { null },
+                            )
+                            waiters[st.commandId]?.invoke(st)
+                        }
+                        "ping" -> send(JSONObject().put("t", "pong").put("at", msg.optLong("at")))
+                        "pong" -> if (msg.optLong("at") == lastPingAt) { latencyMs = System.currentTimeMillis() - lastPingAt; refreshState() }
+                        "unpaired" -> {
+                            log("La PC desvinculó este teléfono")
+                            store.pairedPc = null
+                            _catalog.value = emptyList()
+                            return
+                        }
+                        "bye" -> return
+                    }
+                }
+            } catch (e: Exception) {
+                log("Sesión terminada: ${e.message}")
+            } finally {
+                close()
+            }
+        }
+    }
+
+    private fun parseCatalog(arr: JSONArray?): List<RemoteIntent> = (0 until (arr?.length() ?: 0)).mapNotNull { i ->
+        val o = arr!!.optJSONObject(i) ?: return@mapNotNull null
+        RemoteIntent(o.optString("intent"), o.optString("module"), o.optString("description"), o.optString("risk"), o.optJSONObject("params")?.keySet() ?: emptySet())
+    }
+
+    override fun close() {
+        session?.close()
+        runCatching { udp?.close() }
+        runCatching { server?.close() }
+        scope.coroutineContext[Job]?.cancel()
+    }
+}

@@ -165,11 +165,13 @@ public sealed class PcLink : IAsyncDisposable
             var dev = msg.Str("dev");
             if (dev != null && sessions.ContainsKey(dev)) continue;
             var endpoint = new IPEndPoint(r.RemoteEndPoint.Address, port);
-            if (!connecting.TryAdd(endpoint.ToString(), 0)) continue;
+            // Un teléfono puede contestar por varias redes a la vez: una sola conexión por teléfono.
+            var key = dev ?? endpoint.ToString();
+            if (!connecting.TryAdd(key, 0)) continue;
             _ = Task.Run(async () =>
             {
                 try { await ConnectAsync(endpoint, ct); }
-                finally { connecting.TryRemove(endpoint.ToString(), out _); }
+                finally { connecting.TryRemove(key, out _); }
             }, ct);
         }
     }
