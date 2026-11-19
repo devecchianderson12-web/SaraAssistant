@@ -259,7 +259,7 @@ sealed class PhonesDialog : LucyForm
     internal static Control Buttons(params PillButton[] buttons)
     {
         var row = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, BackColor = Color.Transparent, Padding = new Padding(10, 0, 10, 12) };
-        foreach (var b in buttons.Reverse()) { b.Size = b.GetPreferredSize(Size.Empty); row.Controls.Add(b); }
+        foreach (var b in Enumerable.Reverse(buttons)) { b.Size = b.GetPreferredSize(Size.Empty); row.Controls.Add(b); }
         return row;
     }
 
