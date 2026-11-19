@@ -44,7 +44,7 @@ jobs:
       - name: Nombre del archivo
         shell: pwsh
         run: |
-          $name = "LucyRemota-Receptor-Windows-v1.0.${{ github.run_number }}.exe"
+          $name = "LucyRemota-v1.0.${{ github.run_number }}.exe"
           Copy-Item publicado/LucyRemota.exe $name
           "{0}: {1:N1} MB" -f $name, ((Get-Item $name).Length / 1MB)
 
@@ -53,7 +53,7 @@ jobs:
         run: |
           $dir = Join-Path $PWD "autoprueba"
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          $p = Start-Process -FilePath "LucyRemota-Receptor-Windows-v1.0.${{ github.run_number }}.exe" -ArgumentList "--autoprueba", "`"$dir`"" -Wait -PassThru
+          $p = Start-Process -FilePath "LucyRemota-v1.0.${{ github.run_number }}.exe" -ArgumentList "--autoprueba", "`"$dir`"" -Wait -PassThru
           "Arranque + autoprueba: $($sw.ElapsedMilliseconds) ms"
           Get-Content (Join-Path $dir "autoprueba.txt")
           if ($p.ExitCode -ne 0) { throw "La autoprueba falló ($($p.ExitCode))" }
@@ -80,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LucyRemota-Receptor
-          path: lucy-remota/windows/LucyRemota-Receptor-Windows-*.exe
+          path: lucy-remota/windows/LucyRemota-*.exe
           if-no-files-found: error
 
   emisor:
@@ -125,14 +125,14 @@ jobs:
 
       - name: Nombre del archivo
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "LucyRemota-Emisor-Android-v1.0.${{ github.run_number }}.apk"
-          ls -la LucyRemota-Emisor-Android-*.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "LucyRemota-v1.0.${{ github.run_number }}.apk"
+          ls -la LucyRemota-*.apk
 
       - name: Guardar el APK
         uses: actions/upload-artifact@v4
         with:
           name: LucyRemota-Emisor
-          path: lucy-remota/android/LucyRemota-Emisor-Android-*.apk
+          path: lucy-remota/android/LucyRemota-*.apk
           if-no-files-found: error
 
   emisor-emulador:
@@ -173,7 +173,7 @@ jobs:
           script: |
             adb wait-for-device
             for i in $(seq 1 30); do adb shell pm path android >/dev/null 2>&1 && break; sleep 2; done
-            for i in 1 2 3; do adb install -r LucyRemota-Emisor-Android-*.apk && break; sleep 5; done
+            for i in 1 2 3; do adb install -r LucyRemota-*.apk && break; sleep 5; done
             adb shell pm grant com.lucyremota.emisor android.permission.RECORD_AUDIO || true
             adb shell pm grant com.lucyremota.emisor android.permission.POST_NOTIFICATIONS || true
             adb logcat -c
@@ -234,7 +234,7 @@ jobs:
           TAG=$(gh api "repos/$REPO/releases/latest" -q .tag_name)
           echo "Release: $TAG"
           for a in $(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name' | grep -E '^LucyRemota-' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
-          gh release upload "$TAG" LucyRemota-Receptor-Windows-*.exe LucyRemota-Emisor-Android-*.apk -R "$REPO" --clobber
+          gh release upload "$TAG" LucyRemota-*.exe LucyRemota-*.apk -R "$REPO" --clobber
           FILES=$(gh api "repos/$REPO/releases/tags/$TAG" -q '[.assets[].name] | join("\n- ")')
-          printf 'Sara para Android, Lucy para Windows y Lucy Remota (el teléfono controla la computadora).\n\n- %s\n\nSara: SaraAssistant-…apk (Android).\nLucy: Lucy-Windows-…exe (Windows).\nLucy Remota: LucyRemota-Emisor-…apk en el teléfono + LucyRemota-Receptor-…exe en la computadora.\n' "$FILES" > notas.md
+          printf 'Sara para Android, Lucy para Windows y Lucy Remota (el teléfono controla la computadora).\n\n- %s\n\nSara: SaraAssistant-…apk (Android).\nLucy: Lucy-Windows-…exe (Windows).\nLucy Remota: LucyRemota-…apk en el teléfono + LucyRemota-…exe en la computadora.\n' "$FILES" > notas.md
           gh release edit "$TAG" -R "$REPO" --title "SaraAssistant" --notes-file notas.md

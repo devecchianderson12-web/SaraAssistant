@@ -11,16 +11,16 @@ existe. Las tres apps pueden convivir.
 
 | App | Archivo en el release | Dónde va |
 |---|---|---|
-| **Lucy Remota · Emisor** | `LucyRemota-Emisor-Android-v1.0.N.apk` | El teléfono (Android 10 o más nuevo) |
-| **Lucy Remota · Receptor** | `LucyRemota-Receptor-Windows-v1.0.N.exe` | La computadora (Windows 10/11, 64 bits) |
+| **Lucy Remota · Emisor** | `LucyRemota-v1.0.N.apk` | El teléfono (Android 10 o más nuevo) |
+| **Lucy Remota · Receptor** | `LucyRemota-v1.0.N.exe` | La computadora (Windows 10/11, 64 bits) |
 
 ## Instalar y vincular (una sola vez)
 
-1. **En la computadora:** bajá `LucyRemota-Receptor-Windows-…exe` y abrilo. No se instala ni pide
+1. **En la computadora:** bajá `LucyRemota-…exe` y abrilo. No se instala ni pide
    administrador; podés tenerlo en cualquier carpeta o en un pendrive (guarda sus datos al lado, en
    `LucyRemota-datos`).
 2. Tocá **«Vincular teléfono»**: aparece un QR y un código de 8 letras (valen 5 minutos).
-3. **En el teléfono:** instalá `LucyRemota-Emisor-Android-…apk`, abrilo, dale permiso al micrófono y
+3. **En el teléfono:** instalá `LucyRemota-…apk`, abrilo, dale permiso al micrófono y
    tocá **«Escanear QR»** (o «Escribir código» si no querés usar la cámara).
 4. Listo: en los dos aparece «Conectada». Desde ahí se reconectan solos cada vez que estén en la
    misma red.

@@ -17,7 +17,7 @@ import java.net.URL
 
 /**
  * Actualizaciones de Lucy Remota · Emisor: busca en el release «SaraAssistant» el APK cuyo nombre
- * empieza con «LucyRemota-Emisor» (nunca el de Sara) y lo instala si es más nuevo.
+ * empieza con «LucyRemota-» (nunca el de Sara) y lo instala si es más nuevo.
  */
 class Updater(private val context: Context, private val logger: SaraLogger) {
     data class Release(val version: Int, val url: String, val name: String)
@@ -82,5 +82,5 @@ class Updater(private val context: Context, private val logger: SaraLogger) {
         }.getOrElse { "No pude actualizar: ${it.message}" }.also { _progress.value = null }
     }
 
-    companion object { const val PREFIX = "LucyRemota-Emisor" }
+    companion object { const val PREFIX = "LucyRemota-" }
 }
