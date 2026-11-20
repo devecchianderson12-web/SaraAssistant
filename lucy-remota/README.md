@@ -35,12 +35,12 @@ conexión directa.
 El relé es un Worker de Cloudflare gratis en tu cuenta, con el código de [`relay/`](relay/):
 
 1. En Cloudflare: **Workers & Pages › Create › Import a repository**, elegí este repositorio.
-2. Nombre del proyecto `lucy-remota-relay`, carpeta raíz (*Root directory*) `lucy-remota/relay`,
+2. Nombre del proyecto `lucy-relay`, carpeta raíz (*Root directory*) `lucy-remota/relay`,
    rama `main`. **Deploy**.
-3. Abrí `https://lucy-remota-relay.<tu-subdominio>.workers.dev/`: tiene que decir
+3. Abrí `https://lucy-relay.<tu-subdominio>.workers.dev/`: tiene que decir
    `lucy-remota-relay ok`.
 
-Las apps usan `https://lucy-remota-relay.devecchianderson12.workers.dev`. Para usar otra dirección
+Las apps usan `https://lucy-relay.devecchianderson12.workers.dev`. Para usar otra dirección
 en la PC, escribila en `LucyRemota-datos/relay.txt` (o `no` para usar sólo la red local).
 
 ## Usarla
