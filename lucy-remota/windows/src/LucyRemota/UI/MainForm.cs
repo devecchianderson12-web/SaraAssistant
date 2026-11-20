@@ -13,6 +13,10 @@ sealed class MainForm : LucyForm
     readonly PcLink link;
     readonly IPcStore store;
     readonly History history;
+    readonly Modules.AppsModule apps;
+    readonly PillButton updateButton = new("Actualizar") { Primary = true, Visible = false };
+    Updater.Release? pendingUpdate;
+    bool installing;
     readonly SphereView sphere = new() { Dock = DockStyle.Fill };
     readonly Label status = Theme.Label("", 14f, style: FontStyle.Bold);
     readonly Label detail = Theme.Label("", 10.5f, Theme.Muted);
@@ -41,8 +45,9 @@ sealed class MainForm : LucyForm
         [Status.Unauthorized] = ("No autorizado", Theme.Bad), [Status.Busy] = ("Ocupada", Theme.Warn),
     };
 
-    public MainForm(PcLink link, IPcStore store, History history, bool startHidden)
+    public MainForm(PcLink link, IPcStore store, History history, Modules.AppsModule apps, bool startHidden)
     {
+        this.apps = apps;
         this.link = link;
         this.store = store;
         this.history = history;
@@ -68,9 +73,12 @@ sealed class MainForm : LucyForm
         phones.Click += (_, _) => new PhonesDialog(link, store).ShowDialog(this);
         var orders = new PillButton("Historial");
         orders.Click += (_, _) => new HistoryDialog(history).ShowDialog(this);
+        var settings = new PillButton("Ajustes");
+        settings.Click += (_, _) => OpenSettings();
         var more = new PillButton("Más");
         more.Click += (_, _) => MoreMenu().Show(more, new Point(0, more.Height));
-        foreach (var b in new Control[] { pair, phones, orders, more }) { b.Size = b.GetPreferredSize(Size.Empty); buttons.Controls.Add(b); }
+        updateButton.Click += async (_, _) => { if (pendingUpdate != null) await InstallUpdateAsync(pendingUpdate); };
+        foreach (var b in new PillButton[] { pair, phones, orders, settings, more, updateButton }) { b.Size = b.GetPreferredSize(Size.Empty); buttons.Controls.Add(b); }
         bottom.Controls.Add(buttons);
 
         Controls.Add(sphere);
@@ -81,6 +89,7 @@ sealed class MainForm : LucyForm
         var menu = Menus.Dark();
         menu.Items.Add("Abrir", null, (_, _) => ShowFromTray());
         menu.Items.Add("Vincular teléfono", null, (_, _) => { ShowFromTray(); OpenPairing(); });
+        menu.Items.Add("Ajustes", null, (_, _) => { ShowFromTray(); OpenSettings(); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Salir", null, (_, _) => ExitApp());
         tray.ContextMenuStrip = menu;
@@ -95,11 +104,67 @@ sealed class MainForm : LucyForm
             tray.ShowBalloonTip(3000, "Lucy Remota", $"Vinculada con {d.Name}.", ToolTipIcon.Info);
             RefreshStatus();
         });
-        history.Added += r => Ui(() => { sphere.Pulse(); RefreshStatus(); });
+        history.Added += r => Ui(() =>
+        {
+            sphere.Pulse();
+            RefreshStatus();
+            if (AppSettings.Current.NotifyOrders)
+                tray.ShowBalloonTip(2500, $"Lucy Remota · {Friendly.GetValueOrDefault(r.Intent, r.Intent)}", r.Message, r.Status == Status.Success ? ToolTipIcon.Info : ToolTipIcon.Warning);
+        });
         RefreshStatus();
         var timer = new System.Windows.Forms.Timer { Interval = 10_000 };
         timer.Tick += (_, _) => RefreshStatus();
         timer.Start();
+
+        // Versiones nuevas: al rato de abrir y después cada 6 horas (si está activado en Ajustes).
+        var updates = new System.Windows.Forms.Timer { Interval = 15_000 };
+        updates.Tick += async (_, _) =>
+        {
+            updates.Interval = (int)TimeSpan.FromHours(6).TotalMilliseconds;
+            if (AppSettings.Current.CheckUpdates) await CheckUpdatesAsync();
+        };
+        updates.Start();
+    }
+
+    void OpenSettings()
+    {
+        using var dialog = new SettingsDialog(this, apps, store);
+        dialog.ShowDialog(this);
+        RefreshStatus();
+    }
+
+    async Task CheckUpdatesAsync()
+    {
+        var release = await Updater.AvailableAsync();
+        if (release == null || IsDisposed || pendingUpdate?.Version == release.Version) return;
+        pendingUpdate = release;
+        updateButton.Text = $"Actualizar a V{release.Version}";
+        updateButton.Size = updateButton.GetPreferredSize(Size.Empty);
+        updateButton.Visible = true;
+        tray.ShowBalloonTip(5000, "Lucy Remota", $"Hay una versión nueva (V{release.Version}). Abrí Lucy Remota y tocá «Actualizar».", ToolTipIcon.Info);
+    }
+
+    /// <summary>Baja la versión nueva, la abre y cierra ésta. false si no se pudo (avisa por qué).</summary>
+    internal async Task<bool> InstallUpdateAsync(Updater.Release release)
+    {
+        if (installing) return false;
+        if (MessageBox.Show(this, $"¿Actualizo Lucy Remota a la V{release.Version}? Se cierra un momento y se vuelve a abrir sola; los teléfonos vinculados se mantienen.",
+                "Lucy Remota", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+        installing = true;
+        ShowFromTray();
+        status.Text = "Bajando la actualización…";
+        status.ForeColor = Theme.Text;
+        var progress = new Progress<int>(p => status.Text = $"Bajando la actualización… {p} %");
+        var error = await Updater.InstallAsync(release, progress);
+        installing = false;
+        if (error == null)
+        {
+            ExitApp();
+            return true;
+        }
+        RefreshStatus();
+        MessageBox.Show(this, error, "Lucy Remota", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return false;
     }
 
     static Control Centered(Control c)
@@ -114,9 +179,13 @@ sealed class MainForm : LucyForm
     ContextMenuStrip MoreMenu()
     {
         var m = Menus.Dark();
-        var auto = new ToolStripMenuItem("Iniciar con Windows") { Checked = Autostart.Enabled, CheckOnClick = true };
-        auto.CheckedChanged += (_, _) => { try { Autostart.Enabled = auto.Checked; } catch (Exception e) { Log.Write("Inicio automático: " + e.Message); } };
-        m.Items.Add(auto);
+        m.Items.Add("Buscar actualizaciones", null, async (_, _) =>
+        {
+            var latest = await Updater.LatestAsync();
+            if (latest == null) MessageBox.Show(this, "No pude buscar actualizaciones. Revisá la conexión a Internet.", "Lucy Remota");
+            else if (latest.Version <= Updater.CurrentVersion) MessageBox.Show(this, $"Lucy Remota está al día (V{Updater.CurrentVersion}).", "Lucy Remota");
+            else await InstallUpdateAsync(latest);
+        });
         m.Items.Add("Ver registro", null, (_, _) => Modules.M.ShellOpen(Paths.File("registro.txt")));
         m.Items.Add("Abrir la carpeta de datos", null, (_, _) => Modules.M.ShellOpen(Paths.Data));
         m.Items.Add(new ToolStripSeparator());
@@ -179,6 +248,7 @@ sealed class MainForm : LucyForm
 
     void RefreshStatus()
     {
+        if (installing) return;
         var connected = link.Connected;
         var devices = store.Devices;
         if (devices.Count == 0)

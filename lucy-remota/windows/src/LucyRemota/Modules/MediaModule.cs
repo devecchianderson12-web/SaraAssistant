@@ -91,6 +91,20 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
             M.ShellOpen("https://music.youtube.com/");
             return Outcome.Ok("No encontré una app de música instalada: abrí YouTube Music en el navegador.");
         }
+        if (WebMusic.WebAppId(music.AppId) != null)
+        {
+            // YouTube Music instalada: la ventana que ya está abierta, o se abre la app (nunca una pestaña).
+            var (h, fresh) = await OpenWebApp(music, ct);
+            if (h != 0)
+            {
+                await WebMusic.FocusAsync(h, ct);
+                var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(fresh ? 12 : 6), ct);
+                return played != null
+                    ? Outcome.Ok($"Listo, puse música en {music.Name}.", new JsonObject { ["app"] = music.Name })
+                    : Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
+            }
+            return Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
+        }
         apps.Launch(music);
         // Spotify sigue con lo último que escuchaste; las demás quedan abiertas para elegir.
         if (music.Name.Contains("spotify", StringComparison.OrdinalIgnoreCase))
@@ -105,22 +119,45 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
         return Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
     }
 
+    /// <summary>La ventana de la app web: la abierta o, si no hay, la abre (como desde su ícono) y espera a que cargue.</summary>
+    async Task<(nint window, bool fresh)> OpenWebApp(InstalledApp music, CancellationToken ct)
+    {
+        var h = WebMusic.FindWindow(music.AppId);
+        if (h != 0) return (h, false);
+        apps.Launch(music);
+        h = await WebMusic.WaitWindow(() => WebMusic.FindWindow(music.AppId), TimeSpan.FromSeconds(20), ct);
+        if (h != 0) await WebMusic.WaitReadyAsync(h, TimeSpan.FromSeconds(15), ct);
+        return (h, true);
+    }
+
     async Task<Outcome> Search(string query, string? app, CancellationToken ct)
     {
         var music = apps.MusicApp(app);
         var isSpotify = music?.Name.Contains("spotify", StringComparison.OrdinalIgnoreCase) == true;
         if (isSpotify)
         {
-            // Spotify no deja reproducir un resultado sin tocarlo: se abre la búsqueda.
+            // Spotify no deja reproducir un resultado sin tocarlo: se abre la búsqueda (en la app abierta, si está).
             M.ShellOpen("spotify:search:" + Uri.EscapeDataString(query));
             return Outcome.Ok($"Te busqué «{query}» en Spotify.", new JsonObject { ["app"] = music!.Name });
         }
+        if (music != null && WebMusic.WebAppId(music.AppId) != null)
+        {
+            // YouTube Music instalada: se busca en su ventana (la abierta, o se abre) y se pone el primer resultado.
+            var (h, _) = await OpenWebApp(music, ct);
+            if (h != 0 && await WebMusic.SearchAsync(h, query, ct))
+            {
+                await Task.Delay(1500, ct);
+                var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(10), ct);
+                return played != null
+                    ? Outcome.Ok($"Listo, pongo «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name })
+                    : Outcome.Ok($"Te busqué «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name });
+            }
+            if (h != 0) return Outcome.Fail($"Abrí {music.Name}, pero Windows no me dejó escribir en la ventana. Probá de nuevo.", "focus_denied");
+        }
+        // Sin app de música instalada: YouTube en el navegador.
         var id = await FirstVideo(query, ct);
         if (id != null)
         {
-            // En la app de YouTube Music (la instalada desde Chrome/Edge) si está; si no, en el navegador.
-            if (music != null && apps.OpenWebAppAt(music, "https://music.youtube.com/watch?v=" + id))
-                return Outcome.Ok($"Listo, pongo «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name });
             M.ShellOpen("https://www.youtube.com/watch?v=" + id);
             return Outcome.Ok($"Listo, pongo «{query}».", new JsonObject { ["query"] = query, ["source"] = "youtube" });
         }

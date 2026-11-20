@@ -115,7 +115,7 @@ static class SelfTest
             using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(screen.Location, Point.Empty, screen.Size);
             bmp.Save(Path.Combine(dir, name));
         }
-        var form = new MainForm(link, store, history, startHidden: false);
+        var form = new MainForm(link, store, history, apps, startHidden: false);
         form.Show();
         Shot("receptor.png");
         var dialog = new PairDialog(link.StartPairing(), store);
@@ -130,7 +130,98 @@ static class SelfTest
         historyDialog.Show(form);
         Shot("historial.png");
         historyDialog.Close();
-        Ok("ventanas", "capturas: receptor, vincular, telefonos, historial");
+        var settingsDialog = new SettingsDialog(form, apps, store);
+        settingsDialog.Show(form);
+        Shot("ajustes.png");
+        settingsDialog.Close();
+        Ok("ventanas", "capturas: receptor, vincular, telefonos, historial, ajustes");
         form.Hide();
+
+        // Actualizaciones: encuentra el .exe en el release (como lo haría el botón «Actualizar»).
+        var latest = await Updater.LatestAsync();
+        if (latest != null) Ok("buscar actualizaciones", $"última publicada: {latest.Name} (esta: V{Updater.CurrentVersion})");
+        else Info("buscar actualizaciones", "no se pudo consultar GitHub desde acá");
+
+        await WebAppTest(dir, Shot);
     }
+
+    /// <summary>
+    /// Manejo de una app web abierta (como YouTube Music instalada) en el Chrome real: buscar con «/» en
+    /// su ventana y tocar el primer «Reproducir…» con la accesibilidad de Windows, sin abrir pestañas.
+    /// </summary>
+    static async Task WebAppTest(string dir, Action<string> shot)
+    {
+        var chrome = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        }.Select(d => Path.Combine(d, "Google", "Chrome", "Application", "chrome.exe")).FirstOrDefault(File.Exists);
+        if (chrome == null) { Info("app web de música", "no hay Chrome en esta máquina"); return; }
+        var html = Path.Combine(Path.GetFullPath(dir), "musica-prueba.html");
+        File.WriteAllText(html, WebAppPage);
+        var profile = Path.Combine(Path.GetTempPath(), "lucyremota-chrome-" + Guid.NewGuid().ToString("N")[..8]);
+        using var proc = Process.Start(new ProcessStartInfo(chrome)
+        {
+            UseShellExecute = false,
+            ArgumentList = { "--app=" + new Uri(html).AbsoluteUri, "--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check", "--window-size=900,700" },
+        });
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var ct = cts.Token;
+            var t = Stopwatch.StartNew();
+            var h = await WebMusic.WaitWindow(() => Native.WinUi.TopLevel().FirstOrDefault(x => Native.WinUi.Title(x).StartsWith("Música de prueba")), TimeSpan.FromSeconds(25), ct);
+            if (h == 0) { Fail("app web de música", "no apareció la ventana de Chrome"); return; }
+            if (!await WebMusic.WaitReadyAsync(h, TimeSpan.FromSeconds(20), ct)) { Fail("app web de música", "la accesibilidad no muestra el buscador"); return; }
+            if (!await WebMusic.SearchAsync(h, "queen bohemian", ct)) { Fail("app web de música", "Windows no dejó traer la ventana al frente"); return; }
+            await Task.Delay(800, ct);
+            var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(15), ct);
+            string title = "";
+            for (var i = 0; i < 20 && !(title = Native.WinUi.Title(h)).StartsWith("Sonando"); i++) await Task.Delay(250, ct);
+            shot("musica.png");
+            if (played != null && title == "Sonando: queen bohemian") Ok("app web de música", $"buscó y puso el primer resultado en su ventana en {t.ElapsedMilliseconds} ms ({played})");
+            else Fail("app web de música", $"tocó «{played}», título «{title}»");
+            var windows = Native.WinUi.TopLevel().Count(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0);
+            if (windows == 1) Ok("sin pestañas nuevas", "una sola ventana de Chrome"); else Fail("sin pestañas nuevas", $"{windows} ventanas de Chrome");
+        }
+        catch (OperationCanceledException) { Fail("app web de música", "tardó demasiado"); }
+        finally
+        {
+            try { proc?.Kill(entireProcessTree: true); } catch { }
+            await Task.Delay(500);
+            try { Directory.Delete(profile, true); } catch { }
+        }
+    }
+
+    const string WebAppPage = """
+        <!doctype html><html lang="es"><head><meta charset="utf-8"><title>Música de prueba</title>
+        <style>
+          body { background:#0f0f12; color:#eee; font:16px "Segoe UI",sans-serif; margin:0 }
+          header { height:70px; padding:12px 20px; box-sizing:border-box }
+          input { width:420px; font-size:16px; padding:8px; background:#222; color:#fff; border:1px solid #444 }
+          main { padding:20px }
+          button { font-size:16px; margin:6px; padding:10px 16px }
+          footer { position:fixed; bottom:0; left:0; right:0; height:72px; background:#1d1d24 }
+        </style></head>
+        <body>
+          <header><input id="q" aria-label="Buscar canciones" placeholder="Buscar canciones, álbumes, artistas"></header>
+          <main id="results"><p>Portada</p></main>
+          <footer><button aria-label="Reproducir" onclick="document.title='MAL: barra del reproductor'">▶</button></footer>
+          <script>
+            const q = document.getElementById('q');
+            document.addEventListener('keydown', e => { if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); q.select(); } });
+            q.addEventListener('keydown', e => {
+              if (e.key !== 'Enter') return;
+              const t = q.value;
+              const main = document.getElementById('results');
+              main.innerHTML = '';
+              const h = document.createElement('h2'); h.textContent = 'Resultado principal'; main.appendChild(h);
+              const top = document.createElement('button'); top.textContent = '▶ ' + t; top.setAttribute('aria-label', 'Reproducir ' + t);
+              top.onclick = () => document.title = 'Sonando: ' + t; main.appendChild(top);
+              const other = document.createElement('button'); other.textContent = '▶ otra'; other.setAttribute('aria-label', 'Reproducir otra');
+              other.onclick = () => document.title = 'MAL: otra'; main.appendChild(other);
+            });
+          </script>
+        </body></html>
+        """;
 }

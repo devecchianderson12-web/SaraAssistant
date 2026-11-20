@@ -5,6 +5,8 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- Sólo por la accesibilidad de Windows (UI Automation) para manejar YouTube Music instalada. -->
+    <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -29,6 +31,11 @@
     <DebugType>none</DebugType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Con WPF activado no vienen solas (chocan con nombres de WPF que acá no se usan). -->
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />

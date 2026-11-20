@@ -45,6 +45,12 @@ sealed class AppsModule : ISkillModule
             {
                 var app = NameMatcher.Best(name, await Apps(), a => a.Name);
                 if (app == null) return new Outcome(Status.Error, $"No encontré {name} instalado en la computadora.", null, "not_installed");
+                // Una app web (YouTube Music de Chrome, por ejemplo) ya abierta: se trae su ventana en lugar de abrir otra.
+                if (WebMusic.FindWindow(app.AppId) is var open and not 0)
+                {
+                    Win32.BringToFront(open);
+                    return Outcome.Ok($"{app.Name} ya estaba abierto: te lo muestro.", new JsonObject { ["app"] = app.Name });
+                }
                 Launch(app);
                 return Outcome.Ok($"Abriendo {app.Name} en tu computadora.", new JsonObject { ["app"] = app.Name });
             }
@@ -75,46 +81,26 @@ sealed class AppsModule : ISkillModule
         ["media player", "reproductor multimedia", "groove"],
     ];
 
-    /// <summary>La app de música a usar: la pedida («spotify»/«youtube») o la mejor instalada.</summary>
+    /// <summary>
+    /// La app de música a usar: la pedida («spotify»/«youtube»), la elegida en Ajustes o la mejor
+    /// instalada (YouTube Music de Chrome/Edge, Spotify, …).
+    /// </summary>
     public InstalledApp? MusicApp(string? wanted)
     {
         var list = cache ?? Apps().GetAwaiter().GetResult();
         InstalledApp? Match(string[] names) => list.FirstOrDefault(a => names.Any(n => NameMatcher.Normalize(a.Name).Contains(n)));
         if (wanted == "spotify") return Match(["spotify"]);
         if (wanted == "youtube") return Match(["youtube music"]);
+        if (AppSettings.Current.MusicApp is { Length: > 0 } chosen && list.FirstOrDefault(a => a.Name == chosen) is { } picked) return picked;
         return MusicPriority.Select(Match).FirstOrDefault(a => a != null);
     }
 
-    /// <summary>
-    /// Abre una app web instalada (PWA de Chrome o Edge) directo en [url]. Sólo con identificadores de
-    /// la lista de Windows y URLs armadas acá. false si no es una app web (entonces se usa otra vía).
-    /// </summary>
-    public bool OpenWebAppAt(InstalledApp app, string url)
+    /// <summary>Las apps de música instaladas (para elegir en Ajustes).</summary>
+    public async Task<List<InstalledApp>> MusicAppsAsync()
     {
-        var m = System.Text.RegularExpressions.Regex.Match(app.AppId, @"^(Chrome|MSEdge)\._crx_([a-p]{32})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (!m.Success || !Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme != "https") return false;
-        var exe = BrowserPath(m.Groups[1].Value.Equals("chrome", StringComparison.OrdinalIgnoreCase) ? "chrome.exe" : "msedge.exe");
-        if (exe == null) return false;
-        try
-        {
-            using var _ = Process.Start(new ProcessStartInfo(exe)
-            {
-                UseShellExecute = false,
-                ArgumentList = { "--app-id=" + m.Groups[2].Value, "--app-launch-url-for-shortcuts-menu-item=" + u.AbsoluteUri },
-            });
-            return true;
-        }
-        catch (Exception) { return false; }
-    }
-
-    static string? BrowserPath(string exe)
-    {
-        foreach (var root in new[] { Microsoft.Win32.Registry.CurrentUser, Microsoft.Win32.Registry.LocalMachine })
-        {
-            using var k = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe);
-            if (k?.GetValue(null) is string path && File.Exists(path)) return path;
-        }
-        return null;
+        var list = await Apps();
+        return MusicPriority.SelectMany(names => list.Where(a => names.Any(n => NameMatcher.Normalize(a.Name).Contains(n))))
+            .DistinctBy(a => a.Name).ToList();
     }
 
     public void Launch(InstalledApp app) => M.ShellOpen("explorer.exe", "shell:AppsFolder\\" + app.AppId);

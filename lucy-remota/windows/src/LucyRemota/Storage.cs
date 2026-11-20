@@ -54,12 +54,12 @@ sealed class PcStore : IPcStore
     List<PairedDevice> devices;
 
     public string PcId { get; }
-    public string PcName { get; }
+    /// <summary>El de los ajustes, o el nombre de Windows.</summary>
+    public string PcName => AppSettings.Current.PcName is { Length: > 0 } n ? n.Trim() : Environment.MachineName;
     public IdentityKey Key { get; }
 
     public PcStore()
     {
-        PcName = Environment.MachineName;
         var identityFile = Paths.File("identidad.json");
         (string id, IdentityKey key)? loaded = null;
         try
@@ -159,7 +159,8 @@ sealed class History
         {
             items.Add(r);
             if (items.Count > 300) items.RemoveRange(0, items.Count - 300);
-            try { Paths.WriteSafely(Paths.File("historial.json"), JsonSerializer.Serialize(items)); } catch (IOException) { }
+            if (AppSettings.Current.SaveHistory)
+                try { Paths.WriteSafely(Paths.File("historial.json"), JsonSerializer.Serialize(items)); } catch (IOException) { }
         }
         Added?.Invoke(r);
     }

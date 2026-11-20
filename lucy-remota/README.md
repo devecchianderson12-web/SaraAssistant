@@ -59,6 +59,11 @@ Decí «Lucy» (o tocá el círculo) y pedí lo que quieras. Algunos ejemplos:
 En la PC, la ventana muestra el teléfono conectado y cada orden recibida (hecha, con error,
 inválida…). Al cerrarla queda en la bandeja; «Salir» la cierra del todo.
 
+**Ajustes** (en la PC): nombre de la computadora, iniciar con Windows, app de música para «poné
+música» (YouTube Music instalada, Spotify…), conexión por Internet, historial, avisos y
+actualizaciones. Cuando hay una versión nueva aparece el botón **«Actualizar»**: baja el `.exe`
+nuevo, se reemplaza sola y conserva los teléfonos vinculados.
+
 ## Desvincular
 
 - Desde el teléfono: «Desvincular».

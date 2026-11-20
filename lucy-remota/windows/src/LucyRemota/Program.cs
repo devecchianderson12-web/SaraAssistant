@@ -18,8 +18,18 @@ static class Program
             Application.EnableVisualStyles();
             return SelfTest.Run(args.Length > selftest + 1 ? args[selftest + 1] : "autoprueba");
         }
+        // «--reemplazar <viejo.exe>»: la abrió la versión anterior al actualizarse; se espera a que se cierre.
+        var replace = Array.IndexOf(args, "--reemplazar");
+        var oldExe = replace >= 0 && args.Length > replace + 1 ? args[replace + 1] : null;
         // Una sola Lucy Remota por usuario: si ya está abierta, se muestra esa.
-        using var single = new Mutex(true, @"Local\LucyRemota.Receptor", out var first);
+        var single = new Mutex(true, @"Local\LucyRemota.Receptor", out var first);
+        for (var i = 0; !first && oldExe != null && i < 40; i++)
+        {
+            single.Dispose();
+            Thread.Sleep(500);
+            single = new Mutex(true, @"Local\LucyRemota.Receptor", out first);
+        }
+        using var _single = single;
         using var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\LucyRemota.Receptor.Mostrar");
         if (!first)
         {
@@ -39,19 +49,21 @@ static class Program
         var apps = new AppsModule();
         var registry = new CommandRegistry([new AudioModule(), new MediaModule(apps), apps, new SystemModule(), new InfoModule()]);
         registry.Logged += history.Add;
+        if (oldExe != null) Updater.FinishReplace(oldExe);
         var link = new PcLink(store, registry, Log.Write);
-        // «relay.txt» junto a los datos: otra dirección del relé, o «no» para usar sólo la red local.
-        if (File.Exists(Paths.File("relay.txt")))
+        void ApplyRelay()
         {
-            var r = File.ReadAllText(Paths.File("relay.txt")).Trim();
-            link.RelayUrl = r.Equals("no", StringComparison.OrdinalIgnoreCase) ? null : r.Length > 0 ? r : link.RelayUrl;
+            var s = AppSettings.Current;
+            link.RelayUrl = s.UseRelay && Uri.TryCreate(s.RelayUrl, UriKind.Absolute, out var u) && u.Scheme is "https" or "http" ? s.RelayUrl : null;
+            Log.Write(link.RelayUrl != null ? "Relé para redes distintas: " + link.RelayUrl : "Relé desactivado (sólo red local)");
         }
-        Log.Write(link.RelayUrl != null ? "Relé para redes distintas: " + link.RelayUrl : "Relé desactivado (sólo red local)");
+        ApplyRelay();
+        AppSettings.Changed += ApplyRelay;
         apps.Preload();
         link.Start();
 
-        var minimized = args.Contains("--minimizada");
-        var form = new MainForm(link, store, history, startHidden: minimized);
+        var minimized = args.Contains("--minimizada") || AppSettings.Current.StartMinimized;
+        var form = new MainForm(link, store, history, apps, startHidden: minimized);
         // Otra copia pidió mostrarse.
         ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => form.BeginInvoke(form.ShowFromTray), null, -1, false);
         Application.Run(form);

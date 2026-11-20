@@ -7,8 +7,11 @@
 - **Programas como administrador:** Windows no deja que Lucy cierre o traiga al frente ventanas de
   programas abiertos como administrador.
 - **Brillo:** sólo en notebooks (los monitores externos casi nunca lo permiten desde Windows).
-- **Música con búsqueda:** «poné X» abre el primer video de YouTube en el navegador; con «en
-  Spotify» abre la búsqueda en Spotify (Spotify no deja reproducir un resultado sin tocarlo).
+- **Música con búsqueda:** con YouTube Music instalada desde Chrome/Edge, Lucy busca en su ventana
+  (la abierta, o la abre) y toca el primer resultado con la accesibilidad de Windows; si YouTube
+  cambia su página puede quedarse en los resultados sin reproducir. Para escribir en la ventana,
+  Windows tiene que dejar traerla al frente. Con Spotify abre la búsqueda (Spotify no deja reproducir
+  un resultado sin tocarlo). Sin app de música instalada, abre YouTube en el navegador.
 - **Sin Internet en el teléfono:** el reconocimiento pasa a Vosk (entiende peor frases largas) y las
   preguntas generales no se pueden contestar con IA.
 - **Pendrive en otra PC:** la clave de la PC está cifrada con el usuario de Windows; en otra
