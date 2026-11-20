@@ -308,7 +308,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             canCloseApps = com.sara.assistant.apps.SaraAccessibilityService.isEnabled(getApplication()),
             missing = com.sara.assistant.permissions.PermissionCenter.missing(getApplication()),
             aiConfigured = c.ai.isAvailable(),
-            googleKey = c.secrets.has(SecretStore.GEMINI_KEY),
+            googleKey = c.secrets.has(SecretStore.GEMINI_KEY) || com.sara.assistant.BuildConfig.GEMINI_DEFAULT_KEY.isNotBlank(),
             claudeKey = c.secrets.has(SecretStore.ANTHROPIC_KEY),
             musicApp = runCatching { c.mediaControl.preferredMusicApp()?.label }.getOrNull(),
             micCurrent = c.micRouter.currentLabel(),

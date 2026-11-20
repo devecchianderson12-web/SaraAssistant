@@ -99,7 +99,7 @@ class AppContainer(private val app: Application) {
     private val lists = com.sara.core.skills.ListBook(com.sara.assistant.skills.PrefsTextStore(app, "sara_lists"))
     private val plannerSupport = com.sara.core.ai.PlannerSupport({ skills }, memory)
     private val claude = com.sara.core.ai.ClaudeAssistant({ secrets.get(SecretStore.ANTHROPIC_KEY) }, plannerSupport, logger)
-    private val gemini = com.sara.core.ai.GeminiAssistant({ secrets.get(SecretStore.GEMINI_KEY) }, memory, logger, plannerSupport)
+    private val gemini = com.sara.core.ai.GeminiAssistant({ secrets.get(SecretStore.GEMINI_KEY)?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_DEFAULT_KEY.takeIf { it.isNotBlank() } }, memory, logger, plannerSupport)
     /** IA: Google para preguntas con datos actuales; Claude (si hay clave) para planificar. */
     val ai = com.sara.core.ai.AiRouter({ settings.settings.value.aiProvider }, gemini, claude)
 

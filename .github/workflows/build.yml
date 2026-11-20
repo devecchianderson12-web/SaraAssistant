@@ -48,6 +48,7 @@ jobs:
         env:
           SARA_AZURE_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
           SARA_AZURE_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          SARA_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./gradlew --no-daemon assembleDebug
 
       - name: Renombrar APK

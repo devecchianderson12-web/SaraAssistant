@@ -33,6 +33,9 @@ android {
         // Voces naturales sin que el usuario configure nada: clave de Azure Speech (plan gratis F0) que
         // pone la compilación en la nube desde los secretos del repositorio (nunca está en el código).
         buildConfigField("String", "AZURE_KEY", "\"${System.getenv("SARA_AZURE_KEY").orEmpty().trim()}\"")
+        // Clave de IA (Gemini) que trae Sara de fábrica: la pone la compilación desde un secreto de GitHub
+        // (GEMINI_API_KEY), nunca está en el código. La que cargues en Ajustes › IA tiene prioridad.
+        buildConfigField("String", "GEMINI_DEFAULT_KEY", "\"${System.getenv("SARA_GEMINI_KEY").orEmpty().trim().filter { it.isLetterOrDigit() || it in "._-" }}\"")
         buildConfigField("String", "AZURE_REGION", "\"${System.getenv("SARA_AZURE_REGION").orEmpty().trim().lowercase()}\"")
         vectorDrawables.useSupportLibrary = true
         // Teléfonos ARM y emuladores x86_64 (x86 de 32 bits se omite para reducir el tamaño).
