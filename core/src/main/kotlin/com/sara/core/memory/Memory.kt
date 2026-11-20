@@ -40,6 +40,7 @@ object MemoryKeys {
         key == MUSIC_TASTE -> "lo que más escuchás es $value"
         key.startsWith(ROUTINE_PREFIX) -> "cuando decís «${key.removePrefix(ROUTINE_PREFIX)}», $value"
         key.startsWith(NOTE_PREFIX) -> value
+        key.startsWith(Spelling.PREFIX) -> "«${Spelling.word(value)}» se escribe así"
         else -> "$key: $value"
     }
 }
@@ -96,6 +97,8 @@ object MemoryParser {
         val body = lower.substring(LEAD.find(lower)?.value?.length ?: 0).trimStart('¿', '¡')
 
         if (RECALL.containsMatchIn(body)) return CommandIntent.RecallMemory
+        // «Yesica se escribe con y griega», «cuando digo Ceci me refiero a Yessi».
+        Spelling.parse(text)?.let { return it }
         (ROUTINE.find(body) ?: ROUTINE_QUOTED.find(body))?.let { m ->
             return CommandIntent.Remember(MemoryKeys.routineKey(clean(m.groupValues[1])), toOrder(clean(m.groupValues[2])))
         }

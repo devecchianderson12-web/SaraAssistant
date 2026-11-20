@@ -116,7 +116,7 @@ class SkillsTest {
         assertEquals(CommandIntent.Skill("dispositivo", "linterna", mapOf("estado" to "apagar")), intentOf("apagá la linterna"))
         assertEquals(CommandIntent.Skill("dispositivo", "brillo", mapOf("accion" to "fijar", "porcentaje" to "40")), intentOf("poné el brillo al 40"))
         assertEquals(CommandIntent.Skill("dispositivo", "bateria"), intentOf("¿cuánta batería me queda?"))
-        assertEquals(CommandIntent.Skill("llamadas", "llamar", mapOf("contacto" to "mama")), intentOf("llamá a mamá"))
+        assertEquals(CommandIntent.Skill("llamadas", "llamar", mapOf("contacto" to "mama", "via" to "telefono")), intentOf("llamá a mamá"))
         assertEquals(CommandIntent.Skill("calendario", "ver", mapOf("dia" to "manana")), intentOf("qué tengo mañana"))
         assertEquals(CommandIntent.Skill("mapas", "navegar", mapOf("destino" to "Plaza de Mayo")), intentOf("llevame a Plaza de Mayo"))
         assertEquals(CommandIntent.Skill("mapas", "cerca", mapOf("lugar" to "farmacias")), intentOf("farmacias cerca de mí"))

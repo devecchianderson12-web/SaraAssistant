@@ -278,6 +278,10 @@ class DefaultCommandExecutor(
             value = apps?.findLabel(value)
                 ?: return ExecutionResult(false, responses.appNotFound(value), ErrorKind.EXECUTION_FAILED)
         }
+        if (intent.key.startsWith(com.sara.core.memory.Spelling.PREFIX)) {
+            store.put(intent.key, com.sara.core.memory.Spelling.merge(store.get(intent.key), value))
+            return ExecutionResult(true, responses.spellingSaved(com.sara.core.memory.Spelling.word(value)))
+        }
         store.put(intent.key, value)
         return ExecutionResult(true, if (intent.key == MemoryKeys.MUSIC_APP) responses.musicAppSaved(value) else responses.remembered())
     }
@@ -561,6 +565,7 @@ class ResponseCatalog(private val random: Random = Random.Default) {
     fun remembered() = "Listo, lo recuerdo."
     fun forgotten() = "Listo, lo olvidé."
     fun nothingToForget() = "No tenía eso guardado."
+    fun spellingSaved(word: String) = "Listo, de ahora en más escribo «$word»."
     fun nothingRemembered() = "Todavía no recuerdo nada."
     fun recall(items: List<String>) = "Recuerdo que " + items.joinToString("; ") + "."
     fun needsAi() = "Para preguntas cargá la clave de Google. Te dejé el botón."

@@ -780,9 +780,19 @@ class CallsSkill(private val context: Context, private val starter: ActivityStar
     override val description = "Llamar a un contacto o número y preparar SMS."
     override val actions = listOf(
         SkillAction(
-            "llamar", "Llama a un contacto o número.", listOf(Param("contacto", ParamType.STRING, "Nombre o número.")),
-            Risk.SENSITIVE, setOf(PermissionKind.CONTACTS), "Abre la llamada en el marcador.",
-            confirm = { "¿Llamo a ${it["contacto"]}?" },
+            "llamar", "Llama a un contacto o número (por teléfono, o por WhatsApp con voz o video).",
+            listOf(
+                Param("contacto", ParamType.STRING, "Nombre o número."),
+                Param("via", ParamType.STRING, "Cómo llamar.", required = false, options = listOf("telefono", "whatsapp", "whatsapp_video")),
+            ),
+            Risk.SENSITIVE, setOf(PermissionKind.CONTACTS), "Abre la llamada en el marcador o en WhatsApp.",
+            confirm = {
+                when (it["via"]) {
+                    "whatsapp" -> "¿Llamo a ${it["contacto"]} por WhatsApp?"
+                    "whatsapp_video" -> "¿Hago una videollamada a ${it["contacto"]} por WhatsApp?"
+                    else -> "¿Llamo a ${it["contacto"]}?"
+                }
+            },
         ),
         SkillAction(
             "sms", "Deja un SMS escrito para enviar.", listOf(Param("contacto", ParamType.STRING, "Nombre o número."), Param("mensaje", ParamType.STRING, "Texto.")),
@@ -802,7 +812,33 @@ class CallsSkill(private val context: Context, private val starter: ActivityStar
         return AppMatcher.best(name, phones.distinctBy { it.label })?.let { it.label to it.id }
     }
 
+    /**
+     * El contacto en WhatsApp: WhatsApp agrega a cada contacto que lo usa una fila «llamada de voz» y
+     * otra «videollamada»; abrir esa fila con WhatsApp empieza la llamada.
+     */
+    private fun whatsAppLookup(name: String, video: Boolean): Triple<String, Long, String>? {
+        val kind = if (video) "video.call" else "voip.call"
+        val rows = mutableListOf<Triple<String, Long, String>>()
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID, ContactsContract.Data.DISPLAY_NAME, ContactsContract.Data.MIMETYPE),
+            "${ContactsContract.Data.MIMETYPE} LIKE ?", arrayOf("vnd.android.cursor.item/vnd.com.whatsapp%.$kind"), null,
+        )?.use { c -> while (c.moveToNext()) { val n = c.getString(1) ?: continue; rows += Triple(n, c.getLong(0), c.getString(2) ?: continue) } }
+        val best = AppMatcher.best(name, rows.map { InstalledApp(it.first, it.second.toString()) }.distinctBy { it.label }) ?: return null
+        return rows.firstOrNull { it.first == best.label }
+    }
+
     override suspend fun run(action: String, args: Map<String, String>): SkillResult {
+        val via = args["via"]
+        if (action == "llamar" && (via == "whatsapp" || via == "whatsapp_video")) {
+            val video = via == "whatsapp_video"
+            val (name, id, mime) = withContext(Dispatchers.IO) { whatsAppLookup(args.getValue("contacto"), video) }
+                ?: return SkillResult.Failed("No encontré a ${args.getValue("contacto")} entre tus contactos de WhatsApp.")
+            val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://com.android.contacts/data/$id"), mime)
+                .setPackage(if (mime.contains(".w4b.")) "com.whatsapp.w4b" else "com.whatsapp")
+            val what = if (video) "la videollamada" else "la llamada"
+            return open(starter, intent, "WhatsApp", "${if (video) "Videollamando" else "Llamando"} a $name por WhatsApp.", "Tocá la notificación para empezar $what con $name.")
+        }
         val (name, number) = withContext(Dispatchers.IO) { lookup(args.getValue("contacto")) }
             ?: return SkillResult.Failed("No encontré a ${args.getValue("contacto")} en tus contactos.")
         return if (action == "llamar") {

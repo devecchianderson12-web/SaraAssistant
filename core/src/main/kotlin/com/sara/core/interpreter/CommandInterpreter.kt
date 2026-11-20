@@ -28,7 +28,8 @@ class CompositeCommandInterpreter(
     private val plannerAvailable: () -> Boolean = { false },
 ) : CommandInterpreter {
     override suspend fun interpret(spoken: String): InterpretationResult {
-        val text = SpokenForms.rewrite(spoken)
+        // Nombres que el reconocimiento escribe mal y que le enseñaste («Yessi», no «Jessi»).
+        val text = com.sara.core.memory.Spelling.apply(SpokenForms.rewrite(spoken), memory)
         val routine = memory?.get(MemoryKeys.routineKey(text.trim().replace(Regex("^(?i)(?:${com.sara.core.model.AssistantIdentity.NAMES})\\b"), "").trim(' ', ',')))
         // Una rutina puede tener varias órdenes («sacá la música y cerrá las apps»).
         if (routine != null) return (splitCompound(routine) ?: rules.interpret(routine)).copy(ruleId = "routine")
