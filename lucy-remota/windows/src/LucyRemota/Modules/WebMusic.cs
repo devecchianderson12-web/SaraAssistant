@@ -79,20 +79,58 @@ static partial class WebMusic
         return false;
     }
 
-    /// <summary>Busca en la app: «/» enfoca el buscador, se escribe y Enter.</summary>
+    /// <summary>
+    /// Busca en la app: enfoca su buscador con la accesibilidad de Windows (así no importa si Chrome
+    /// muestra un aviso encima), escribe y Enter. Si no encuentra el buscador, usa la tecla «/».
+    /// </summary>
     public static async Task<bool> SearchAsync(nint h, string query, CancellationToken ct)
     {
         if (!await FocusAsync(h, ct)) return false;
-        WinUi.Press(WinUi.VK_ESCAPE);
-        await Task.Delay(120, ct);
-        WinUi.Type("/");
-        await Task.Delay(350, ct);
-        if (!WinUi.IsForeground(h)) return false;
+        var box = await Task.Run(() => FindSearchBox(h), ct);
+        var focused = false;
+        if (box != null)
+        {
+            try { box.SetFocus(); focused = true; }
+            catch (Exception e) when (e is ElementNotAvailableException or InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+        }
+        if (!focused)
+        {
+            WinUi.Press(WinUi.VK_ESCAPE);
+            await Task.Delay(120, ct);
+            WinUi.Type("/");
+        }
+        await Task.Delay(250, ct);
+        if (!WinUi.IsForeground(h) && !await FocusAsync(h, ct)) return false;
         WinUi.Chord(WinUi.VK_CONTROL, WinUi.VK_A);
         WinUi.Type(query);
         await Task.Delay(150, ct);
         WinUi.Press(WinUi.VK_RETURN);
         return true;
+    }
+
+    /// <summary>El buscador de la página (no la barra de direcciones del navegador).</summary>
+    static AutomationElement? FindSearchBox(nint h)
+    {
+        try
+        {
+            var win = WinUi.Bounds(h);
+            var root = AutomationElement.FromHandle(h);
+            AutomationElement? best = null;
+            foreach (AutomationElement e in root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)))
+            {
+                string name;
+                System.Windows.Rect r;
+                try { name = e.Current.Name ?? ""; r = e.Current.BoundingRectangle; }
+                catch (ElementNotAvailableException) { continue; }
+                if (r.IsEmpty || r.Width < 20 || r.Left < win.Left - 2 || r.Right > win.Right + 2 || r.Top < win.Top) continue;
+                if (name.Contains("address", StringComparison.OrdinalIgnoreCase) || name.Contains("dirección", StringComparison.OrdinalIgnoreCase)) continue;
+                var looksLikeSearch = name.Contains("busc", StringComparison.OrdinalIgnoreCase) || name.Contains("search", StringComparison.OrdinalIgnoreCase);
+                if (looksLikeSearch) return e;
+                best ??= e;
+            }
+            return best;
+        }
+        catch (Exception e) when (e is ElementNotAvailableException or InvalidOperationException or System.Runtime.InteropServices.COMException) { return null; }
     }
 
     /// <summary>
