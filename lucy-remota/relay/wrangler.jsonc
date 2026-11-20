@@ -1,6 +1,6 @@
 {
   // Relé de Lucy Remota (Cloudflare Workers, plan gratis).
-  "name": "lucy-relay",
+  "name": "lucy-remota-relay",
   "main": "src/index.js",
   "compatibility_date": "2025-10-01",
   "workers_dev": true,

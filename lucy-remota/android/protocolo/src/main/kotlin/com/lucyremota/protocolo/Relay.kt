@@ -107,7 +107,7 @@ class RelayClient private constructor(url: String, http: OkHttpClient) : WebSock
     }
 
     companion object {
-        const val DEFAULT_URL = "https://lucy-relay.devecchianderson12.workers.dev"
+        const val DEFAULT_URL = "https://lucy-remota-relay.devecchianderson12.workers.dev"
         private const val KEEPALIVE_MS = 25_000L
         private const val SILENCE_MS = 70_000L
 

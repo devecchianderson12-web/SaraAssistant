@@ -13,7 +13,7 @@ namespace LucyRemota.Core.Link;
 /// </summary>
 public sealed class RelayClient : IAsyncDisposable
 {
-    public const string DefaultUrl = "https://lucy-relay.devecchianderson12.workers.dev";
+    public const string DefaultUrl = "https://lucy-remota-relay.devecchianderson12.workers.dev";
     static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(25);
     static readonly TimeSpan Silence = TimeSpan.FromSeconds(70);
 
