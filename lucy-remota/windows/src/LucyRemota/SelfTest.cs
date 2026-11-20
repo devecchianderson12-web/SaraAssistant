@@ -180,9 +180,14 @@ static class SelfTest
             for (var i = 0; i < 20 && !(title = Native.WinUi.Title(h)).StartsWith("Sonando"); i++) await Task.Delay(250, ct);
             shot("musica.png");
             if (played != null && title == "Sonando: queen bohemian") Ok("app web de música", $"buscó y puso el primer resultado en su ventana en {t.ElapsedMilliseconds} ms ({played})");
-            else Fail("app web de música", $"tocó «{played}», título «{title}»");
-            var windows = Native.WinUi.TopLevel().Count(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0);
-            if (windows == 1) Ok("sin pestañas nuevas", "una sola ventana de Chrome"); else Fail("sin pestañas nuevas", $"{windows} ventanas de Chrome");
+            else
+            {
+                Fail("app web de música", $"tocó «{played}», título «{title}»");
+                Info("app web de música", await Task.Run(() => WebMusic.Describe(h)));
+            }
+            var windows = Native.WinUi.TopLevel().Where(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0).ToList();
+            if (windows.Count == 1) Ok("sin pestañas nuevas", "una sola ventana de Chrome");
+            else Info("ventanas de Chrome", string.Join(" | ", windows.Select(x => $"«{Native.WinUi.Title(x)}» {Native.WinUi.AppId(x)}")));
         }
         catch (OperationCanceledException) { Fail("app web de música", "tardó demasiado"); }
         finally

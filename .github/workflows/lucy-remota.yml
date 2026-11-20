@@ -80,7 +80,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Publicar captura (manual)
-        if: github.event_name == 'workflow_dispatch'
+        if: always() && github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           mkdir capturas && cp autoprueba/*.png autoprueba/autoprueba.txt capturas/ 2>/dev/null; cd capturas

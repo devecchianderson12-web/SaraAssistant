@@ -111,6 +111,31 @@ static partial class WebMusic
         return null;
     }
 
+    /// <summary>Para diagnosticar: qué ve la accesibilidad en la ventana (botones y campos de texto).</summary>
+    public static string Describe(nint h)
+    {
+        try
+        {
+            var win = WinUi.Bounds(h);
+            var root = AutomationElement.FromHandle(h);
+            var sb = new System.Text.StringBuilder($"ventana {win.Left},{win.Top}-{win.Right},{win.Bottom}; ");
+            foreach (AutomationElement e in root.FindAll(TreeScope.Descendants, new OrCondition(
+                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit))))
+            {
+                try
+                {
+                    var r = e.Current.BoundingRectangle;
+                    var value = e.TryGetCurrentPattern(ValuePattern.Pattern, out var v) ? " =«" + ((ValuePattern)v).Current.Value + "»" : "";
+                    sb.Append($"[{e.Current.ControlType.ProgrammaticName} «{e.Current.Name}»{value} @{(int)r.Left},{(int)r.Top} {(int)r.Width}x{(int)r.Height}] ");
+                }
+                catch (ElementNotAvailableException) { }
+            }
+            return sb.ToString();
+        }
+        catch (Exception e) { return "sin accesibilidad: " + e.Message; }
+    }
+
     static string? TryPlayFirst(nint h)
     {
         try
