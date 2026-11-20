@@ -67,7 +67,7 @@ sealed class MainForm : LucyForm
         bottom.Controls.Add(Centered(status));
         bottom.Controls.Add(Centered(detail));
         var buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.None, BackColor = Color.Transparent, Margin = new Padding(0, 12, 0, 0), WrapContents = true };
-        var pair = new PillButton("Vincular teléfono") { Primary = true };
+        var pair = new PillButton("Vincular") { Primary = true };
         pair.Click += (_, _) => OpenPairing();
         var phones = new PillButton("Teléfonos");
         phones.Click += (_, _) => new PhonesDialog(link, store).ShowDialog(this);

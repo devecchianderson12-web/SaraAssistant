@@ -13,7 +13,7 @@ sealed class SettingsDialog : LucyForm
     readonly CheckBox autostart = Check("Iniciar con Windows");
     readonly CheckBox minimized = Check("Abrir minimizada en la bandeja");
     readonly ComboBox music = Combo();
-    readonly CheckBox relay = Check("Conectarme por Internet cuando el teléfono está en otra red (datos móviles)");
+    readonly CheckBox relay = Check("Conectarme por Internet si el teléfono está en otra red");
     readonly TextBox relayUrl = Field();
     readonly CheckBox saveHistory = Check("Guardar el historial de órdenes");
     readonly CheckBox notify = Check("Avisarme en la bandeja cada vez que llega una orden");
