@@ -91,19 +91,13 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
             M.ShellOpen("https://music.youtube.com/");
             return Outcome.Ok("No encontré una app de música instalada: abrí YouTube Music en el navegador.");
         }
-        if (WebMusic.WebAppId(music.AppId) != null)
+        if (music.IsWebApp)
         {
-            // YouTube Music instalada: la ventana que ya está abierta, o se abre la app (nunca una pestaña).
-            var (h, fresh) = await OpenWebApp(music, ct);
-            if (h != 0)
-            {
-                await WebMusic.FocusAsync(h, ct);
-                var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(fresh ? 12 : 6), ct);
-                return played != null
-                    ? Outcome.Ok($"Listo, puse música en {music.Name}.", new JsonObject { ["app"] = music.Name })
-                    : Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
-            }
-            return Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
+            // YouTube Music instalada (sin canción pedida): en su ventana (la abierta, o se abre) se busca
+            // lo último que pediste, o un mix, y se pone. Nunca una pestaña del navegador.
+            var query = AppSettings.Current.LastMusicQuery is { Length: > 0 } last ? last : "mix";
+            var outcome = await SearchInWebApp(music, query, ct);
+            return outcome ?? Outcome.Ok($"Abrí {music.Name}.", new JsonObject { ["app"] = music.Name });
         }
         apps.Launch(music);
         // Spotify sigue con lo último que escuchaste; las demás quedan abiertas para elegir.
@@ -122,12 +116,26 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
     /// <summary>La ventana de la app web: la abierta o, si no hay, la abre (como desde su ícono) y espera a que cargue.</summary>
     async Task<(nint window, bool fresh)> OpenWebApp(InstalledApp music, CancellationToken ct)
     {
-        var h = WebMusic.FindWindow(music.AppId);
+        var h = WebMusic.FindWindow(music);
         if (h != 0) return (h, false);
         apps.Launch(music);
-        h = await WebMusic.WaitWindow(() => WebMusic.FindWindow(music.AppId), TimeSpan.FromSeconds(20), ct);
-        if (h != 0) await WebMusic.WaitReadyAsync(h, TimeSpan.FromSeconds(15), ct);
+        h = await WebMusic.WaitWindow(() => WebMusic.FindWindow(music), TimeSpan.FromSeconds(15), ct);
+        if (h != 0) await WebMusic.WaitReadyAsync(h, TimeSpan.FromSeconds(8), ct);
         return (h, true);
+    }
+
+    /// <summary>Busca en la ventana de la app web (la abierta, o la abre) y pone el primer resultado. null si no se abrió.</summary>
+    async Task<Outcome?> SearchInWebApp(InstalledApp music, string query, CancellationToken ct)
+    {
+        var (h, _) = await OpenWebApp(music, ct);
+        if (h == 0) return null;
+        if (!await WebMusic.SearchAsync(h, query, ct))
+            return Outcome.Fail($"Abrí {music.Name}, pero Windows no me dejó escribir en la ventana. Probá de nuevo.", "focus_denied");
+        await Task.Delay(1200, ct);
+        var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(9), ct, query);
+        return played != null
+            ? Outcome.Ok($"Listo, pongo «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name })
+            : Outcome.Ok($"Te busqué «{query}» en {music.Name}, pero no pude ponerlo solo.", new JsonObject { ["query"] = query, ["app"] = music.Name });
     }
 
     async Task<Outcome> Search(string query, string? app, CancellationToken ct)
@@ -140,19 +148,19 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
             M.ShellOpen("spotify:search:" + Uri.EscapeDataString(query));
             return Outcome.Ok($"Te busqué «{query}» en Spotify.", new JsonObject { ["app"] = music!.Name });
         }
-        if (music != null && WebMusic.WebAppId(music.AppId) != null)
+        if (music != null && music.IsWebApp)
         {
-            // YouTube Music instalada: se busca en su ventana (la abierta, o se abre) y se pone el primer resultado.
-            var (h, _) = await OpenWebApp(music, ct);
-            if (h != 0 && await WebMusic.SearchAsync(h, query, ct))
+            var outcome = await SearchInWebApp(music, query, ct);
+            if (outcome != null)
             {
-                await Task.Delay(1500, ct);
-                var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(10), ct);
-                return played != null
-                    ? Outcome.Ok($"Listo, pongo «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name })
-                    : Outcome.Ok($"Te busqué «{query}» en {music.Name}.", new JsonObject { ["query"] = query, ["app"] = music.Name });
+                if (outcome.Status == Status.Success)
+                {
+                    var s = AppSettings.Current.Copy();
+                    s.LastMusicQuery = query;
+                    AppSettings.Save(s);
+                }
+                return outcome;
             }
-            if (h != 0) return Outcome.Fail($"Abrí {music.Name}, pero Windows no me dejó escribir en la ventana. Probá de nuevo.", "focus_denied");
         }
         // Sin app de música instalada: YouTube en el navegador.
         var id = await FirstVideo(query, ct);

@@ -5,8 +5,15 @@ using LucyRemota.Native;
 
 namespace LucyRemota.Modules;
 
-/// <summary>Un programa del menú Inicio: nombre visible e identificador para abrirlo.</summary>
-sealed record InstalledApp(string Name, string AppId);
+/// <summary>
+/// Un programa del menú Inicio (o del escritorio): nombre visible e identificador para abrirlo.
+/// [Shortcut]: su acceso directo. [WebId]: si es una app web instalada desde Chrome/Edge (como
+/// YouTube Music), su id de Chrome (32 letras) o «app:» + la dirección.
+/// </summary>
+sealed record InstalledApp(string Name, string AppId, string? Shortcut = null, string? WebId = null)
+{
+    public bool IsWebApp => WebId != null;
+}
 
 /// <summary>
 /// Aplicaciones de Windows: abrir, cerrar y traer al frente. Sólo se abren programas que están en
@@ -46,7 +53,7 @@ sealed class AppsModule : ISkillModule
                 var app = NameMatcher.Best(name, await Apps(), a => a.Name);
                 if (app == null) return new Outcome(Status.Error, $"No encontré {name} instalado en la computadora.", null, "not_installed");
                 // Una app web (YouTube Music de Chrome, por ejemplo) ya abierta: se trae su ventana en lugar de abrir otra.
-                if (WebMusic.FindWindow(app.AppId) is var open and not 0)
+                if (app.IsWebApp && WebMusic.FindWindow(app) is var open and not 0)
                 {
                     Win32.BringToFront(open);
                     return Outcome.Ok($"{app.Name} ya estaba abierto: te lo muestro.", new JsonObject { ["app"] = app.Name });
@@ -103,7 +110,56 @@ sealed class AppsModule : ISkillModule
             .DistinctBy(a => a.Name).ToList();
     }
 
-    public void Launch(InstalledApp app) => M.ShellOpen("explorer.exe", "shell:AppsFolder\\" + app.AppId);
+    /// <summary>Abre el programa como desde su ícono (el acceso directo, si lo hay: así la app web abre con su perfil de Chrome).</summary>
+    public void Launch(InstalledApp app)
+    {
+        if (app.Shortcut != null && File.Exists(app.Shortcut)) M.ShellOpen(app.Shortcut);
+        else if (Path.IsPathRooted(app.AppId) && File.Exists(app.AppId)) M.ShellOpen(app.AppId);
+        else M.ShellOpen("explorer.exe", "shell:AppsFolder\\" + app.AppId);
+    }
+
+    /// <summary>Vuelve a leer la lista de programas (por ejemplo, después de instalar uno).</summary>
+    public void Refresh() { cache = null; }
+
+    static readonly string[] Browsers = ["chrome.exe", "chrome_proxy.exe", "msedge.exe", "msedge_proxy.exe", "brave.exe", "brave_proxy.exe"];
+
+    /// <summary>
+    /// Accesos directos de apps web (los que crea Chrome/Edge al «instalar» una página, como YouTube
+    /// Music): en el menú Inicio y en el escritorio. Se leen sus argumentos (--app-id=…).
+    /// </summary>
+    static List<InstalledApp> WebAppShortcuts()
+    {
+        var found = new List<InstalledApp>();
+        var dirs = new[]
+        {
+            Environment.SpecialFolder.StartMenu, Environment.SpecialFolder.CommonStartMenu,
+            Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.CommonDesktopDirectory,
+        }.Select(Environment.GetFolderPath).Where(d => d.Length > 0 && Directory.Exists(d)).Distinct();
+        dynamic? wsh = null;
+        try { wsh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!); } catch { return found; }
+        foreach (var dir in dirs)
+        {
+            IEnumerable<string> links;
+            try { links = Directory.EnumerateFiles(dir, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 3, IgnoreInaccessible = true }).ToList(); }
+            catch (Exception) { continue; }
+            foreach (var lnk in links)
+            {
+                try
+                {
+                    dynamic sc = wsh!.CreateShortcut(lnk);
+                    string target = sc.TargetPath ?? "";
+                    string args = sc.Arguments ?? "";
+                    if (!Browsers.Contains(Path.GetFileName(target), StringComparer.OrdinalIgnoreCase)) continue;
+                    var id = System.Text.RegularExpressions.Regex.Match(args, @"--app-id=([a-p]{32})");
+                    var url = System.Text.RegularExpressions.Regex.Match(args, @"--app=(\S+)");
+                    var webId = id.Success ? id.Groups[1].Value : url.Success ? "app:" + url.Groups[1].Value.Trim('"') : null;
+                    if (webId != null) found.Add(new InstalledApp(Path.GetFileNameWithoutExtension(lnk), lnk, lnk, webId));
+                }
+                catch (Exception) { }
+            }
+        }
+        return found;
+    }
 
     async Task<List<InstalledApp>> Apps()
     {
@@ -125,7 +181,15 @@ sealed class AppsModule : ISkillModule
                     // Desinstaladores, ayudas y documentación no son «programas» que alguien pida abrir.
                     var low = n.ToLowerInvariant();
                     if (low.Contains("uninstall") || low.Contains("desinstalar") || low.EndsWith(" help") || low.Contains("readme")) continue;
-                    list.Add(new InstalledApp(n, id));
+                    list.Add(new InstalledApp(n, id, WebId: WebMusic.WebAppId(id)));
+                }
+                // Apps web (YouTube Music de Chrome…): se completan con su acceso directo, y se suman las
+                // que sólo están en el escritorio.
+                foreach (var web in WebAppShortcuts())
+                {
+                    var i = list.FindIndex(a => a.Name.Equals(web.Name, StringComparison.OrdinalIgnoreCase));
+                    if (i >= 0) list[i] = list[i] with { Shortcut = list[i].Shortcut ?? web.Shortcut, WebId = list[i].WebId ?? web.WebId };
+                    else list.Add(web);
                 }
                 return list;
             });

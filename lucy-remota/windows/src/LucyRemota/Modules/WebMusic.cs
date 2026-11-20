@@ -21,17 +21,25 @@ static partial class WebMusic
     /// <summary>El id de la app web (las 32 letras de Chrome) de un id de Windows; null si no es una app web.</summary>
     public static string? WebAppId(string appId) => Crx().Match(appId) is { Success: true } m ? m.Groups[1].Value.ToLowerInvariant() : null;
 
-    /// <summary>La ventana abierta de esa app web (0 si no está abierta).</summary>
-    public static nint FindWindow(string appId)
+    /// <summary>
+    /// La ventana abierta de esa app web (0 si no está abierta): por su identidad de Chrome o, si no,
+    /// por el título (las ventanas de app web no terminan en «- Google Chrome» como las del navegador).
+    /// </summary>
+    public static nint FindWindow(Modules.InstalledApp app)
     {
-        var id = WebAppId(appId);
-        if (id == null) return 0;
+        var crx = app.WebId is { Length: 32 } id ? id : null;
+        var name = Core.Commands.NameMatcher.Normalize(app.Name);
+        nint byTitle = 0;
         foreach (var h in WinUi.TopLevel())
         {
-            var a = WinUi.AppId(h);
-            if (a != null && WebAppId(a) == id && WinUi.Title(h).Length > 0) return h;
+            if (WinUi.ClassName(h) != "Chrome_WidgetWin_1") continue;
+            var title = WinUi.Title(h);
+            if (title.Length == 0) continue;
+            if (crx != null && WinUi.AppId(h) is { } a && WebAppId(a) == crx) return h;
+            if (title.Contains("Google Chrome") || title.Contains("Edge") || title.Contains("Brave")) continue;
+            if (byTitle == 0 && name.Length > 0 && Core.Commands.NameMatcher.Normalize(title).Contains(name)) byTitle = h;
         }
-        return 0;
+        return byTitle;
     }
 
     public static async Task<nint> WaitWindow(Func<nint> find, TimeSpan timeout, CancellationToken ct)
@@ -137,14 +145,19 @@ static partial class WebMusic
     /// Toca el primer botón «Reproducir…» de la página (el resultado principal de la búsqueda, o lo
     /// primero de la portada). No toca los de la barra del reproductor (abajo de todo).
     /// </summary>
-    public static async Task<string?> PlayFirstAsync(nint h, TimeSpan timeout, CancellationToken ct)
+    public static async Task<string?> PlayFirstAsync(nint h, TimeSpan timeout, CancellationToken ct, string? query = null)
     {
-        var until = DateTime.UtcNow + timeout;
+        // Con búsqueda: se espera a que aparezca un «Reproducir …» con alguna palabra buscada (si no,
+        // se tocaría algo de la página anterior); al final, el primero que haya.
+        var words = query == null ? [] : Core.Commands.NameMatcher.Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 3).ToArray();
+        var started = DateTime.UtcNow;
+        var until = started + timeout;
         while (DateTime.UtcNow < until)
         {
-            var played = await Task.Run(() => TryPlayFirst(h), ct);
+            var strict = words.Length > 0 && DateTime.UtcNow - started < timeout * 0.7;
+            var played = await Task.Run(() => TryPlayFirst(h, strict ? words : null), ct);
             if (played != null) return played;
-            await Task.Delay(500, ct);
+            await Task.Delay(400, ct);
         }
         return null;
     }
@@ -174,24 +187,38 @@ static partial class WebMusic
         catch (Exception e) { return "sin accesibilidad: " + e.Message; }
     }
 
-    static string? TryPlayFirst(nint h)
+    static string? TryPlayFirst(nint h, string[]? mustContain)
     {
         try
         {
             var win = WinUi.Bounds(h);
-            var root = AutomationElement.FromHandle(h);
-            var buttons = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+            // Nombre y posición de todos los botones en un solo pedido (la página de YouTube Music es grande).
+            var cache = new CacheRequest();
+            cache.Add(AutomationElement.NameProperty);
+            cache.Add(AutomationElement.BoundingRectangleProperty);
+            cache.Add(InvokePattern.Pattern);
+            AutomationElementCollection buttons;
+            using (cache.Activate())
+            {
+                var root = AutomationElement.FromHandle(h);
+                buttons = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+            }
             AutomationElement? best = null;
             System.Windows.Rect bestRect = default;
             foreach (AutomationElement b in buttons)
             {
                 string name;
                 System.Windows.Rect r;
-                try { name = b.Current.Name ?? ""; r = b.Current.BoundingRectangle; }
-                catch (ElementNotAvailableException) { continue; }
-                if (!PlayButton().IsMatch(name.Trim()) || r.IsEmpty || r.Width < 4) continue;
+                try { name = (b.Cached.Name ?? "").Trim(); r = b.Cached.BoundingRectangle; }
+                catch (Exception e) when (e is ElementNotAvailableException or InvalidOperationException) { continue; }
+                if (!PlayButton().IsMatch(name) || r.IsEmpty || r.Width < 4) continue;
                 // Fuera de la barra de arriba y de la del reproductor (abajo).
                 if (r.Top < win.Top + 60 || r.Bottom > win.Bottom - 110) continue;
+                if (mustContain != null)
+                {
+                    var n = Core.Commands.NameMatcher.Normalize(name);
+                    if (!mustContain.Any(n.Contains)) continue;
+                }
                 if (best == null || r.Top < bestRect.Top - 4 || (Math.Abs(r.Top - bestRect.Top) <= 4 && r.Left < bestRect.Left))
                 {
                     best = b;
@@ -199,10 +226,11 @@ static partial class WebMusic
                 }
             }
             if (best == null) return null;
-            if (best.TryGetCurrentPattern(InvokePattern.Pattern, out var p))
+            var label = best.Cached.Name;
+            if (best.TryGetCachedPattern(InvokePattern.Pattern, out var p) || best.TryGetCurrentPattern(InvokePattern.Pattern, out p))
             {
                 ((InvokePattern)p).Invoke();
-                return best.Current.Name;
+                return label;
             }
             return null;
         }

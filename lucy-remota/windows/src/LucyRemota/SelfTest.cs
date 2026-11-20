@@ -142,14 +142,16 @@ static class SelfTest
         if (latest != null) Ok("buscar actualizaciones", $"última publicada: {latest.Name} (esta: V{Updater.CurrentVersion})");
         else Info("buscar actualizaciones", "no se pudo consultar GitHub desde acá");
 
-        await WebAppTest(dir, Shot);
+        await WebAppTest(dir, Shot, phone, apps);
     }
 
     /// <summary>
-    /// Manejo de una app web abierta (como YouTube Music instalada) en el Chrome real: buscar con «/» en
-    /// su ventana y tocar el primer «Reproducir…» con la accesibilidad de Windows, sin abrir pestañas.
+    /// Música con una app web instalada (como YouTube Music desde Chrome), de punta a punta: un acceso
+    /// directo como el que crea Chrome, la app elegida en Ajustes y órdenes «poné …» desde el teléfono.
+    /// La primera la abre (con su acceso directo, no una pestaña), busca y pone el primer resultado; la
+    /// segunda usa la misma ventana.
     /// </summary>
-    static async Task WebAppTest(string dir, Action<string> shot)
+    static async Task WebAppTest(string dir, Action<string> shot, PhoneSimulator phone, AppsModule apps)
     {
         var chrome = new[]
         {
@@ -160,39 +162,78 @@ static class SelfTest
         var html = Path.Combine(Path.GetFullPath(dir), "musica-prueba.html");
         File.WriteAllText(html, WebAppPage);
         var profile = Path.Combine(Path.GetTempPath(), "lucyremota-chrome-" + Guid.NewGuid().ToString("N")[..8]);
-        using var proc = Process.Start(new ProcessStartInfo(chrome)
-        {
-            UseShellExecute = false,
-            ArgumentList = { "--app=" + new Uri(html).AbsoluteUri, "--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check", "--window-size=900,700" },
-        });
+        var appsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Chrome Apps");
+        Directory.CreateDirectory(appsDir);
+        var lnk = Path.Combine(appsDir, "Música de prueba.lnk");
+        var before = AppSettings.Current.Copy();
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            var ct = cts.Token;
-            var t = Stopwatch.StartNew();
-            var h = await WebMusic.WaitWindow(() => Native.WinUi.TopLevel().FirstOrDefault(x => Native.WinUi.Title(x).StartsWith("Música de prueba")), TimeSpan.FromSeconds(25), ct);
-            if (h == 0) { Fail("app web de música", "no apareció la ventana de Chrome"); return; }
-            if (!await WebMusic.WaitReadyAsync(h, TimeSpan.FromSeconds(20), ct)) { Fail("app web de música", "la accesibilidad no muestra el buscador"); return; }
-            if (!await WebMusic.SearchAsync(h, "queen bohemian", ct)) { Fail("app web de música", "Windows no dejó traer la ventana al frente"); return; }
-            await Task.Delay(800, ct);
-            var played = await WebMusic.PlayFirstAsync(h, TimeSpan.FromSeconds(15), ct);
-            string title = "";
-            for (var i = 0; i < 20 && !(title = Native.WinUi.Title(h)).StartsWith("Sonando"); i++) await Task.Delay(250, ct);
-            shot("musica.png");
-            if (played != null && title == "Sonando: queen bohemian") Ok("app web de música", $"buscó y puso el primer resultado en su ventana en {t.ElapsedMilliseconds} ms ({played})");
-            else
+            await Native.Sta.Run(() =>
             {
-                Fail("app web de música", $"tocó «{played}», título «{title}»");
-                Info("app web de música", await Task.Run(() => WebMusic.Describe(h)));
+                dynamic wsh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+                dynamic sc = wsh.CreateShortcut(lnk);
+                sc.TargetPath = chrome;
+                sc.Arguments = $"--user-data-dir=\"{profile}\" --no-first-run --no-default-browser-check --window-size=900,700 --app={new Uri(html).AbsoluteUri}";
+                sc.Save();
+                return 0;
+            });
+            apps.Refresh();
+            await apps.MusicAppsAsync();
+            var s = AppSettings.Current.Copy();
+            s.MusicApp = "Música de prueba";
+            AppSettings.Save(s);
+            var picked = apps.MusicApp(null);
+            if (picked?.IsWebApp == true) Ok("app web instalada", $"«{picked.Name}» reconocida por su acceso directo ({picked.WebId![..Math.Min(20, picked.WebId.Length)]}…)");
+            else { Fail("app web instalada", $"no la reconoció: {picked}"); return; }
+
+            int ChromeWindows() => Native.WinUi.TopLevel().Count(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0);
+            async Task<string> TitleSoon(string start)
+            {
+                var title = "";
+                for (var i = 0; i < 20; i++)
+                {
+                    var h = Native.WinUi.TopLevel().FirstOrDefault(x => Native.WinUi.Title(x).Contains("Música de prueba"));
+                    title = h == 0 ? "" : Native.WinUi.Title(h);
+                    if (title.StartsWith(start)) break;
+                    await Task.Delay(250);
+                }
+                return title;
             }
-            var windows = Native.WinUi.TopLevel().Where(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0).ToList();
-            if (windows.Count == 1) Ok("sin pestañas nuevas", "una sola ventana de Chrome");
-            else Info("ventanas de Chrome", string.Join(" | ", windows.Select(x => $"«{Native.WinUi.Title(x)}» {Native.WinUi.AppId(x)}")));
+            var steps = new (string? query, string expect, string name)[]
+            {
+                ("queen bohemian", "queen bohemian #1", "poné Queen (app cerrada)"),
+                ("abba", "abba #2", "poné ABBA (app abierta)"),
+                (null, "abba #3", "poné música, sin decir qué (app abierta)"),
+            };
+            foreach (var (query, expect, name) in steps)
+            {
+                var t = Stopwatch.StartNew();
+                var p = query == null ? new JsonObject() : new JsonObject { ["query"] = query };
+                var statuses = await phone.CommandAsync("MEDIA_PLAY", p, expiresMs: 30_000, waitSeconds: 40);
+                var last = statuses[^1];
+                var title = await TitleSoon("Sonando: " + expect);
+                if (last.Str("status") == "success" && title.StartsWith("Sonando: " + expect))
+                    Ok(name, $"«{last.Str("message")}» en {t.ElapsedMilliseconds} ms");
+                else
+                {
+                    Fail(name, $"{last.Str("status")} «{last.Str("message")}», título «{title}»");
+                    var h = Native.WinUi.TopLevel().FirstOrDefault(x => Native.WinUi.Title(x).Contains("Música de prueba"));
+                    if (h != 0) Info(name, await Task.Run(() => WebMusic.Describe(h)));
+                }
+                var windows = ChromeWindows();
+                if (windows == 1) Ok("sin pestañas nuevas", "una sola ventana de Chrome");
+                else Fail("sin pestañas nuevas", string.Join(" | ", Native.WinUi.TopLevel().Where(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0).Select(Native.WinUi.Title)));
+            }
+            shot("musica.png");
         }
-        catch (OperationCanceledException) { Fail("app web de música", "tardó demasiado"); }
         finally
         {
-            try { proc?.Kill(entireProcessTree: true); } catch { }
+            AppSettings.Save(before);
+            try { File.Delete(lnk); } catch { }
+            foreach (var p in Process.GetProcessesByName("chrome"))
+            {
+                try { if (p.MainModule?.FileName != null) p.Kill(entireProcessTree: true); } catch { }
+            }
             await Task.Delay(500);
             try { Directory.Delete(profile, true); } catch { }
         }
@@ -214,6 +255,7 @@ static class SelfTest
           <footer><button aria-label="Reproducir" onclick="document.title='MAL: barra del reproductor'">▶</button></footer>
           <script>
             const q = document.getElementById('q');
+            let plays = 0;
             document.addEventListener('keydown', e => { if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); q.select(); } });
             q.addEventListener('keydown', e => {
               if (e.key !== 'Enter') return;
@@ -222,7 +264,7 @@ static class SelfTest
               main.innerHTML = '';
               const h = document.createElement('h2'); h.textContent = 'Resultado principal'; main.appendChild(h);
               const top = document.createElement('button'); top.textContent = '▶ ' + t; top.setAttribute('aria-label', 'Reproducir ' + t);
-              top.onclick = () => document.title = 'Sonando: ' + t; main.appendChild(top);
+              top.onclick = () => document.title = 'Sonando: ' + t + ' #' + (++plays) + ' - Música de prueba'; main.appendChild(top);
               const other = document.createElement('button'); other.textContent = '▶ otra'; other.setAttribute('aria-label', 'Reproducir otra');
               other.onclick = () => document.title = 'MAL: otra'; main.appendChild(other);
             });

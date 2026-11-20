@@ -18,6 +18,8 @@ sealed class AppSettings
     /// <summary>Aviso en la bandeja cada vez que llega una orden.</summary>
     public bool NotifyOrders { get; set; }
     public bool CheckUpdates { get; set; } = true;
+    /// <summary>Lo último que pediste escuchar (para «poné música» sin decir qué).</summary>
+    public string LastMusicQuery { get; set; } = "";
 
     public static AppSettings Current { get; private set; } = Load();
     public static event Action? Changed;

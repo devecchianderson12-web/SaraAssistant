@@ -163,7 +163,7 @@ public sealed class PhoneSimulator : IAsyncDisposable
     public async Task Send(JsonObject msg) => await Wire.WriteFrameAsync(stream!, cipher!.Seal(Wire.Json(msg)), stop.Token);
 
     /// <summary>Manda una orden y junta los estados hasta el final.</summary>
-    public async Task<List<JsonObject>> CommandAsync(string intent, JsonObject? p = null, string? id = null, long? sentAt = null, bool confirmed = false, int expiresMs = 8000)
+    public async Task<List<JsonObject>> CommandAsync(string intent, JsonObject? p = null, string? id = null, long? sentAt = null, bool confirmed = false, int expiresMs = 8000, int waitSeconds = 10)
     {
         id ??= Guid.NewGuid().ToString();
         await Send(new JsonObject
@@ -172,7 +172,7 @@ public sealed class PhoneSimulator : IAsyncDisposable
             ["sent_at"] = sentAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), ["expires_ms"] = expiresMs, ["confirmed"] = confirmed,
         });
         var list = new List<JsonObject>();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(waitSeconds));
         while (true)
         {
             var m = await inbox.Reader.ReadAsync(cts.Token);
