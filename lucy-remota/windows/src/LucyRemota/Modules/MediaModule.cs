@@ -85,12 +85,8 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
             if (session.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) return Outcome.Ok("Ya está sonando música.");
             if (await session.TryPlayAsync()) return Outcome.Ok("Listo, puse la música.");
         }
-        var music = apps.MusicApp(app);
-        if (music == null)
-        {
-            M.ShellOpen("https://music.youtube.com/");
-            return Outcome.Ok("No encontré una app de música instalada: abrí YouTube Music en el navegador.");
-        }
+        // Sin la app pedida instalada: YouTube Music en una ventana de app del navegador.
+        var music = apps.MusicApp(app) ?? AppsModule.BrowserMusic;
         if (music.IsWebApp)
         {
             // YouTube Music instalada (sin canción pedida): en su ventana (la abierta, o se abre) se busca
@@ -140,7 +136,7 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
 
     async Task<Outcome> Search(string query, string? app, CancellationToken ct)
     {
-        var music = apps.MusicApp(app);
+        var music = apps.MusicApp(app) ?? AppsModule.BrowserMusic;
         var isSpotify = music?.Name.Contains("spotify", StringComparison.OrdinalIgnoreCase) == true;
         if (isSpotify)
         {

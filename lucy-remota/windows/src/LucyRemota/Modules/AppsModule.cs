@@ -85,8 +85,16 @@ sealed class AppsModule : ISkillModule
     static readonly string[][] MusicPriority =
     [
         ["youtube music"], ["spotify"], ["deezer"], ["amazon music"], ["apple music"], ["tidal"], ["soundcloud"],
-        ["media player", "reproductor multimedia", "groove"],
     ];
+
+    /// <summary>Reproductores de Windows: sólo si los elegís en Ajustes (solos no ponen nada sin canciones guardadas).</summary>
+    static readonly string[] LocalPlayers = ["media player", "reproductor multimedia", "groove"];
+
+    /// <summary>
+    /// Sin app de música instalada: YouTube Music en una ventana de app del navegador (Chrome o Edge,
+    /// con tu sesión), sin pestañas. Se maneja igual que la instalada.
+    /// </summary>
+    public static readonly InstalledApp BrowserMusic = new("YouTube Music", "web:youtube-music", WebId: "app:https://music.youtube.com/");
 
     /// <summary>
     /// La app de música a usar: la pedida («spotify»/«youtube»), la elegida en Ajustes o la mejor
@@ -99,14 +107,14 @@ sealed class AppsModule : ISkillModule
         if (wanted == "spotify") return Match(["spotify"]);
         if (wanted == "youtube") return Match(["youtube music"]);
         if (AppSettings.Current.MusicApp is { Length: > 0 } chosen && list.FirstOrDefault(a => a.Name == chosen) is { } picked) return picked;
-        return MusicPriority.Select(Match).FirstOrDefault(a => a != null);
+        return MusicPriority.Select(Match).FirstOrDefault(a => a != null) ?? BrowserMusic;
     }
 
     /// <summary>Las apps de música instaladas (para elegir en Ajustes).</summary>
     public async Task<List<InstalledApp>> MusicAppsAsync()
     {
         var list = await Apps();
-        return MusicPriority.SelectMany(names => list.Where(a => names.Any(n => NameMatcher.Normalize(a.Name).Contains(n))))
+        return MusicPriority.Append(LocalPlayers).SelectMany(names => list.Where(a => names.Any(n => NameMatcher.Normalize(a.Name).Contains(n))))
             .DistinctBy(a => a.Name).ToList();
     }
 
@@ -114,8 +122,26 @@ sealed class AppsModule : ISkillModule
     public void Launch(InstalledApp app)
     {
         if (app.Shortcut != null && File.Exists(app.Shortcut)) M.ShellOpen(app.Shortcut);
+        else if (app.WebId is { } w && w.StartsWith("app:https://", StringComparison.Ordinal) && !File.Exists(app.AppId))
+        {
+            // Ventana de app del navegador (sin barra ni pestañas), con el perfil de siempre.
+            var browser = BrowserPath("chrome.exe") ?? BrowserPath("msedge.exe");
+            if (browser != null) { using var _ = Process.Start(new ProcessStartInfo(browser) { UseShellExecute = false, ArgumentList = { "--app=" + w[4..] } }); }
+            else M.ShellOpen(w[4..]);
+        }
         else if (Path.IsPathRooted(app.AppId) && File.Exists(app.AppId)) M.ShellOpen(app.AppId);
         else M.ShellOpen("explorer.exe", "shell:AppsFolder\\" + app.AppId);
+    }
+
+    static string? BrowserPath(string exe)
+    {
+        foreach (var root in new[] { Microsoft.Win32.Registry.CurrentUser, Microsoft.Win32.Registry.LocalMachine })
+        {
+            using var k = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe);
+            if (k?.GetValue(null) is string path && File.Exists(path)) return path;
+        }
+        var guess = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft", "Edge", "Application", exe);
+        return File.Exists(guess) ? guess : null;
     }
 
     /// <summary>Vuelve a leer la lista de programas (por ejemplo, después de instalar uno).</summary>

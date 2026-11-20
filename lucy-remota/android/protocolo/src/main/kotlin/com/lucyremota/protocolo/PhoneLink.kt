@@ -29,11 +29,21 @@ import java.util.concurrent.ConcurrentHashMap
 /** La PC vinculada: su clave pública queda fija (nadie más puede hacerse pasar por ella). */
 data class PairedPc(val id: String, val name: String, val publicKey: ByteArray)
 
-/** Dónde guarda el teléfono su identidad y la PC vinculada. */
+/**
+ * Dónde guarda el teléfono su identidad y las PC vinculadas. Se pueden vincular varias (cada una con
+ * su QR, una sola vez) y se elige con cuál conectarse: [pairedPc] es la elegida.
+ */
 interface PhoneStore {
     val deviceId: String
     val deviceName: String
+    /** La PC elegida. Asignar una la agrega (o actualiza) y la elige; asignar null la desvincula. */
     var pairedPc: PairedPc?
+    /** Todas las PC vinculadas. */
+    val pairedPcs: List<PairedPc> get() = listOfNotNull(pairedPc)
+    /** Elige otra PC ya vinculada. false si no está. */
+    fun selectPc(id: String): Boolean = pairedPc?.id == id
+    /** Desvincula una PC (si era la elegida, queda elegida otra de las vinculadas). */
+    fun removePc(id: String) { if (pairedPc?.id == id) pairedPc = null }
 }
 
 /** Una intención que la PC sabe hacer (del catálogo que manda al conectarse). */
@@ -152,12 +162,34 @@ class PhoneLink(
         refreshState()
     }
 
-    /** Desvincula: avisa a la PC (si está conectada) y borra su clave. */
+    /** Desvincula la PC elegida: avisa a la PC (si está conectada) y borra su clave. */
     suspend fun unpair() {
         session?.let { runCatching { it.send(JSONObject().put("t", "unpair")) }; it.close() }
         store.pairedPc = null
         _catalog.value = emptyList()
         refreshState()
+    }
+
+    /** Desvincula otra PC (no la elegida): sólo se borra su clave acá. */
+    fun forget(pcId: String) {
+        if (store.pairedPc?.id == pcId) return
+        store.removePc(pcId)
+        refreshState()
+    }
+
+    /**
+     * Cambia a otra PC vinculada: se corta la conexión actual y se busca la elegida (en la red local
+     * o por el relé). Las demás quedan vinculadas para cambiar cuando quieras.
+     */
+    fun selectPc(pcId: String): Boolean {
+        if (store.pairedPc?.id == pcId) return true
+        if (!store.selectPc(pcId)) return false
+        session?.close()
+        relay?.close()
+        _catalog.value = emptyList()
+        refreshState()
+        log("Cambiada a ${store.pairedPc?.name}")
+        return true
     }
 
     // ------------------------------------------------------------------ Anuncios de la PC
@@ -320,7 +352,7 @@ class PhoneLink(
                 } else if (reason == "unauthorized" && paired?.id == pcId && !socket.viaRelay) {
                     // La PC ya no nos tiene vinculados (la desvincularon desde allá). Por el relé no se
                     // le cree (un rechazo sin firma no alcanza para borrar la vinculación).
-                    store.pairedPc = null
+                    store.removePc(pcId)
                     refreshState()
                 }
                 socket.close(); return

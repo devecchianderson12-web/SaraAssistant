@@ -15,6 +15,7 @@ import com.lucyremota.protocolo.PhoneStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -105,8 +106,12 @@ class KeystoreIdentity : DeviceIdentity {
 /** Identificador del teléfono y PC vinculada (la clave pública de la PC, no hay secretos). */
 class PrefsPhoneStore(context: Context) : PhoneStore {
     private val prefs = context.getSharedPreferences("vinculacion", Context.MODE_PRIVATE)
-    private val _paired = MutableStateFlow(read())
-    val paired: StateFlow<PairedPc?> = _paired.asStateFlow()
+    private val _pcs = MutableStateFlow(readAll())
+    private val _active = MutableStateFlow(prefs.getString("activa", null) ?: _pcs.value.firstOrNull()?.id)
+    /** Todas las PC vinculadas (para la lista en pantalla). */
+    val pcs: StateFlow<List<PairedPc>> = _pcs.asStateFlow()
+    /** La PC elegida. */
+    val active: StateFlow<String?> = _active.asStateFlow()
 
     override val deviceId: String = prefs.getString("id", null) ?: ("tel-" + UUID.randomUUID().toString().replace("-", "").take(16)).also {
         prefs.edit().putString("id", it).apply()
@@ -114,17 +119,45 @@ class PrefsPhoneStore(context: Context) : PhoneStore {
 
     override val deviceName: String = listOf(Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, Build.MODEL).distinct().joinToString(" ")
 
+    override val pairedPcs: List<PairedPc> get() = _pcs.value
+
     override var pairedPc: PairedPc?
-        get() = _paired.value
-        set(value) {
-            val e = prefs.edit()
-            if (value == null) e.remove("pc") else e.putString("pc", JSONObject().put("id", value.id).put("name", value.name).put("key", B64.enc(value.publicKey)).toString())
-            e.apply()
-            _paired.value = value
+        get() = _pcs.value.firstOrNull { it.id == _active.value }
+        @Synchronized set(value) {
+            if (value == null) {
+                _active.value?.let(::removePc)
+                return
+            }
+            save(_pcs.value.filter { it.id != value.id } + value, value.id)
         }
 
-    private fun read(): PairedPc? = prefs.getString("pc", null)?.let {
-        runCatching { JSONObject(it).let { j -> PairedPc(j.getString("id"), j.getString("name"), B64.dec(j.getString("key"))) } }.getOrNull()
+    @Synchronized override fun selectPc(id: String): Boolean {
+        if (_pcs.value.none { it.id == id }) return false
+        save(_pcs.value, id)
+        return true
+    }
+
+    @Synchronized override fun removePc(id: String) {
+        val rest = _pcs.value.filter { it.id != id }
+        save(rest, if (_active.value == id) rest.lastOrNull()?.id else _active.value)
+    }
+
+    private fun save(list: List<PairedPc>, active: String?) {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("key", B64.enc(it.publicKey))) }
+        prefs.edit().putString("pcs", arr.toString()).putString("activa", active).remove("pc").apply()
+        _pcs.value = list
+        _active.value = active
+    }
+
+    private fun parse(j: JSONObject) = PairedPc(j.getString("id"), j.getString("name"), B64.dec(j.getString("key")))
+
+    private fun readAll(): List<PairedPc> {
+        prefs.getString("pcs", null)?.let { raw ->
+            return runCatching { JSONArray(raw).let { a -> (0 until a.length()).map { parse(a.getJSONObject(it)) } } }.getOrDefault(emptyList())
+        }
+        // Versiones anteriores guardaban una sola PC.
+        return listOfNotNull(prefs.getString("pc", null)?.let { runCatching { parse(JSONObject(it)) }.getOrNull() })
     }
 }
 

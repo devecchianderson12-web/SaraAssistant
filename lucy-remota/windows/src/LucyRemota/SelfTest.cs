@@ -225,6 +225,32 @@ static class SelfTest
                 else Fail("sin pestañas nuevas", string.Join(" | ", Native.WinUi.TopLevel().Where(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0).Select(Native.WinUi.Title)));
             }
             shot("musica.png");
+            foreach (var p in Process.GetProcessesByName("chrome")) { try { p.Kill(entireProcessTree: true); } catch { } }
+            await Task.Delay(1000);
+
+            // Una PC sin app de música: YouTube Music de verdad, en una ventana de app de Chrome.
+            s = AppSettings.Current.Copy();
+            s.MusicApp = "";
+            s.LastMusicQuery = "";
+            AppSettings.Save(s);
+            File.Delete(lnk);
+            apps.Refresh();
+            await apps.MusicAppsAsync();
+            Info("sin app de música", $"usa: {apps.MusicApp(null)?.Name} ({apps.MusicApp(null)?.WebId})");
+            var tw = Stopwatch.StartNew();
+            var real = await phone.CommandAsync("MEDIA_PLAY", new JsonObject { ["query"] = "queen bohemian rhapsody" }, expiresMs: 30_000, waitSeconds: 40);
+            Info("YouTube Music real", $"{real[^1].Str("status")} «{real[^1].Str("message")}» en {tw.ElapsedMilliseconds} ms");
+            await Task.Delay(5000);
+            var now = await phone.CommandAsync("MEDIA_NOW_PLAYING");
+            Info("YouTube Music real · qué suena", now[^1].Str("message") ?? "");
+            Info("YouTube Music real · ventanas", string.Join(" | ", Native.WinUi.TopLevel().Where(x => Native.WinUi.ClassName(x) == "Chrome_WidgetWin_1" && Native.WinUi.Title(x).Length > 0).Select(Native.WinUi.Title)));
+            var ytm = Native.WinUi.TopLevel().FirstOrDefault(x => Native.WinUi.Title(x).Contains("YouTube Music"));
+            if (ytm != 0)
+            {
+                var d = await Task.Run(() => WebMusic.Describe(ytm));
+                Info("YouTube Music real · botones", d.Length > 1500 ? d[..1500] : d);
+            }
+            shot("musica-real.png");
         }
         finally
         {

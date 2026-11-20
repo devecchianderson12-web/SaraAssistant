@@ -106,6 +106,8 @@ private fun Screen() {
     val c = context.container
     val scope = rememberCoroutineScope()
     val link by c.link.state.collectAsState()
+    val pcs by c.phoneStore.pcs.collectAsState()
+    val activePc by c.phoneStore.active.collectAsState()
     val state by c.orchestrator.state.collectAsState()
     val orders by c.orders.orders.collectAsState()
     val settings by c.settings.settings.collectAsState()
@@ -182,8 +184,9 @@ private fun Screen() {
                 }
             }
         }
-        item { ConnectionPanel(link, onScan = { if (granted(Manifest.permission.CAMERA)) scanning = true else askCamera.launch(Manifest.permission.CAMERA) },
-            onCode = { typingCode = true }, onCancel = { c.link.cancelPairing() }, onUnpair = { scope.launch { c.link.unpair() } }) }
+        item { ConnectionPanel(link, pcs, activePc, onScan = { if (granted(Manifest.permission.CAMERA)) scanning = true else askCamera.launch(Manifest.permission.CAMERA) },
+            onCode = { typingCode = true }, onCancel = { c.link.cancelPairing() }, onUnpair = { scope.launch { c.link.unpair() } },
+            onSelect = { id -> c.link.selectPc(id) }, onForget = { id -> c.link.forget(id) }) }
         if (typingCode) item { CodePanel(onDone = { code -> typingCode = false; c.link.pairWithCode(code); answer = "Conectando…" }, onCancel = { typingCode = false }) }
         item {
             TalkPanel(state, heard, answer, settings.wakeWord, onTalk = {
@@ -220,7 +223,11 @@ private fun Panel(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun ConnectionPanel(link: LinkState, onScan: () -> Unit, onCode: () -> Unit, onCancel: () -> Unit, onUnpair: () -> Unit) {
+private fun ConnectionPanel(
+    link: LinkState, pcs: List<com.lucyremota.protocolo.PairedPc>, activePc: String?,
+    onScan: () -> Unit, onCode: () -> Unit, onCancel: () -> Unit, onUnpair: () -> Unit,
+    onSelect: (String) -> Unit, onForget: (String) -> Unit,
+) {
     Panel {
         val (dot, title, detail) = when (link) {
             is LinkState.Connected -> Triple(Good, "Conectada con ${link.pcName}", (if (link.address == "Internet") "Por Internet" else link.address) + if (link.latencyMs > 0) " · ${link.latencyMs} ms" else "")
@@ -237,9 +244,33 @@ private fun ConnectionPanel(link: LinkState, onScan: () -> Unit, onCode: () -> U
         Spacer(Modifier.height(6.dp))
         Text(detail, color = Muted)
         Spacer(Modifier.height(12.dp))
+        // Varias computadoras: se vinculan una vez cada una y se elige con cuál conectarse.
+        if (pcs.size > 1 || (pcs.size == 1 && link is LinkState.Pairing)) {
+            Text("Computadoras vinculadas", color = Muted, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            pcs.forEach { pc ->
+                val using = pc.id == activePc
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (using) Sky.copy(alpha = 0.18f) else Color.Transparent)
+                        .clickable(enabled = !using) { onSelect(pc.id) }.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(pc.name, color = TextMain, modifier = Modifier.weight(1f))
+                    if (using) Text("En uso", color = Sky, fontSize = 13.sp)
+                    else {
+                        TextButton(onClick = { onSelect(pc.id) }) { Text("Usar") }
+                        TextButton(onClick = { onForget(pc.id) }) { Text("Quitar", color = Muted) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             when (link) {
-                is LinkState.Connected, is LinkState.Searching -> OutlinedButton(onClick = onUnpair) { Text("Desvincular") }
+                is LinkState.Connected, is LinkState.Searching -> {
+                    Button(onClick = onScan) { Text("Agregar otra PC") }
+                    OutlinedButton(onClick = onUnpair) { Text("Desvincular") }
+                }
                 is LinkState.Pairing -> OutlinedButton(onClick = onCancel) { Text("Cancelar") }
                 else -> {
                     Button(onClick = onScan) { Text("Escanear QR") }
