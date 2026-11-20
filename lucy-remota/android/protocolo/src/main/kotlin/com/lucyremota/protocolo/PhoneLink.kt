@@ -44,6 +44,8 @@ interface PhoneStore {
     fun selectPc(id: String): Boolean = pairedPc?.id == id
     /** Desvincula una PC (si era la elegida, queda elegida otra de las vinculadas). */
     fun removePc(id: String) { if (pairedPc?.id == id) pairedPc = null }
+    /** Ninguna elegida (desconectarse sin desvincular). */
+    fun clearSelection() {}
 }
 
 /** Una intención que la PC sabe hacer (del catálogo que manda al conectarse). */
@@ -101,6 +103,9 @@ class PhoneLink(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow<LinkState>(LinkState.Unpaired)
     val state: StateFlow<LinkState> = _state.asStateFlow()
+    private val _seen = MutableStateFlow<Map<String, Long>>(emptyMap())
+    /** Cuándo se vio por última vez cada PC vinculada en la red local (por sus anuncios). */
+    val seen: StateFlow<Map<String, Long>> = _seen.asStateFlow()
     private val _catalog = MutableStateFlow<List<RemoteIntent>>(emptyList())
     /** Lo que sabe hacer la PC conectada. */
     val catalog: StateFlow<List<RemoteIntent>> = _catalog.asStateFlow()
@@ -170,6 +175,15 @@ class PhoneLink(
         refreshState()
     }
 
+    /** Se desconecta de la PC elegida sin desvincularla (queda en la lista para volver a conectarse). */
+    fun disconnect() {
+        store.clearSelection()
+        session?.let { runCatching { it.send(JSONObject().put("t", "bye")) }; it.close() }
+        relay?.close()
+        _catalog.value = emptyList()
+        refreshState()
+    }
+
     /** Desvincula otra PC (no la elegida): sólo se borra su clave acá. */
     fun forget(pcId: String) {
         if (store.pairedPc?.id == pcId) return
@@ -201,6 +215,10 @@ class PhoneLink(
             val packet = DatagramPacket(buf, buf.size)
             try { socket.receive(packet) } catch (e: SocketException) { return } catch (e: Exception) { continue }
             val msg = runCatching { JSONObject(String(packet.data, 0, packet.length)) }.getOrNull() ?: continue
+            msg.optString("pc").takeIf { id -> id.isNotEmpty() && store.pairedPcs.any { it.id == id } }?.let { id ->
+                val now = System.currentTimeMillis()
+                if (now - (_seen.value[id] ?: 0) > 2_000) _seen.value = _seen.value + (id to now)
+            }
             // Ya conectada o conectándose: no se contesta (una sola conexión con la PC). Por el relé sí:
             // si la PC está en la misma red, se pasa a la conexión directa.
             if (msg.optString("t") != "beacon" || session?.viaRelay == false || System.currentTimeMillis() - handshakeAt < 8_000) continue

@@ -107,7 +107,10 @@ class KeystoreIdentity : DeviceIdentity {
 class PrefsPhoneStore(context: Context) : PhoneStore {
     private val prefs = context.getSharedPreferences("vinculacion", Context.MODE_PRIVATE)
     private val _pcs = MutableStateFlow(readAll())
-    private val _active = MutableStateFlow(prefs.getString("activa", null) ?: _pcs.value.firstOrNull()?.id)
+    // «activa» vacía = desconectado a propósito (no se elige otra sola al abrir).
+    private val _active = MutableStateFlow(
+        if (prefs.contains("activa")) prefs.getString("activa", "")!!.ifEmpty { null } else _pcs.value.firstOrNull()?.id,
+    )
     /** Todas las PC vinculadas (para la lista en pantalla). */
     val pcs: StateFlow<List<PairedPc>> = _pcs.asStateFlow()
     /** La PC elegida. */
@@ -137,6 +140,8 @@ class PrefsPhoneStore(context: Context) : PhoneStore {
         return true
     }
 
+    @Synchronized override fun clearSelection() = save(_pcs.value, null)
+
     @Synchronized override fun removePc(id: String) {
         val rest = _pcs.value.filter { it.id != id }
         save(rest, if (_active.value == id) rest.lastOrNull()?.id else _active.value)
@@ -145,7 +150,7 @@ class PrefsPhoneStore(context: Context) : PhoneStore {
     private fun save(list: List<PairedPc>, active: String?) {
         val arr = JSONArray()
         list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("key", B64.enc(it.publicKey))) }
-        prefs.edit().putString("pcs", arr.toString()).putString("activa", active).remove("pc").apply()
+        prefs.edit().putString("pcs", arr.toString()).putString("activa", active ?: "").remove("pc").apply()
         _pcs.value = list
         _active.value = active
     }

@@ -108,6 +108,7 @@ private fun Screen() {
     val link by c.link.state.collectAsState()
     val pcs by c.phoneStore.pcs.collectAsState()
     val activePc by c.phoneStore.active.collectAsState()
+    val seen by c.link.seen.collectAsState()
     val state by c.orchestrator.state.collectAsState()
     val orders by c.orders.orders.collectAsState()
     val settings by c.settings.settings.collectAsState()
@@ -184,9 +185,10 @@ private fun Screen() {
                 }
             }
         }
-        item { ConnectionPanel(link, pcs, activePc, onScan = { if (granted(Manifest.permission.CAMERA)) scanning = true else askCamera.launch(Manifest.permission.CAMERA) },
-            onCode = { typingCode = true }, onCancel = { c.link.cancelPairing() }, onUnpair = { scope.launch { c.link.unpair() } },
-            onSelect = { id -> c.link.selectPc(id) }, onForget = { id -> c.link.forget(id) }) }
+        item { ConnectionPanel(link, pcs, activePc, seen, onScan = { if (granted(Manifest.permission.CAMERA)) scanning = true else askCamera.launch(Manifest.permission.CAMERA) },
+            onCode = { typingCode = true }, onCancel = { c.link.cancelPairing() },
+            onConnect = { id -> c.link.selectPc(id) }, onDisconnect = { c.link.disconnect() },
+            onForget = { id -> if (id == activePc) scope.launch { c.link.unpair() } else c.link.forget(id) }) }
         if (typingCode) item { CodePanel(onDone = { code -> typingCode = false; c.link.pairWithCode(code); answer = "Conectando…" }, onCancel = { typingCode = false }) }
         item {
             TalkPanel(state, heard, answer, settings.wakeWord, onTalk = {
@@ -224,58 +226,106 @@ private fun Panel(content: @Composable () -> Unit) {
 
 @Composable
 private fun ConnectionPanel(
-    link: LinkState, pcs: List<com.lucyremota.protocolo.PairedPc>, activePc: String?,
-    onScan: () -> Unit, onCode: () -> Unit, onCancel: () -> Unit, onUnpair: () -> Unit,
-    onSelect: (String) -> Unit, onForget: (String) -> Unit,
+    link: LinkState, pcs: List<com.lucyremota.protocolo.PairedPc>, activePc: String?, seen: Map<String, Long>,
+    onScan: () -> Unit, onCode: () -> Unit, onCancel: () -> Unit,
+    onConnect: (String) -> Unit, onDisconnect: () -> Unit, onForget: (String) -> Unit,
 ) {
-    Panel {
-        val (dot, title, detail) = when (link) {
-            is LinkState.Connected -> Triple(Good, "Conectada con ${link.pcName}", (if (link.address == "Internet") "Por Internet" else link.address) + if (link.latencyMs > 0) " · ${link.latencyMs} ms" else "")
-            is LinkState.Searching -> Triple(Warn, "Buscando ${link.pcName}…", "Abrí Lucy Remota en la computadora. Tienen que estar en la misma red Wi-Fi (o la PC conectada al hotspot del teléfono).")
-            is LinkState.Pairing -> Triple(Sky, "Vinculando…", "Esperando a ${link.pcName ?: "la computadora"}. Dejá abierta la ventana del QR en la PC.")
-            is LinkState.PairingFailed -> Triple(Bad, "No se pudo vincular", link.reason)
-            LinkState.Unpaired -> Triple(Muted, "Ninguna computadora vinculada", "En la PC abrí Lucy Remota (Receptor) y tocá «Vincular teléfono».")
+    // Vinculando o con error: el aviso arriba de la lista.
+    when (link) {
+        is LinkState.Pairing -> Panel {
+            StatusLine(Sky, "Vinculando…", "Esperando a ${link.pcName ?: "la computadora"}. Dejá abierta la ventana del QR en la PC.")
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onCancel) { Text("Cancelar") }
         }
+        is LinkState.PairingFailed -> Panel { StatusLine(Bad, "No se pudo vincular", link.reason) }
+        else -> Unit
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(12.dp).clip(CircleShape).background(dot))
-            Spacer(Modifier.width(10.dp))
-            Text(title, color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Tus computadoras", color = Muted, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onCode) { Text("Código") }
+            Button(onClick = onScan) { Text(if (pcs.isEmpty()) "Escanear QR" else "+ Agregar") }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(detail, color = Muted)
-        Spacer(Modifier.height(12.dp))
-        // Varias computadoras: se vinculan una vez cada una y se elige con cuál conectarse.
-        if (pcs.size > 1 || (pcs.size == 1 && link is LinkState.Pairing)) {
-            Text("Computadoras vinculadas", color = Muted, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
-            pcs.forEach { pc ->
-                val using = pc.id == activePc
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (using) Sky.copy(alpha = 0.18f) else Color.Transparent)
-                        .clickable(enabled = !using) { onSelect(pc.id) }.padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(pc.name, color = TextMain, modifier = Modifier.weight(1f))
-                    if (using) Text("En uso", color = Sky, fontSize = 13.sp)
-                    else {
-                        TextButton(onClick = { onSelect(pc.id) }) { Text("Usar") }
-                        TextButton(onClick = { onForget(pc.id) }) { Text("Quitar", color = Muted) }
-                    }
+        if (pcs.isEmpty()) {
+            Panel { StatusLine(Muted, "Ninguna computadora vinculada", "En la PC abrí Lucy Remota y tocá «Vincular». Cada PC se vincula una sola vez; después elegís a cuál conectarte.") }
+        }
+        val now = System.currentTimeMillis()
+        pcs.forEachIndexed { i, pc ->
+            val active = pc.id == activePc
+            val connected = active && link is LinkState.Connected
+            val nearby = (seen[pc.id] ?: 0L) > now - 12_000
+            val (dot, detail) = when {
+                connected -> Good to ((link as LinkState.Connected).let { (if (it.address == "Internet") "Conectada por Internet" else "Conectada · ${it.address}") + if (it.latencyMs > 0) " · ${it.latencyMs} ms" else "" })
+                active -> Warn to "Conectando…"
+                nearby -> Good to "Disponible en tu red"
+                else -> Muted to "Tocá para conectarte"
+            }
+            DeviceCard(
+                name = pc.name, detail = detail, dot = dot, color = PcColors[i % PcColors.size], highlighted = active,
+                onClick = { if (!active) onConnect(pc.id) },
+                menu = buildList {
+                    if (active) add("Desconectar" to onDisconnect) else add("Conectar" to { onConnect(pc.id) })
+                    add("Desvincular" to { onForget(pc.id) })
+                },
+            )
+        }
+        if (pcs.size > 1) Text("Te conectás a una computadora a la vez: al elegir otra, se desconecta de la anterior.", color = Muted, fontSize = 13.sp)
+    }
+}
+
+private val PcColors = listOf(Color(0xFF1E2A8A), Color(0xFF6B21A8), Color(0xFF0F766E), Color(0xFF9A3412), Color(0xFF1D4ED8))
+
+@Composable
+private fun StatusLine(dot: Color, title: String, detail: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(12.dp).clip(CircleShape).background(dot))
+        Spacer(Modifier.width(10.dp))
+        Text(title, color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(detail, color = Muted)
+}
+
+/** Una computadora vinculada, como en la lista de dispositivos de una app de escritorio remoto. */
+@Composable
+private fun DeviceCard(name: String, detail: String, dot: Color, color: Color, highlighted: Boolean, onClick: () -> Unit, menu: List<Pair<String, () -> Unit>>) {
+    var open by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (highlighted) Color(0xFF26233A) else Card)
+            .then(if (highlighted) Modifier.border(1.dp, Sky.copy(alpha = 0.5f), RoundedCornerShape(16.dp)) else Modifier)
+            .clickable(onClick = onClick).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        WindowsTile(color)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(9.dp).clip(CircleShape).background(dot))
+                Spacer(Modifier.width(8.dp))
+                Text(name, color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            }
+            Text(detail, color = Muted, fontSize = 14.sp)
+        }
+        Box {
+            TextButton(onClick = { open = true }) { Text("⋮", color = TextMain, fontSize = 22.sp) }
+            androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                menu.forEach { (label, action) ->
+                    androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
                 }
             }
-            Spacer(Modifier.height(10.dp))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            when (link) {
-                is LinkState.Connected, is LinkState.Searching -> {
-                    Button(onClick = onScan) { Text("Agregar otra PC") }
-                    OutlinedButton(onClick = onUnpair) { Text("Desvincular") }
-                }
-                is LinkState.Pairing -> OutlinedButton(onClick = onCancel) { Text("Cancelar") }
-                else -> {
-                    Button(onClick = onScan) { Text("Escanear QR") }
-                    OutlinedButton(onClick = onCode) { Text("Escribir código") }
-                }
+    }
+}
+
+/** Ícono de PC con Windows: un cuadro de color con la ventana de cuatro partes. */
+@Composable
+private fun WindowsTile(color: Color) {
+    Box(Modifier.size(58.dp).clip(RoundedCornerShape(10.dp)).background(color), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(30.dp)) {
+            val gap = size.width * 0.08f
+            val half = (size.width - gap) / 2
+            for (x in 0..1) for (y in 0..1) {
+                drawRect(Color.White, topLeft = androidx.compose.ui.geometry.Offset(x * (half + gap), y * (half + gap)), size = androidx.compose.ui.geometry.Size(half, half))
             }
         }
     }
