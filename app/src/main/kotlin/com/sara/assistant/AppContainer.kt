@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
  * un framework porque el grafo es pequeño y así se evita procesamiento de anotaciones.
  */
 private const val BLUETOOTH_VOICE_GAIN = 2f
+private const val POCKET_VOICE_GAIN = 3f
 
 class AppContainer(private val app: Application) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -71,9 +72,11 @@ class AppContainer(private val app: Application) {
     val connectivity = ConnectivityMonitor(app)
     /** Micrófono de las órdenes con Bluetooth conectado (auto, auriculares). */
     val micRouter = com.sara.assistant.audio.MicRouter(app, { settings.settings.value.micChoice }, logger)
+    /** En el bolsillo la tela apaga la voz: ahí (y sólo ahí) el micrófono se refuerza al triple. */
+    val pocket = com.sara.assistant.audio.PocketDetector(app).also { it.start() }
     // Con Bluetooth (el auto) el teléfono queda lejos: la voz se refuerza al doble.
     val microphone = MicrophoneSource(app, levels, { settings.settings.value.echoCancellation }, { micRouter.captureDevice() }) {
-        if (micRouter.bluetoothAudioConnected()) BLUETOOTH_VOICE_GAIN else 1f
+        (if (micRouter.bluetoothAudioConnected()) BLUETOOTH_VOICE_GAIN else 1f) * (if (pocket.inPocket) POCKET_VOICE_GAIN else 1f)
     }
     private val phraseCache = com.sara.assistant.voice.PhraseCache(app)
     val voskModels = VoskModelManager(app, logger)

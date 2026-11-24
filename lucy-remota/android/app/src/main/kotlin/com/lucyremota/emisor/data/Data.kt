@@ -1,230 +1,219 @@
 package com.lucyremota.emisor.data
 
 import android.content.Context
-import android.os.Build
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.util.Log
-import com.lucyremota.nucleo.memory.MemoryStore
+import com.lucyremota.nucleo.assistant.CommandHistory
+import com.lucyremota.nucleo.engine.ConnectivityStatus
+import com.lucyremota.nucleo.model.HistoryEntry
 import com.lucyremota.nucleo.util.SaraLogger
-import com.lucyremota.nucleo.voice.PiperVoice
-import com.lucyremota.protocolo.B64
-import com.lucyremota.protocolo.DeviceIdentity
-import com.lucyremota.protocolo.PairedPc
-import com.lucyremota.protocolo.PhoneStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.KeyPairGenerator
+import java.io.File
 import java.security.KeyStore
-import java.security.PrivateKey
-import java.security.Signature
-import java.security.spec.ECGenParameterSpec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Ajustes de Lucy Remota (pocos y claros). */
-data class Settings(
-    val wakeWord: Boolean = true,
-    val sensitivity: Float = 0.5f,
-    val usePiper: Boolean = true,
-    val piperVoice: PiperVoice = PiperVoice.DANIELA,
-    val quickResponse: Boolean = true,
-    val chatFollowUp: Boolean = true,
-    /** «Ey Lucy» en lugar de «Lucy» sola (menos activaciones por error). */
-    val heyPrefix: Boolean = false,
-    /** «Repetir tu orden cuando la menciones»: apagado = un tono cuando la PC lo hizo. */
-    val repeatCommands: Boolean = false,
-    val speechRate: Float = 1f,
-)
-
-class SettingsStore(context: Context) {
-    private val prefs = context.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
-    private val _settings = MutableStateFlow(load())
-    val settings: StateFlow<Settings> = _settings.asStateFlow()
-    val current: Settings get() = _settings.value
-
-    private fun load(): Settings {
-        val d = Settings()
-        return Settings(
-            wakeWord = prefs.getBoolean("wake", d.wakeWord),
-            sensitivity = prefs.getFloat("sensibilidad", d.sensitivity),
-            usePiper = prefs.getBoolean("piper", d.usePiper),
-            piperVoice = runCatching { PiperVoice.valueOf(prefs.getString("voz", d.piperVoice.name)!!) }.getOrDefault(d.piperVoice),
-            quickResponse = prefs.getBoolean("rapida", d.quickResponse),
-            chatFollowUp = prefs.getBoolean("charla", d.chatFollowUp),
-            heyPrefix = prefs.getBoolean("ey", d.heyPrefix),
-            repeatCommands = prefs.getBoolean("repetir", d.repeatCommands),
-            speechRate = prefs.getFloat("velocidad", d.speechRate),
-        )
-    }
-
-    fun update(change: (Settings) -> Settings) {
-        val s = change(_settings.value)
-        prefs.edit().putBoolean("wake", s.wakeWord).putFloat("sensibilidad", s.sensitivity).putBoolean("piper", s.usePiper)
-            .putString("voz", s.piperVoice.name).putBoolean("rapida", s.quickResponse).putBoolean("charla", s.chatFollowUp)
-            .putBoolean("ey", s.heyPrefix).putBoolean("repetir", s.repeatCommands).putFloat("velocidad", s.speechRate).apply()
-        _settings.value = s
-    }
-}
-
 /**
- * Identidad del teléfono: clave EC P-256 creada en el almacén seguro de Android (no se puede sacar
- * del teléfono). Con ella firma cada conexión; la PC guarda sólo la parte pública.
+ * Credenciales cifradas con una clave AES-GCM del Android Keystore (la clave nunca sale del
+ * hardware seguro). Las claves de API las carga el usuario en Ajustes: nunca están en el código.
  */
-class KeystoreIdentity : DeviceIdentity {
-    private val alias = "lucyremota_identidad"
-    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-
-    init {
-        if (!keyStore.containsAlias(alias)) {
-            KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
-                initialize(
-                    KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
-                        .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                        .setDigests(KeyProperties.DIGEST_SHA256)
-                        .build(),
-                )
-            }.generateKeyPair()
-        }
-    }
-
-    override val publicKeySpki: ByteArray get() = keyStore.getCertificate(alias).publicKey.encoded
-
-    override fun sign(data: ByteArray): ByteArray =
-        Signature.getInstance("SHA256withECDSA").run { initSign(keyStore.getKey(alias, null) as PrivateKey); update(data); sign() }
-}
-
-/** Identificador del teléfono y PC vinculada (la clave pública de la PC, no hay secretos). */
-class PrefsPhoneStore(context: Context) : PhoneStore {
-    private val prefs = context.getSharedPreferences("vinculacion", Context.MODE_PRIVATE)
-    private val _pcs = MutableStateFlow(readAll())
-    // «activa» vacía = desconectado a propósito (no se elige otra sola al abrir).
-    private val _active = MutableStateFlow(
-        if (prefs.contains("activa")) prefs.getString("activa", "")!!.ifEmpty { null } else _pcs.value.firstOrNull()?.id,
-    )
-    /** Todas las PC vinculadas (para la lista en pantalla). */
-    val pcs: StateFlow<List<PairedPc>> = _pcs.asStateFlow()
-    /** La PC elegida. */
-    val active: StateFlow<String?> = _active.asStateFlow()
-
-    override val deviceId: String = prefs.getString("id", null) ?: ("tel-" + UUID.randomUUID().toString().replace("-", "").take(16)).also {
-        prefs.edit().putString("id", it).apply()
-    }
-
-    override val deviceName: String = listOf(Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, Build.MODEL).distinct().joinToString(" ")
-
-    override val pairedPcs: List<PairedPc> get() = _pcs.value
-
-    override var pairedPc: PairedPc?
-        get() = _pcs.value.firstOrNull { it.id == _active.value }
-        @Synchronized set(value) {
-            if (value == null) {
-                _active.value?.let(::removePc)
-                return
-            }
-            save(_pcs.value.filter { it.id != value.id } + value, value.id)
-        }
-
-    @Synchronized override fun selectPc(id: String): Boolean {
-        if (_pcs.value.none { it.id == id }) return false
-        save(_pcs.value, id)
-        return true
-    }
-
-    @Synchronized override fun clearSelection() = save(_pcs.value, null)
-
-    @Synchronized override fun removePc(id: String) {
-        val rest = _pcs.value.filter { it.id != id }
-        save(rest, if (_active.value == id) rest.lastOrNull()?.id else _active.value)
-    }
-
-    private fun save(list: List<PairedPc>, active: String?) {
-        val arr = JSONArray()
-        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("key", B64.enc(it.publicKey))) }
-        prefs.edit().putString("pcs", arr.toString()).putString("activa", active ?: "").remove("pc").apply()
-        _pcs.value = list
-        _active.value = active
-    }
-
-    private fun parse(j: JSONObject) = PairedPc(j.getString("id"), j.getString("name"), B64.dec(j.getString("key")))
-
-    private fun readAll(): List<PairedPc> {
-        prefs.getString("pcs", null)?.let { raw ->
-            return runCatching { JSONArray(raw).let { a -> (0 until a.length()).map { parse(a.getJSONObject(it)) } } }.getOrDefault(emptyList())
-        }
-        // Versiones anteriores guardaban una sola PC.
-        return listOfNotNull(prefs.getString("pc", null)?.let { runCatching { parse(JSONObject(it)) }.getOrNull() })
-    }
-}
-
-/** Claves (la de la IA): cifradas con una clave del almacén seguro de Android. */
 class SecretStore(context: Context) {
-    private val prefs = context.getSharedPreferences("secretos", Context.MODE_PRIVATE)
-    private val alias = "lucyremota_secretos"
+    private val prefs = context.applicationContext.getSharedPreferences("lucy_secrets", Context.MODE_PRIVATE)
+    private val _version = MutableStateFlow(0)
 
-    private fun key(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
-        }.generateKey()
+    /** Cambia cada vez que se modifica un secreto (para refrescar la UI). */
+    val version: StateFlow<Int> = _version.asStateFlow()
+
+    fun get(name: String): String? {
+        val stored = prefs.getString(name, null) ?: return null
+        return runCatching {
+            val bytes = Base64.decode(stored, Base64.NO_WRAP)
+            val iv = bytes.copyOfRange(0, IV_SIZE)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
+            String(cipher.doFinal(bytes, IV_SIZE, bytes.size - IV_SIZE), Charsets.UTF_8)
+        }.getOrNull()
     }
 
-    fun get(name: String): String? = runCatching {
-        val raw = prefs.getString(name, null) ?: return null
-        val data = B64.dec(raw)
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, data.copyOfRange(0, 12)))
-        String(c.doFinal(data.copyOfRange(12, data.size)))
-    }.getOrNull()?.takeIf { it.isNotBlank() }
+    fun has(name: String) = !get(name).isNullOrBlank()
 
     fun put(name: String, value: String?) {
-        if (value.isNullOrBlank()) { prefs.edit().remove(name).apply(); return }
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, key())
-        prefs.edit().putString(name, B64.enc(c.iv + c.doFinal(value.toByteArray()))).apply()
+        if (value.isNullOrBlank()) {
+            prefs.edit().remove(name).apply()
+        } else {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, key())
+            val encrypted = cipher.iv + cipher.doFinal(value.trim().toByteArray(Charsets.UTF_8))
+            prefs.edit().putString(name, Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
+        }
+        _version.value++
     }
 
-    companion object { const val GEMINI_KEY = "gemini" }
+    private fun key(): SecretKey {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        (keyStore.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+        generator.init(
+            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        return generator.generateKey()
+    }
+
+    companion object {
+        const val AZURE_KEY = "azure_speech_key"
+        const val PORCUPINE_ACCESS_KEY = "porcupine_access_key"
+        const val ANTHROPIC_KEY = "anthropic_api_key"
+        const val GEMINI_KEY = "gemini_api_key"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val ALIAS = "lucy_secrets_v1"
+        private const val TRANSFORMATION = "AES/GCM/NoPadding"
+        private const val IV_SIZE = 12
+    }
 }
 
-/** Preferencias y rutinas que se le enseñan a Lucy («cuando te diga…»). */
-class PrefsMemoryStore(context: Context) : MemoryStore {
-    private val prefs = context.getSharedPreferences("memoria", Context.MODE_PRIVATE)
-    override fun all(): Map<String, String> = prefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
-    override fun put(key: String, value: String) = prefs.edit().putString(key, value).apply()
-    override fun remove(key: String): Boolean = prefs.contains(key).also { prefs.edit().remove(key).apply() }
+class ConnectivityMonitor(context: Context) : ConnectivityStatus {
+    private val manager = context.applicationContext.getSystemService(ConnectivityManager::class.java)
+
+    override fun isOnline(): Boolean {
+        val caps = manager?.getNetworkCapabilities(manager.activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
 }
 
-/** Registro para el diagnóstico (últimas 200 líneas). */
+/** Log del sistema + registro en memoria para la pantalla de diagnóstico (no se guarda en disco). */
 class DiagnosticsLog : SaraLogger {
     private val _lines = MutableStateFlow<List<String>>(emptyList())
     val lines: StateFlow<List<String>> = _lines.asStateFlow()
     private val format = SimpleDateFormat("HH:mm:ss", Locale.ROOT)
 
     override fun d(tag: String, message: String) {
-        Log.d("LucyRemota/$tag", message)
+        Log.d("Lucy/$tag", message)
         append("· $tag: $message")
     }
 
     override fun w(tag: String, message: String, error: Throwable?) {
-        Log.w("LucyRemota/$tag", message, error)
+        Log.w("Lucy/$tag", message, error)
         append("! $tag: $message" + (error?.let { " (${it.javaClass.simpleName}: ${it.message})" } ?: ""))
     }
 
     @Synchronized
     private fun append(line: String) {
-        _lines.value = (_lines.value + "${format.format(Date())} $line").takeLast(200)
+        _lines.value = (_lines.value + "${format.format(Date())} $line").takeLast(150)
+    }
+
+    fun clear() {
+        _lines.value = emptyList()
     }
 }
 
+/**
+ * Historial mínimo: sólo texto (nunca audio), máximo [MAX_ENTRIES] entradas, en almacenamiento
+ * privado de la app. Se puede desactivar y borrar desde Privacidad.
+ */
+class FileCommandHistory(context: Context, private val enabled: () -> Boolean) : CommandHistory {
+    private val file = File(context.filesDir, "history.json")
+    private val mutex = Mutex()
+    private val _entries = MutableStateFlow<List<HistoryEntry>>(emptyList())
+    val entries: StateFlow<List<HistoryEntry>> = _entries.asStateFlow()
+
+    suspend fun load() = mutex.withLock {
+        _entries.value = withContext(Dispatchers.IO) { readFile() }
+    }
+
+    override suspend fun record(entry: HistoryEntry) {
+        if (!enabled()) return
+        mutex.withLock {
+            val updated = (listOf(entry) + _entries.value).take(MAX_ENTRIES)
+            _entries.value = updated
+            withContext(Dispatchers.IO) { writeFile(updated) }
+        }
+    }
+
+    suspend fun clear() = mutex.withLock {
+        _entries.value = emptyList()
+        withContext(Dispatchers.IO) { file.delete() }
+    }
+
+    private fun readFile(): List<HistoryEntry> = runCatching {
+        if (!file.exists()) return emptyList()
+        val array = JSONArray(file.readText())
+        (0 until array.length()).map { i ->
+            val o = array.getJSONObject(i)
+            HistoryEntry(o.getLong("t"), o.getString("heard"), o.getString("intent"), o.getString("response"), o.getBoolean("ok"))
+        }
+    }.getOrDefault(emptyList())
+
+    private fun writeFile(list: List<HistoryEntry>) {
+        val array = JSONArray()
+        list.forEach {
+            array.put(
+                JSONObject().put("t", it.timestampMillis).put("heard", it.heard).put("intent", it.intentLabel)
+                    .put("response", it.response).put("ok", it.success),
+            )
+        }
+        val tmp = File(file.parentFile, "history.json.tmp")
+        tmp.writeText(array.toString())
+        if (!tmp.renameTo(file)) {
+            file.delete()
+            tmp.renameTo(file)
+        }
+    }
+
+    companion object {
+        const val MAX_ENTRIES = 100
+    }
+}
+
+/** Lo que Sara recuerda (preferencias y rutinas), guardado en el teléfono. */
+class PrefsMemoryStore(context: Context) : com.lucyremota.nucleo.memory.MemoryStore {
+    private val prefs = context.getSharedPreferences("lucy_memory", Context.MODE_PRIVATE)
+    private val _entries = MutableStateFlow(read())
+    /** Para mostrar los recuerdos en Ajustes. */
+    val entries: StateFlow<Map<String, String>> = _entries.asStateFlow()
+
+    private fun read(): Map<String, String> =
+        prefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap().toSortedMap()
+
+    override fun all(): Map<String, String> = _entries.value
+
+    @Synchronized
+    override fun put(key: String, value: String) {
+        prefs.edit().putString(key, value).apply()
+        _entries.value = read() + (key to value)
+    }
+
+    @Synchronized
+    override fun remove(key: String): Boolean {
+        if (!prefs.contains(key)) return false
+        prefs.edit().remove(key).apply()
+        _entries.value = read() - key
+        return true
+    }
+
+    fun clear() {
+        prefs.edit().clear().apply()
+        _entries.value = emptyMap()
+    }
+}

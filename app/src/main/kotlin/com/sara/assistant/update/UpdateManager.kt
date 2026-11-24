@@ -105,6 +105,13 @@ class UpdateManager(private val context: Context, private val logger: SaraLogger
         _state.value = if (success) UpdateState.UpToDate else UpdateState.Failed(message ?: "La instalación se canceló.", release)
     }
 
+    /** «SaraAssistant-v1.5.2.apk» → 10502 (su versionCode); las viejas «v1.0.N-debug» → N. */
+    private fun versionCodeOf(name: String): Int? {
+        val m = Regex("""^SaraAssistant-v(\d+)\.(\d+)\.(\d+)(?:-debug)?\.apk$""").find(name) ?: return null
+        val (major, minor, patch) = m.destructured.toList().take(3).map { it.toInt() }
+        return if (major == 1 && minor == 0) patch else major * 10_000 + minor * 100 + patch
+    }
+
     private fun fetchLatest(): ReleaseInfo? {
         val connection = (URL("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest").openConnection() as HttpURLConnection).apply {
             setRequestProperty("Accept", "application/vnd.github+json")
@@ -116,13 +123,13 @@ class UpdateManager(private val context: Context, private val logger: SaraLogger
             if (connection.responseCode == 404) return null // todavía no hay releases
             if (connection.responseCode != 200) error("GitHub respondió ${connection.responseCode}")
             val json = JSONObject(connection.inputStream.bufferedReader().readText())
-            val tag = json.getString("tag_name")
-            val version = UpdatePolicy.versionFromTag(tag) ?: return null
             val assets = json.getJSONArray("assets")
-            val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
-                .firstOrNull { it.getString("name").let { n -> n.startsWith("SaraAssistant-") && n.endsWith(".apk") } } ?: return null
+            // El APK de Sara: «SaraAssistant-v1.5.2.apk» (Sara lleva su propio número de versión).
+            val (apk, version) = (0 until assets.length()).map { assets.getJSONObject(it) }
+                .mapNotNull { a -> versionCodeOf(a.getString("name"))?.let { a to it } }
+                .maxByOrNull { it.second } ?: return null
             return ReleaseInfo(
-                tag = tag,
+                tag = "V" + apk.getString("name").removePrefix("SaraAssistant-v").removeSuffix(".apk").removeSuffix("-debug"),
                 versionCode = version,
                 apkUrl = apk.getString("browser_download_url"),
                 sizeBytes = apk.optLong("size", -1),

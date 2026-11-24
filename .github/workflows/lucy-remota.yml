@@ -52,12 +52,13 @@ jobs:
           LUCY_RELAY_URL=http://127.0.0.1:8787 dotnet test tests/LucyRemota.Tests -c Release
 
       - name: Compilar Lucy Remota (un solo .exe portable)
-        run: dotnet publish src/LucyRemota -c Release -o publicado -p:Version=1.0.${{ github.run_number }}
+        shell: bash
+        run: dotnet publish src/LucyRemota -c Release -o publicado -p:Version=$(tr -d '[:space:]' < VERSION)
 
       - name: Nombre del archivo
         shell: pwsh
         run: |
-          $name = "LucyRemota-v1.0.${{ github.run_number }}.exe"
+          $name = "LucyRemota-v$((Get-Content VERSION -Raw).Trim()).exe"
           Copy-Item publicado/LucyRemota.exe $name
           "{0}: {1:N1} MB" -f $name, ((Get-Item $name).Length / 1MB)
 
@@ -66,7 +67,7 @@ jobs:
         run: |
           $dir = Join-Path $PWD "autoprueba"
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          $p = Start-Process -FilePath "LucyRemota-v1.0.${{ github.run_number }}.exe" -ArgumentList "--autoprueba", "`"$dir`"" -Wait -PassThru
+          $p = Start-Process -FilePath "LucyRemota-v$((Get-Content VERSION -Raw).Trim()).exe" -ArgumentList "--autoprueba", "`"$dir`"" -Wait -PassThru
           "Arranque + autoprueba: $($sw.ElapsedMilliseconds) ms"
           Get-Content (Join-Path $dir "autoprueba.txt")
           if ($p.ExitCode -ne 0) { throw "La autoprueba falló ($($p.ExitCode))" }
@@ -149,11 +150,15 @@ jobs:
           echo "--- PC simulada"; cat pcsim.log pcsim2.log
 
       - name: Compilar APK
+        env:
+          SARA_AZURE_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          SARA_AZURE_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          SARA_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./gradlew --no-daemon :app:assembleDebug
 
       - name: Nombre del archivo
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "LucyRemota-v1.0.${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "LucyRemota-v$(tr -d '[:space:]' < VERSION).apk"
           ls -la LucyRemota-*.apk
 
       - name: Guardar el APK
@@ -232,7 +237,9 @@ jobs:
             adb logcat -d | grep -E "LucyRemota/|AndroidRuntime|FATAL" | tail -40 || true
             adb logcat -d > logcat.txt
             if grep -q "FATAL EXCEPTION" logcat.txt; then grep -A30 "FATAL EXCEPTION" logcat.txt | head -60; exit 1; fi
-            adb logcat -d | grep -q "Volumen al 40" || (echo "No llegó la respuesta de la PC"; exit 1)
+            cat pcsim.log
+            grep -q "Volumen al 40" pcsim.log || (echo "La PC no recibió las órdenes"; exit 1)
+            adb logcat -d | grep -q "Okey" || (echo "Lucy no contestó"; exit 1)
       - name: Publicar capturas (manual)
         if: always() && github.event_name == 'workflow_dispatch'
         run: |
@@ -252,6 +259,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Descargar código (para ver qué cambió)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Cada plataforma se actualiza por separado: sólo se publica la que cambió en este envío.
+      - name: Qué cambió
+        id: cambios
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then CHANGED="lucy-remota/windows lucy-remota/android"; else CHANGED=$(git diff --name-only "$BEFORE" "${{ github.sha }}"); fi
+          W=false; A=false
+          echo "$CHANGED" | grep -qE '^lucy-remota/(windows|protocol)/' && W=true
+          echo "$CHANGED" | grep -qE '^lucy-remota/(android|protocol)/' && A=true
+          echo "windows=$W" >> "$GITHUB_OUTPUT"; echo "android=$A" >> "$GITHUB_OUTPUT"
+          echo "Windows: $W · Android: $A"
       - name: Descargar el .exe
         uses: actions/download-artifact@v4
         with:
@@ -270,8 +292,12 @@ jobs:
           set -e
           TAG=$(gh api "repos/$REPO/releases/latest" -q .tag_name)
           echo "Release: $TAG"
-          for a in $(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name' | grep -E '^LucyRemota-' || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
-          gh release upload "$TAG" LucyRemota-*.exe LucyRemota-*.apk -R "$REPO" --clobber
+          UP=""
+          if [ "${{ steps.cambios.outputs.windows }}" = true ]; then UP="$UP $(ls LucyRemota-*.exe)"; PAT='exe'; fi
+          if [ "${{ steps.cambios.outputs.android }}" = true ]; then UP="$UP $(ls LucyRemota-*.apk)"; PAT="${PAT:+$PAT|}apk"; fi
+          if [ -z "$UP" ]; then echo "Nada para publicar"; exit 0; fi
+          for a in $(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name' | grep -E "^LucyRemota-.*\.($PAT)$" || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
+          gh release upload "$TAG" $UP -R "$REPO" --clobber
           FILES=$(gh api "repos/$REPO/releases/tags/$TAG" -q '[.assets[].name] | join("\n- ")')
           printf 'Sara para Android, Lucy para Windows y Lucy Remota (el teléfono controla la computadora).\n\n- %s\n\nSara: SaraAssistant-…apk (Android).\nLucy: Lucy-Windows-…exe (Windows).\nLucy Remota: LucyRemota-…apk en el teléfono + LucyRemota-…exe en la computadora.\n' "$FILES" > notas.md
           gh release edit "$TAG" -R "$REPO" --title "SaraAssistant" --notes-file notas.md

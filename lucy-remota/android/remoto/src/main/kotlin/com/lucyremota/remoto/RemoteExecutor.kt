@@ -22,6 +22,12 @@ class RemoteExecutor(
     private val orders: OrderLog,
     /** Lo último que se escuchó (para el historial de la pantalla). */
     private val lastHeard: () -> String,
+    /**
+     * Lucy completa (con todo lo de Sara en el teléfono): lo que no es de la PC lo hace el teléfono, y
+     * la música, el volumen y las apps van a la PC sólo si hay una conectada (si no, en el teléfono).
+     * Lo que nombra la computadora («bloqueá la compu») va siempre a la PC.
+     */
+    private val phoneFallback: Boolean = false,
 ) : CommandExecutor {
 
     /** Una orden para Windows: intención + parámetros con su tipo. */
@@ -38,6 +44,11 @@ class RemoteExecutor(
                 if (!r.success) return r.copy(response = said.joinToString(" "))
             }
             return ExecutionResult(true, said.joinToString(" "), informative = true)
+        }
+        if (phoneFallback) {
+            val forPc = intent is CommandIntent.Skill && intent.skill == PcInterpreter.PC
+            val remote = if (forPc || (intent !is CommandIntent.Skill && link.state.value is com.lucyremota.protocolo.LinkState.Connected)) toRemote(intent) else null
+            return if (remote != null) send(remote, confirmed = false) else local.execute(intent)
         }
         val remote = toRemote(intent) ?: return localOrExplain(intent)
         return send(remote, confirmed = false)
@@ -107,20 +118,26 @@ class RemoteExecutor(
         if (orderId.isEmpty() || orderId != final.commandId) {
             orders.upsert(SentOrder(final.commandId, System.currentTimeMillis(), heard, remote.intent, final.status, final.message))
         }
+        // Lo que pide información (qué suena, la hora de la PC…) se dice; lo demás, sólo «Okey».
+        val asks = remote.intent in INFO_INTENTS
         return when (final.status) {
-            CommandStatus.SUCCESS -> ExecutionResult(true, final.message.ifBlank { "Listo." }, informative = true)
+            CommandStatus.SUCCESS -> ExecutionResult(true, if (asks) final.message.ifBlank { "Okey." } else "Okey.", informative = asks)
             CommandStatus.NEEDS_CONFIRMATION -> ExecutionResult(
                 true, "",
                 confirmation = Confirmation(final.message.ifBlank { "¿Lo hago?" }, "Listo, no hago nada.") { send(remote, confirmed = true) },
             )
-            CommandStatus.NOT_CONNECTED -> ExecutionResult(false, "La computadora no está conectada. Abrí Lucy Remota en la PC, en la misma red.", ErrorKind.NETWORK, informative = true)
-            CommandStatus.NO_ANSWER -> ExecutionResult(false, "La computadora no contestó; puede que lo haya hecho igual.", ErrorKind.NETWORK, informative = true)
+            CommandStatus.NOT_CONNECTED -> ExecutionResult(false, "No encuentro la computadora.", ErrorKind.NETWORK, informative = true)
+            // La PC ya la recibió (se reintenta hasta que llega): la está haciendo.
+            CommandStatus.NO_ANSWER -> ExecutionResult(true, "Okey.")
             CommandStatus.EXPIRED -> ExecutionResult(false, "La orden llegó tarde a la computadora y no la hice.", ErrorKind.NETWORK, informative = true)
             else -> ExecutionResult(false, final.message.ifBlank { "La computadora no pudo hacerlo." }, ErrorKind.EXECUTION_FAILED, informative = true)
         }
     }
 
     companion object {
+        /** Órdenes que piden un dato: su respuesta se dice entera. */
+        private val INFO_INTENTS = setOf("MEDIA_NOW_PLAYING", "GET_TIME", "GET_SYSTEM_INFO", "GET_VOLUME", "LIST_APPLICATIONS")
+
         /** Para el historial: «Volumen al 70 %» en vez de SET_VOLUME. */
         fun describe(intent: CommandIntent) = intent.label()
     }

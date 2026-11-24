@@ -131,9 +131,17 @@ object SkillParser {
         }
 
         // ---------------------------------------------------------- Llamadas y SMS
-        Regex("^(?:llama|llamame|llamar|llamale|marca|marcale|discar|disca)\\s+(?:a\\s+|al\\s+)?(.+)$").find(n)?.let { m ->
-            val who = m.groupValues[1].replace(Regex("\\s+por (telefono|whatsapp)$"), "").trim()
-            if (who.isNotBlank()) return skill("llamadas", "llamar", "contacto" to who)
+        // «Haceme una videollamada por WhatsApp a Tati», «videollamá a mamá».
+        Regex("^(?:(?:haceme|hace|hacele|hacer|inicia|empeza)\\s+)?(?:una\\s+)?(?:video\\s*llamada|videollama|videollamale|videollamar)\\s+(.+)$").find(n)?.let { m ->
+            val who = callee(m.groupValues[1])
+            if (who.isNotBlank()) return skill("llamadas", "llamar", "contacto" to who, "via" to "whatsapp_video")
+        }
+        // «Llamá a Tatiana», «llamá por WhatsApp a Tatiana», «llamá a mamá por WhatsApp».
+        Regex("^(?:llama|llamame|llamar|llamale|marca|marcale|discar|disca)\\s+(.+)$").find(n)?.let { m ->
+            val rest = m.groupValues[1]
+            val whatsapp = Regex("\\b(?:por|en|de|con|desde|usando)\\s+(?:el\\s+)?$WA\\b").containsMatchIn(rest)
+            val who = callee(rest)
+            if (who.isNotBlank()) return skill("llamadas", "llamar", "contacto" to who, "via" to if (whatsapp) "whatsapp" else "telefono")
         }
         Regex("^(?:manda|mandale|envia|enviale|escribi|escribile)\\s+(?:un\\s+)?(?:sms|mensaje de texto)\\s+(?:a|al|para)\\s+(.+?)\\s+(?:que diga|diciendo|diciendole)\\s+(.+)$").find(n)?.let { m ->
             val message = Regex("(?:que diga|diciendo|diciendole)\\s+(.+)$", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.trim() ?: m.groupValues[2]
@@ -301,6 +309,16 @@ object SkillParser {
 
     /** Devuelve el fragmento del texto original (con mayúsculas y tildes) que corresponde a [normalizedTail]. */
     private val GENERIC_BLUETOOTH = setOf("bluetooth", "blutu", "bluetu", "mi bluetooth", "el bluetooth", "algo", "algun dispositivo", "lo de siempre", "lo que siempre")
+
+    private const val WA = "(?:whatsapp|whats app|wasap|guasap|wsp|wpp|whatsap)"
+
+    /** «por whatsapp a tatiana», «a mamá por teléfono», «al 11 5555» → el contacto o número. */
+    private fun callee(rest: String): String = rest
+        .replace(Regex("\\b(?:por|en|de|con|desde|usando)\\s+(?:el\\s+)?(?:$WA|telefono|celular|linea)\\b"), " ")
+        .replace(Regex("\\s+"), " ").trim()
+        .replace(Regex("^(?:a|al|con)\\s+"), "")
+        .replace(Regex("^(?:(?:mi|la|el)\\s+)+"), "")
+        .trim(' ', ',', '.')
 
     /** «mi mamá por WhatsApp» → «mamá». */
     private fun cleanContact(raw: String): String = raw

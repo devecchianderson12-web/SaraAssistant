@@ -54,7 +54,7 @@ jobs:
       - name: Renombrar APK
         id: apk
         run: |
-          NAME="SaraAssistant-v1.0.${{ github.run_number }}-debug.apk"
+          NAME="SaraAssistant-v$(tr -d '[:space:]' < app/VERSION).apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 

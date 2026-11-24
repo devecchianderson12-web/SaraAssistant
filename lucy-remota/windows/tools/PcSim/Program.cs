@@ -46,6 +46,7 @@ sealed class SimModule : ISkillModule
         Interlocked.Increment(ref Executions);
         if (intent == "SHUTDOWN") return Task.FromResult(Outcome.Ok("(simulado) apagando"));
         Volume = Math.Clamp(p.Int("level") ?? Volume + p.Int("delta")!.Value, 0, 100);
+        Console.WriteLine($"[pc] hecho: Volumen al {Volume} %");
         return Task.FromResult(Outcome.Ok($"Volumen al {Volume} %", new JsonObject { ["level"] = Volume }));
     }
 }

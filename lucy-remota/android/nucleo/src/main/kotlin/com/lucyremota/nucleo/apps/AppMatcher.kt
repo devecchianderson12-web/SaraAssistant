@@ -41,8 +41,16 @@ object AppMatcher {
         val perToken = qTokens.map { qt -> lTokens.maxOf { similarity(qt, it) } }.average()
         best = maxOf(best, perToken * 0.85)
         best = maxOf(best, similarity(qCompact, lCompact) * 0.85)
+        // Suena igual aunque se escriba distinto («Jessi» / «Yessi», «Vanesa» / «Banessa»).
+        if (qCompact.length >= 3) best = maxOf(best, similarity(phonetic(qCompact), phonetic(lCompact)) * 0.82)
         return best
     }
+
+    /** Clave de cómo suena en español: y/ll/j/i, c/s/z, b/v, h muda, letras dobles. */
+    internal fun phonetic(s: String): String = s
+        .replace("ch", "#").replace("qu", "k").replace(Regex("c(?=[ei])"), "s").replace("c", "k").replace("z", "s")
+        .replace("v", "b").replace("w", "u").replace("h", "").replace("ll", "y").replace(Regex("g(?=[ei])"), "j")
+        .replace("y", "i").replace("j", "i").replace(Regex("(.)\\1+"), "$1").replace("#", "ch")
 
     /** Nombres en español de apps del sistema que en algunos teléfonos están en inglés. */
     private val synonyms = mapOf(

@@ -27,7 +27,7 @@ private const val MISSING_MODEL =
 
 /**
  * Palabra de activación con Vosk, en dos etapas y 100 % local:
- * 1. Reconocimiento continuo con gramática restringida a ["sara", "[unk]"]. Reacciona a los
+ * 1. Reconocimiento continuo con gramática restringida a ["lucy", "[unk]"]. Reacciona a los
  *    resultados parciales (sin esperar silencio), así responde rápido y funciona con música.
  * 2. Ante un candidato, los últimos 2,4 s se transcriben con vocabulario libre y sólo se acepta si
  *    aparece «Sara»; con música también vale ganarle a palabras parecidas («para», «cara»…).
@@ -41,7 +41,7 @@ class VoskWakeWordEngine(
     override val displayName = "Vosk (local, sin cuenta)"
 
     override suspend fun availability(): Availability = when {
-        !microphone.hasPermission() -> Availability.Unavailable(UnavailableReason.PERMISSION_DENIED, "Sara necesita permiso de micrófono.")
+        !microphone.hasPermission() -> Availability.Unavailable(UnavailableReason.PERMISSION_DENIED, "Lucy necesita permiso de micrófono.")
         !models.isInstalled() -> Availability.Unavailable(UnavailableReason.MISSING_MODEL, MISSING_MODEL)
         else -> Availability.Available
     }
@@ -163,14 +163,15 @@ class VoskWakeWordEngine(
 
     private companion object {
         const val TAG = "VoskWake"
-        const val GRAMMAR = "[\"sara\", \"[unk]\"]"
+        /** Cómo escribe el modelo en español el nombre («luci» para Lucy). */
+        val GRAMMAR: String get() = "[\"${WakeWordTuning.profile.keyword}\", \"[unk]\"]"
         const val WINDOW_CHUNKS = 24 // 2,4 s
         const val PREROLL_CHUNKS = 5
         const val MUSIC_CHECK_CHUNKS = 20 // cada 2 s
-        val COMPETITORS: String = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
+        val COMPETITORS: String get() = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
         /** Primera etapa de «Ey Sara»: el nombre solo o con el llamado delante. */
-        val PREFIXED_GRAMMAR: String = (WakeWordTuning.PREFIXED_PHRASES + listOf("sara", "[unk]")).joinToString(",", "[", "]") { "\"$it\"" }
-        val PREFIXED_COMPETITORS: String = (WakeWordTuning.PREFIXED_PHRASES + WakeWordTuning.COMPETITOR_GRAMMAR).joinToString(",", "[", "]") { "\"$it\"" }
+        val PREFIXED_GRAMMAR: String get() = (WakeWordTuning.PREFIXED_PHRASES + listOf(WakeWordTuning.profile.keyword, "[unk]")).joinToString(",", "[", "]") { "\"$it\"" }
+        val PREFIXED_COMPETITORS: String get() = (WakeWordTuning.PREFIXED_PHRASES + WakeWordTuning.COMPETITOR_GRAMMAR).joinToString(",", "[", "]") { "\"$it\"" }
     }
 }
 
@@ -186,7 +187,7 @@ class VoskSpeechRecognitionEngine(
     override val isOnline = false
 
     override suspend fun availability(): Availability = when {
-        !microphone.hasPermission() -> Availability.Unavailable(UnavailableReason.PERMISSION_DENIED, "Sara necesita permiso de micrófono.")
+        !microphone.hasPermission() -> Availability.Unavailable(UnavailableReason.PERMISSION_DENIED, "Lucy necesita permiso de micrófono.")
         !models.isInstalled() -> Availability.Unavailable(UnavailableReason.MISSING_MODEL, MISSING_MODEL)
         else -> Availability.Available
     }

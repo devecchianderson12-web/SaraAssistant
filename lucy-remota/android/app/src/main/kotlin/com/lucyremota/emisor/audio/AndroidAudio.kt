@@ -106,25 +106,70 @@ class ChimePlayer(private val notes: List<Pair<Double, Double>> = LISTEN) {
     }
 }
 
-/** Sonido de «te escucho» y audio en primer plano (baja la música del teléfono) mientras Lucy escucha y habla. */
 class AndroidActivationFeedback(
-    private val chimePlayer: ChimePlayer,
+    private val chime: ChimePlayer,
     private val focus: AudioFocusHelper,
-) : com.lucyremota.nucleo.assistant.ActivationFeedback {
-    @Volatile private var request: android.media.AudioFocusRequest? = null
+    private val logger: SaraLogger,
+    private val router: MicRouter? = null,
+    /** Ajuste «Música mientras te escucho». */
+    private val musicMode: () -> MusicWhileListening = { MusicWhileListening.DUCK },
+) : ActivationFeedback {
+    @Volatile private var request: AudioFocusRequest? = null
 
-    override suspend fun chime() = chimePlayer.play()
+    override suspend fun chime() {
+        runCatching { chime.play() }.onFailure { logger.w("Feedback", "No se pudo reproducir la señal", it) }
+    }
 
     private val doneTone = ChimePlayer(ChimePlayer.DONE)
 
-    override suspend fun done() { runCatching { doneTone.play() } }
+    override suspend fun done() {
+        runCatching { doneTone.play() }.onFailure { logger.w("Feedback", "No se pudo reproducir el tono de listo", it) }
+    }
 
     override fun interactionStarted() {
-        request = runCatching { focus.requestSpeech() }.getOrNull()
+        val pause = when (musicMode()) {
+            MusicWhileListening.DUCK -> false
+            MusicWhileListening.PAUSE -> true
+            MusicWhileListening.PAUSE_BLUETOOTH -> router?.bluetoothAudioConnected() == true
+        }
+        if (request == null) request = focus.requestSpeech(pause)
+        router?.beginInteraction()
     }
 
     override fun interactionEnded() {
+        router?.endInteraction()
         focus.abandon(request)
         request = null
+    }
+}
+
+/** Volumen del canal multimedia (STREAM_MUSIC). No toca alarmas, llamadas ni notificaciones. */
+class AndroidVolumeControl(context: Context) : VolumeControl {
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+
+    override fun state(): VolumeState = VolumeState(
+        current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
+        min = audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC),
+        max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
+        isFixed = audioManager.isVolumeFixed,
+        isMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC),
+    )
+
+    override fun setIndex(index: Int): Boolean = try {
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, index, AudioManager.FLAG_SHOW_UI)
+        true
+    } catch (e: SecurityException) {
+        false
+    }
+
+    override fun setMuted(muted: Boolean): Boolean = try {
+        audioManager.adjustStreamVolume(
+            AudioManager.STREAM_MUSIC,
+            if (muted) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE,
+            AudioManager.FLAG_SHOW_UI,
+        )
+        true
+    } catch (e: SecurityException) {
+        false
     }
 }

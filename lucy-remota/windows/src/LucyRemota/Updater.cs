@@ -13,17 +13,36 @@ namespace LucyRemota;
 /// </summary>
 static partial class Updater
 {
-    public sealed record Release(int Version, string Url, string Name);
+    public sealed record Release(int Version, string Url, string Name)
+    {
+        /// <summary>«1.5.3» (para mostrar).</summary>
+        public string Label => Name.Replace("LucyRemota-v", "", StringComparison.OrdinalIgnoreCase).Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+    }
 
     const string Repo = "devecchianderson12-web/SaraAssistant";
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
-    [GeneratedRegex(@"^LucyRemota-v1\.0\.(\d+)\.exe$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^LucyRemota-v(\d+)\.(\d+)\.(\d+)\.exe$", RegexOptions.IgnoreCase)]
     private static partial Regex ExeName();
 
-    /// <summary>Número de esta versión (el N de 1.0.N).</summary>
-    public static int CurrentVersion =>
-        int.TryParse(Application.ProductVersion.Split('+')[0].Split('.').ElementAtOrDefault(2), out var n) ? n : 0;
+    /// <summary>
+    /// Número para comparar versiones: 1.5.2 → 10502 (cada número llega hasta 10). Las viejas
+    /// «1.0.N» valen N, así cualquier 1.5.x es más nueva.
+    /// </summary>
+    public static int Code(int major, int minor, int patch) => major == 1 && minor == 0 ? patch : major * 10_000 + minor * 100 + patch;
+
+    /// <summary>Esta versión, como se muestra («1.5.2»).</summary>
+    public static string CurrentName => string.Join('.', Application.ProductVersion.Split('+')[0].Split('.').Take(3));
+
+    /// <summary>Esta versión para comparar (ver <see cref="Code"/>).</summary>
+    public static int CurrentVersion
+    {
+        get
+        {
+            var p = CurrentName.Split('.').Select(x => int.TryParse(x, out var n) ? n : 0).Concat([0, 0, 0]).ToArray();
+            return Code(p[0], p[1], p[2]);
+        }
+    }
 
     /// <summary>La versión más nueva publicada; null si no se pudo consultar.</summary>
     public static async Task<Release?> LatestAsync(CancellationToken ct = default)
@@ -44,7 +63,8 @@ static partial class Updater
                 {
                     var name = a?["name"]?.GetValue<string>() ?? "";
                     var m = ExeName().Match(name);
-                    if (!m.Success || !int.TryParse(m.Groups[1].Value, out var v)) continue;
+                    if (!m.Success) continue;
+                    var v = Code(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value));
                     var url = a!["browser_download_url"]?.GetValue<string>();
                     if (url == null || !url.StartsWith("https://github.com/", StringComparison.Ordinal)) continue;
                     if (best == null || v > best.Version) best = new Release(v, url, name);

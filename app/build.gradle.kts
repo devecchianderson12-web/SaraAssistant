@@ -16,6 +16,9 @@ if (!sherpaAar.isFile) {
     tmp.renameTo(sherpaAar)
 }
 
+/** «1.5.2» del archivo VERSION de Sara. */
+val saraVersion: List<Int> = file("VERSION").readText().trim().split('.').map { it.toInt() }
+
 android {
     namespace = "com.sara.assistant"
     compileSdk = 35
@@ -24,9 +27,9 @@ android {
         applicationId = "com.sara.assistant"
         minSdk = 29
         targetSdk = 35
-        // En GitHub Actions el número de ejecución hace crecer versionCode en cada build.
-        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+        // Versión propia de Sara (archivo app/VERSION: 1.5.2 → versionCode 10502; ver docs/VERSIONES.md).
+        versionCode = saraVersion.let { (a, b, c) -> a * 10_000 + b * 100 + c }
+        versionName = saraVersion.joinToString(".")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Repositorio donde se publican las versiones (GitHub Releases) para el actualizador interno.
         buildConfigField("String", "UPDATE_REPO", "\"devecchianderson12-web/SaraAssistant\"")

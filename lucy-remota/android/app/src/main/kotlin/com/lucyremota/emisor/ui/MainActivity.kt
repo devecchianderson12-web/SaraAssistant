@@ -1,482 +1,384 @@
 package com.lucyremota.emisor.ui
 
 import android.Manifest
-import android.content.pm.PackageManager
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.lucyremota.emisor.LucyRemotaService
-import com.lucyremota.emisor.container
-import com.lucyremota.emisor.data.SecretStore
-import com.lucyremota.remoto.SentOrder
-import com.lucyremota.nucleo.model.AssistantEvent
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lucyremota.emisor.media.SaraNotificationListener
+import com.lucyremota.emisor.ui.theme.SaraColors
+import com.lucyremota.emisor.ui.theme.SaraTheme
 import com.lucyremota.nucleo.model.AssistantState
-import com.lucyremota.protocolo.LinkState
-import com.lucyremota.protocolo.PairingQr
-import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private val Back = Color(0xFF12111A)
-private val Card = Color(0xFF1C1A28)
-private val TextMain = Color(0xFFEEECF8)
-private val Muted = Color(0xFF9A96B8)
-private val Accent = Color(0xFF8B5CF6)
-private val Sky = Color(0xFF0EA5E9)
-private val Good = Color(0xFF34D399)
-private val Warn = Color(0xFFFBBF24)
-private val Bad = Color(0xFFF87171)
 
 class MainActivity : ComponentActivity() {
+    private val viewModel: MainViewModel by viewModels()
+
+    /** Acción a ejecutar cuando el usuario responde el diálogo de permisos. */
+    private var afterPermissions: ((micGranted: Boolean) -> Unit)? = null
+
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        val mic = result[Manifest.permission.RECORD_AUDIO] ?: (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        if (!mic) Toast.makeText(this, "Sin micrófono Lucy no puede escucharte.", Toast.LENGTH_LONG).show()
+        afterPermissions?.invoke(mic)
+        afterPermissions = null
+        viewModel.refreshSystem()
+    }
+    private val grantLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            // «No volver a preguntar»: el único camino es la pantalla de permisos de la app.
+            Toast.makeText(this, "Activalo en Permisos.", Toast.LENGTH_LONG).show()
+            openSafely(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+        }
+        viewModel.refreshSystem()
+    }
+
+    /** Lleva directo a conceder [kind]: diálogo del sistema o la pantalla exacta de Ajustes. */
+    /** «Activar» de la clave de IA: abre Ajustes con el cuadro para cargarla. */
+    private val aiDialogRequested = androidx.compose.runtime.mutableStateOf(false)
+
+    private fun grant(kind: com.lucyremota.nucleo.model.PermissionKind) {
+        val runtime = com.lucyremota.emisor.permissions.PermissionCenter.runtimePermission(kind)
+        if (kind == com.lucyremota.nucleo.model.PermissionKind.AI_KEY) {
+            aiDialogRequested.value = true
+        } else if (runtime != null) {
+            grantLauncher.launch(runtime)
+        } else {
+            openSafely(*com.lucyremota.emisor.permissions.PermissionCenter.settingsIntents(this, kind).toTypedArray())
+        }
+    }
+
+    private fun handleGrantIntent(intent: Intent?) {
+        val name = intent?.getStringExtra(com.lucyremota.emisor.permissions.PermissionCenter.EXTRA_GRANT) ?: return
+        intent.removeExtra(com.lucyremota.emisor.permissions.PermissionCenter.EXTRA_GRANT)
+        com.lucyremota.nucleo.model.PermissionKind.entries.firstOrNull { it.name == name }?.let(::grant)
+    }
+
+    // ---------------------------------------------------------------- «Darle todos los permisos»
+    // Android exige que el usuario apruebe cada permiso; Sara lo hace lo más corto posible: un solo
+    // diálogo para todos los permisos comunes y después cada pantalla especial, una tras otra.
+
+    private var wizardActive = false
+    private val wizardTried = mutableSetOf<com.lucyremota.nucleo.model.PermissionKind>()
+
+    private val wizardRuntimeLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        viewModel.refreshSystem()
+        continueWizard()
+    }
+
+    private fun startGrantAll() {
+        wizardActive = true
+        wizardTried.clear()
+        val runtime = com.lucyremota.emisor.permissions.PermissionCenter.missing(this)
+            .mapNotNull { com.lucyremota.emisor.permissions.PermissionCenter.runtimePermission(it) }
+            .plus(if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList())
+            .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+            .distinct()
+        if (runtime.isNotEmpty()) wizardRuntimeLauncher.launch(runtime.toTypedArray()) else continueWizard()
+    }
+
+    /** Abre la siguiente pantalla de permiso que falta (cada una se intenta una sola vez por ronda). */
+    private fun continueWizard() {
+        if (!wizardActive) return
+        val next = com.lucyremota.emisor.permissions.PermissionCenter.missing(this).firstOrNull { kind ->
+            kind !in wizardTried && com.lucyremota.emisor.permissions.PermissionCenter.runtimePermission(kind) == null &&
+                kind != com.lucyremota.nucleo.model.PermissionKind.AI_KEY
+        }
+        if (next == null) {
+            wizardActive = false
+            viewModel.refreshSystem()
+            val left = com.lucyremota.emisor.permissions.PermissionCenter.missing(this).filter { it != com.lucyremota.nucleo.model.PermissionKind.AI_KEY }
+            Toast.makeText(
+                this,
+                if (left.isEmpty()) "Listo: Lucy tiene todos los permisos." else "Faltan ${left.size}: están en Ajustes › Permisos.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        wizardTried += next
+        val info = com.lucyremota.emisor.permissions.PermissionCenter.info(next)
+        Toast.makeText(this, "Activá «${info.title}» y volvé con Atrás.", Toast.LENGTH_LONG).show()
+        grant(next)
+    }
+
+    private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importModel) }
+    private val keywordPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = true) } }
+    private val pvPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { viewModel.importPorcupine(it, keyword = false) } }
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        // La conexión con la PC anda aunque todavía no haya permiso de micrófono (para vincular).
-        container.startLink()
-        // El servicio usa el micrófono: Android no deja arrancarlo sin ese permiso (se cerraba la app).
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) LucyRemotaService.start(this)
-        setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Back, surface = Card)) {
-                Screen()
-            }
-        }
-    }
-}
-
-@Composable
-private fun Screen() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val c = context.container
-    val scope = rememberCoroutineScope()
-    val link by c.link.state.collectAsState()
-    val pcs by c.phoneStore.pcs.collectAsState()
-    val activePc by c.phoneStore.active.collectAsState()
-    val seen by c.link.seen.collectAsState()
-    val state by c.orchestrator.state.collectAsState()
-    val orders by c.orders.orders.collectAsState()
-    val settings by c.settings.settings.collectAsState()
-    val update by c.updates.available.collectAsState()
-    val progress by c.updates.progress.collectAsState()
-    var heard by remember { mutableStateOf("") }
-    var answer by remember { mutableStateOf("") }
-    var scanning by remember { mutableStateOf(false) }
-    var typingCode by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showLog by remember { mutableStateOf(false) }
-
-    fun granted(p: String) = context.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
-    val askPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (granted(Manifest.permission.RECORD_AUDIO)) LucyRemotaService.start(context)
-        c.refreshWake(granted(Manifest.permission.RECORD_AUDIO))
-    }
-    val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> scanning = ok }
-
-    LaunchedEffect(Unit) {
-        val needed = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-        }.filterNot(::granted)
-        if (needed.isNotEmpty()) askPermissions.launch(needed.toTypedArray())
-        c.updates.check()
-    }
-    LaunchedEffect(Unit) {
-        c.orchestrator.events.collect { e ->
-            when (e) {
-                is AssistantEvent.Heard -> { heard = e.text; answer = "" }
-                is AssistantEvent.Responded -> if (e.text.isNotBlank()) answer = e.text
-                is AssistantEvent.Failed -> answer = e.error.message
-                is AssistantEvent.Notice -> answer = e.text
-                else -> Unit
-            }
-        }
-    }
-
-    if (scanning) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            QrScanner(Modifier.fillMaxSize()) { text ->
-                scanning = false
-                val qr = PairingQr.parse(text)
-                if (qr == null) answer = "Ese QR no es de Lucy Remota. Abrí «Vincular teléfono» en la PC."
-                else { c.link.pairWithQr(qr); answer = "Escaneado. Conectando con ${qr.pcName}…" }
-            }
-            Column(Modifier.align(Alignment.BottomCenter).padding(24.dp).navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Apuntá al QR que muestra Lucy Remota en la computadora", color = Color.White)
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = { scanning = false }) { Text("Cancelar", color = Color.White) }
-            }
-        }
-        return
-    }
-
-    LazyColumn(
-        Modifier.fillMaxSize().background(Back).statusBarsPadding().navigationBarsPadding(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            Text("Lucy Remota", color = TextMain, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-            Text("Emisor · controlá tu computadora con la voz", color = Muted)
-        }
-        update?.let { u ->
-            item {
-                Panel {
-                    Text("Hay una versión nueva (V${u.version}).", color = TextMain)
-                    Spacer(Modifier.height(8.dp))
-                    Button(onClick = { scope.launch { c.updates.install(u)?.let { answer = it } } }) {
-                        Text(progress?.let { "Bajando… $it %" } ?: "Actualizar")
-                    }
-                }
-            }
-        }
-        item { ConnectionPanel(link, pcs, activePc, seen, onScan = { if (granted(Manifest.permission.CAMERA)) scanning = true else askCamera.launch(Manifest.permission.CAMERA) },
-            onCode = { typingCode = true }, onCancel = { c.link.cancelPairing() },
-            onConnect = { id -> c.link.selectPc(id) }, onDisconnect = { c.link.disconnect() },
-            onForget = { id -> if (id == activePc) scope.launch { c.link.unpair() } else c.link.forget(id) }) }
-        if (typingCode) item { CodePanel(onDone = { code -> typingCode = false; c.link.pairWithCode(code); answer = "Conectando…" }, onCancel = { typingCode = false }) }
-        item {
-            TalkPanel(state, heard, answer, settings.wakeWord, onTalk = {
-                if (!granted(Manifest.permission.RECORD_AUDIO)) askPermissions.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                else c.orchestrator.activate()
-            })
-        }
-        item {
-            Panel {
-                SwitchRow("Escuchar «Lucy»", "Con la pantalla apagada también (notificación fija).", settings.wakeWord) { on ->
-                    c.settings.update { it.copy(wakeWord = on) }
-                    c.refreshWake(granted(Manifest.permission.RECORD_AUDIO))
-                }
-            }
-        }
-        if (orders.isNotEmpty()) {
-            item { Text("Órdenes enviadas", color = Muted, fontWeight = FontWeight.SemiBold) }
-            items(orders.take(30), key = { it.id }) { OrderRow(it) }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { showSettings = !showSettings }) { Text(if (showSettings) "Ocultar ajustes" else "Ajustes") }
-                TextButton(onClick = { showLog = !showLog }) { Text(if (showLog) "Ocultar diagnóstico" else "Diagnóstico") }
-            }
-        }
-        if (showSettings) item { SettingsPanel() }
-        if (showLog) item { LogPanel() }
-    }
-}
-
-@Composable
-private fun Panel(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Card).padding(18.dp)) { content() }
-}
-
-@Composable
-private fun ConnectionPanel(
-    link: LinkState, pcs: List<com.lucyremota.protocolo.PairedPc>, activePc: String?, seen: Map<String, Long>,
-    onScan: () -> Unit, onCode: () -> Unit, onCancel: () -> Unit,
-    onConnect: (String) -> Unit, onDisconnect: () -> Unit, onForget: (String) -> Unit,
-) {
-    // Vinculando o con error: el aviso arriba de la lista.
-    when (link) {
-        is LinkState.Pairing -> Panel {
-            StatusLine(Sky, "Vinculando…", "Esperando a ${link.pcName ?: "la computadora"}. Dejá abierta la ventana del QR en la PC.")
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = onCancel) { Text("Cancelar") }
-        }
-        is LinkState.PairingFailed -> Panel { StatusLine(Bad, "No se pudo vincular", link.reason) }
-        else -> Unit
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Tus computadoras", color = Muted, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            TextButton(onClick = onCode) { Text("Código") }
-            Button(onClick = onScan) { Text(if (pcs.isEmpty()) "Escanear QR" else "+ Agregar") }
-        }
-        if (pcs.isEmpty()) {
-            Panel { StatusLine(Muted, "Ninguna computadora vinculada", "En la PC abrí Lucy Remota y tocá «Vincular». Cada PC se vincula una sola vez; después elegís a cuál conectarte.") }
-        }
-        val now = System.currentTimeMillis()
-        pcs.forEachIndexed { i, pc ->
-            val active = pc.id == activePc
-            val connected = active && link is LinkState.Connected
-            val nearby = (seen[pc.id] ?: 0L) > now - 12_000
-            val (dot, detail) = when {
-                connected -> Good to ((link as LinkState.Connected).let { (if (it.address == "Internet") "Conectada por Internet" else "Conectada · ${it.address}") + if (it.latencyMs > 0) " · ${it.latencyMs} ms" else "" })
-                active -> Warn to "Conectando…"
-                nearby -> Good to "Disponible en tu red"
-                else -> Muted to "Tocá para conectarte"
-            }
-            DeviceCard(
-                name = pc.name, detail = detail, dot = dot, color = PcColors[i % PcColors.size], highlighted = active,
-                onClick = { if (!active) onConnect(pc.id) },
-                menu = buildList {
-                    if (active) add("Desconectar" to onDisconnect) else add("Conectar" to { onConnect(pc.id) })
-                    add("Desvincular" to { onForget(pc.id) })
-                },
-            )
-        }
-        if (pcs.size > 1) Text("Te conectás a una computadora a la vez: al elegir otra, se desconecta de la anterior.", color = Muted, fontSize = 13.sp)
-    }
-}
-
-private val PcColors = listOf(Color(0xFF1E2A8A), Color(0xFF6B21A8), Color(0xFF0F766E), Color(0xFF9A3412), Color(0xFF1D4ED8))
-
-@Composable
-private fun StatusLine(dot: Color, title: String, detail: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(12.dp).clip(CircleShape).background(dot))
-        Spacer(Modifier.width(10.dp))
-        Text(title, color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-    }
-    Spacer(Modifier.height(6.dp))
-    Text(detail, color = Muted)
-}
-
-/** Una computadora vinculada, como en la lista de dispositivos de una app de escritorio remoto. */
-@Composable
-private fun DeviceCard(name: String, detail: String, dot: Color, color: Color, highlighted: Boolean, onClick: () -> Unit, menu: List<Pair<String, () -> Unit>>) {
-    var open by remember { mutableStateOf(false) }
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (highlighted) Color(0xFF26233A) else Card)
-            .then(if (highlighted) Modifier.border(1.dp, Sky.copy(alpha = 0.5f), RoundedCornerShape(16.dp)) else Modifier)
-            .clickable(onClick = onClick).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        WindowsTile(color)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(9.dp).clip(CircleShape).background(dot))
-                Spacer(Modifier.width(8.dp))
-                Text(name, color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            }
-            Text(detail, color = Muted, fontSize = 14.sp)
-        }
-        Box {
-            TextButton(onClick = { open = true }) { Text("⋮", color = TextMain, fontSize = 22.sp) }
-            androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                menu.forEach { (label, action) ->
-                    androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
-                }
-            }
-        }
-    }
-}
-
-/** Ícono de PC con Windows: un cuadro de color con la ventana de cuatro partes. */
-@Composable
-private fun WindowsTile(color: Color) {
-    Box(Modifier.size(58.dp).clip(RoundedCornerShape(10.dp)).background(color), contentAlignment = Alignment.Center) {
-        androidx.compose.foundation.Canvas(Modifier.size(30.dp)) {
-            val gap = size.width * 0.08f
-            val half = (size.width - gap) / 2
-            for (x in 0..1) for (y in 0..1) {
-                drawRect(Color.White, topLeft = androidx.compose.ui.geometry.Offset(x * (half + gap), y * (half + gap)), size = androidx.compose.ui.geometry.Size(half, half))
-            }
-        }
-    }
-}
-
-@Composable
-private fun CodePanel(onDone: (String) -> Unit, onCancel: () -> Unit) {
-    var code by remember { mutableStateOf("") }
-    Panel {
-        Text("Escribí el código que muestra la computadora", color = TextMain)
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = code, onValueChange = { code = it.uppercase().take(9) }, singleLine = true, label = { Text("Ej.: K7M2-9XQ4") },
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+        com.lucyremota.emisor.SaraApp.containerOrNull(this)?.appTaskAlive?.value = true
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(SaraColors.Background.toArgb()),
+            navigationBarStyle = SystemBarStyle.dark(SaraColors.Background.toArgb()),
         )
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { onDone(code) }, enabled = code.count { it.isLetterOrDigit() } == 8) { Text("Vincular") }
-            OutlinedButton(onClick = onCancel) { Text("Cancelar") }
-        }
+        super.onCreate(savedInstanceState)
+        setContent { SaraTheme { SaraApp() } }
+        handleAssistIntent(intent)
+        handleGrantIntent(intent)
     }
-}
 
-@Composable
-private fun TalkPanel(state: AssistantState, heard: String, answer: String, wakeOn: Boolean, onTalk: () -> Unit) {
-    val active = state is AssistantState.Listening || state is AssistantState.Processing || state is AssistantState.Speaking
-    val pulse = rememberInfiniteTransition(label = "pulso")
-    val scale by pulse.animateFloat(1f, if (active) 1.08f else 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "escala")
-    Panel {
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(132.dp).scale(scale).clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(Accent, Sky)))
-                    .border(2.dp, Color.White.copy(alpha = if (active) 0.7f else 0.15f), CircleShape)
-                    .clickable(onClick = onTalk),
-                contentAlignment = Alignment.Center,
-            ) { Text(if (active) "…" else "Hablar", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                when (state) {
-                    is AssistantState.Listening -> state.partialText?.takeIf { it.isNotBlank() } ?: "Te escucho…"
-                    is AssistantState.Processing -> "Mandando a la computadora…"
-                    is AssistantState.Speaking -> "Hablando…"
-                    else -> if (wakeOn) "Decí «Lucy» o tocá el círculo" else "Tocá el círculo para hablar"
-                },
-                color = Muted,
-            )
-            if (heard.isNotBlank()) { Spacer(Modifier.height(10.dp)); Text("Vos: «$heard»", color = TextMain) }
-            if (answer.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(answer, color = Accent) }
-        }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleAssistIntent(intent)
+        handleGrantIntent(intent)
     }
-}
 
-@Composable
-private fun OrderRow(o: SentOrder) {
-    val (label, color) = when (o.status) {
-        "received" -> "Recibida" to Sky
-        "processing" -> "En curso" to Sky
-        "success" -> "Hecho" to Good
-        "needs_confirmation" -> "Confirmar" to Warn
-        "not_connected" -> "Sin conexión" to Bad
-        "no_answer" -> "Sin respuesta" to Bad
-        "expired" -> "Llegó tarde" to Bad
-        "unsupported" -> "No disponible" to Bad
-        else -> "Error" to Bad
+    override fun onResume() {
+        super.onResume()
+        viewModel.onResume()
+        // Al volver de una pantalla de Ajustes, sigue con el próximo permiso.
+        if (wizardActive) window.decorView.postDelayed({ continueWizard() }, 400)
     }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Card).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(o.heard.ifBlank { o.intent }, color = TextMain)
-            Text(o.message.ifBlank { o.intent }, color = Muted, fontSize = 13.sp)
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(label, color = color, fontWeight = FontWeight.SemiBold)
-            Text(SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date(o.at)), color = Muted, fontSize = 12.sp)
-        }
-    }
-}
 
-@Composable
-private fun SwitchRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = TextMain)
-            Text(detail, color = Muted, fontSize = 13.sp)
+    /** Botón de asistente de auriculares / ACTION_ASSIST: empieza a escuchar directamente. */
+    private fun handleAssistIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_ASSIST || intent?.action == Intent.ACTION_VOICE_COMMAND) {
+            withMicPermission { viewModel.activate() }
         }
-        Switch(checked = checked, onCheckedChange = onChange)
     }
-}
 
-@Composable
-private fun SettingsPanel() {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val c = ctx.container
-    val s by c.settings.settings.collectAsState()
-    var key by remember { mutableStateOf(if (c.secrets.get(SecretStore.GEMINI_KEY) != null) "••••••••" else "") }
-    Panel {
-        Text("Voz de Lucy", color = TextMain)
-        Text("Las mismas de Sara: naturales y sin Internet (se bajan una vez).", color = Muted, fontSize = 13.sp)
-        Spacer(Modifier.height(6.dp))
-        val choices = com.lucyremota.nucleo.voice.PiperVoice.entries.map { it.name to "${it.label} (${it.country})" } + ("TELEFONO" to "Voz del teléfono")
-        choices.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { (id, label) ->
-                    val selected = if (id == "TELEFONO") !s.usePiper else s.usePiper && s.piperVoice.name == id
-                    val onClick = {
-                        c.settings.update { st ->
-                            if (id == "TELEFONO") st.copy(usePiper = false)
-                            else st.copy(usePiper = true, piperVoice = com.lucyremota.nucleo.voice.PiperVoice.valueOf(id))
-                        }
-                        c.ensureModels()
+    private fun withMicPermission(includeNotifications: Boolean = false, block: () -> Unit) {
+        val needed = buildList {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) add(Manifest.permission.RECORD_AUDIO)
+            if (includeNotifications && Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (needed.isEmpty()) {
+            block()
+            return
+        }
+        afterPermissions = { granted -> if (granted) block() }
+        permissionLauncher.launch(needed.toTypedArray())
+    }
+
+    private fun openSafely(vararg intents: Intent) {
+        for (intent in intents) {
+            try {
+                startActivity(intent)
+                return
+            } catch (_: ActivityNotFoundException) {
+            } catch (_: SecurityException) {
+            }
+        }
+        Toast.makeText(this, "No se pudo abrir la configuración.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openNotificationAccess() {
+        val component = ComponentName(this, SaraNotificationListener::class.java)
+        val detail = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, component.flattenToString())
+        } else {
+            null
+        }
+        openSafely(*listOfNotNull(detail, Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)).toTypedArray())
+    }
+
+    private fun openAppSettings() = openSafely(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+
+    private fun openAssistantSettings() = openSafely(
+        Intent(Settings.ACTION_VOICE_INPUT_SETTINGS),
+        Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+        Intent(Settings.ACTION_SETTINGS),
+    )
+
+    private fun openBatterySettings() = openSafely(
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)),
+    )
+
+    private enum class Tab(val label: String, val icon: ImageVector) {
+        HOME("Lucy", Icons.Filled.Home),
+        PCS("Computadoras", MonitorIcon),
+        HISTORY("Historial", Icons.AutoMirrored.Filled.List),
+        SETTINGS("Ajustes", Icons.Filled.Settings),
+    }
+
+    @Composable
+    private fun SaraApp() {
+        val state by viewModel.state.collectAsStateWithLifecycle()
+        val level by viewModel.level.collectAsStateWithLifecycle()
+        val settings by viewModel.settings.collectAsStateWithLifecycle()
+        val conversation by viewModel.conversation.collectAsStateWithLifecycle()
+        val system by viewModel.system.collectAsStateWithLifecycle()
+        val modelState by viewModel.modelState.collectAsStateWithLifecycle()
+        val running by viewModel.serviceRunning.collectAsStateWithLifecycle()
+        val micActive by viewModel.micActive.collectAsStateWithLifecycle()
+        val micSilenced by viewModel.micSilenced.collectAsStateWithLifecycle()
+        val history by viewModel.history.collectAsStateWithLifecycle()
+        val voices by viewModel.voices.collectAsStateWithLifecycle()
+        val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
+        val message by viewModel.message.collectAsStateWithLifecycle()
+        val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+        val memories by viewModel.memories.collectAsStateWithLifecycle()
+        val routines by viewModel.routines.collectAsStateWithLifecycle()
+        val reminders by viewModel.reminders.collectAsStateWithLifecycle()
+        val micCompare by viewModel.micCompare.collectAsStateWithLifecycle()
+        val piperState by viewModel.piperState.collectAsStateWithLifecycle()
+        var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+        val aiRequested by aiDialogRequested
+        LaunchedEffect(aiRequested) { if (aiRequested) tab = Tab.SETTINGS }
+        val snackbar = remember { SnackbarHostState() }
+
+        LaunchedEffect(message) {
+            message?.let {
+                snackbar.showSnackbar(it)
+                viewModel.consumeMessage()
+            }
+        }
+
+        val wakeToggle: (Boolean) -> Unit = { enabled ->
+            if (enabled) withMicPermission(includeNotifications = true) { viewModel.setWakeWord(true) } else viewModel.setWakeWord(false)
+        }
+
+        Scaffold(
+            containerColor = SaraColors.Background,
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                NavigationBar(containerColor = SaraColors.Surface, tonalElevation = 0.dp) {
+                    Tab.entries.forEach { item ->
+                        NavigationBarItem(
+                            selected = tab == item,
+                            onClick = { tab = item; if (item == Tab.SETTINGS) viewModel.refreshSystem() },
+                            icon = { Icon(item.icon, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                            label = { Text(item.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = SaraColors.Text,
+                                selectedTextColor = SaraColors.Text,
+                                indicatorColor = SaraColors.Violet.copy(alpha = 0.28f),
+                                unselectedIconColor = SaraColors.Muted,
+                                unselectedTextColor = SaraColors.Muted,
+                            ),
+                        )
                     }
-                    if (selected) Button(onClick = onClick) { Text(label, fontSize = 13.sp) } else OutlinedButton(onClick = onClick) { Text(label, fontSize = 13.sp) }
+                }
+            },
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                AnimatedContent(tab, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "tab") { current ->
+                    when (current) {
+                        Tab.HOME -> HomeScreen(
+                            state = state, level = level, settings = settings, conversation = conversation, system = system,
+                            modelState = modelState, serviceRunning = running, micActive = micActive, micSilenced = micSilenced,
+                            onOrbClick = {
+                                if (state is AssistantState.Listening || state is AssistantState.Speaking || state is AssistantState.Processing) {
+                                    viewModel.cancel()
+                                } else {
+                                    withMicPermission { viewModel.activate() }
+                                }
+                            },
+                            onWakeToggle = wakeToggle,
+                            onRequestMic = { withMicPermission(includeNotifications = true) { viewModel.refreshSystem() } },
+                            onDownloadModel = viewModel::downloadModel,
+                            onNotificationAccess = ::openNotificationAccess,
+                            onGrant = ::grant,
+                            onGrantAll = ::startGrantAll,
+                            updateBanner = {
+                                UpdateBanner(
+                                    state = updateState,
+                                    onUpdate = { viewModel.installUpdate(it) },
+                                    onDismiss = viewModel::dismissUpdate,
+                                    onGrantPermission = {
+                                        openSafely(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + packageName)))
+                                    },
+                                )
+                            },
+                        )
+                        Tab.PCS -> PcScreen()
+                        Tab.HISTORY -> HistoryScreen(history, settings.saveHistory, viewModel::clearHistory)
+                        Tab.SETTINGS -> SettingsScreen(
+                            settings = settings, system = system, modelState = modelState, serviceRunning = running,
+                            micActive = micActive, voices = voices, diagnostics = diagnostics, memories = memories,
+                            aiDialogRequested = aiRequested, onAiDialogShown = { aiDialogRequested.value = false },
+                            routines = routines, reminders = reminders,
+                            actions = SettingsActions(
+                                update = { viewModel.update(it) },
+                                onWakeToggle = wakeToggle,
+                                testVoice = { viewModel.testVoice() },
+                                loadVoices = { viewModel.loadVoices(it) },
+                                saveAzure = { k, r -> viewModel.saveAzure(k, r) },
+                                saveAiKey = { p, k -> viewModel.saveAiKey(p, k) },
+                                clearAiKey = viewModel::clearAiKey,
+                                forget = viewModel::forget,
+                                grant = ::grant,
+                                grantAll = ::startGrantAll,
+                                toggleRoutine = viewModel::toggleRoutine,
+                                deleteRoutine = viewModel::deleteRoutine,
+                                deleteReminder = viewModel::deleteReminder,
+                                clearAzure = viewModel::clearAzure,
+                                savePorcupineKey = viewModel::savePorcupineKey,
+                                importPorcupineKeyword = { keywordPicker.launch(arrayOf("*/*")) },
+                                importPorcupineModel = { pvPicker.launch(arrayOf("*/*")) },
+                                downloadModel = { viewModel.downloadModel() },
+                                importModel = { modelPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
+                                deleteModel = { viewModel.deleteModel() },
+                                requestMic = { withMicPermission(includeNotifications = true) { viewModel.refreshSystem() } },
+                                openNotificationAccess = ::openNotificationAccess,
+                                openAppSettings = ::openAppSettings,
+                                openAssistantSettings = ::openAssistantSettings,
+                                openBatterySettings = ::openBatterySettings,
+                                clearHistory = { viewModel.clearHistory() },
+                                clearDiagnostics = viewModel::clearDiagnostics,
+                                refresh = { viewModel.refreshSystem() },
+                                checkUpdates = { viewModel.checkUpdates() },
+                                openOverlaySettings = {
+                                    openSafely(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)))
+                                },
+                                openAccessibilitySettings = { openSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                                compareMicrophones = { withMicPermission { viewModel.compareMicrophones() } },
+                                dismissMicCompare = viewModel::dismissMicCompare,
+                                installUpdate = { viewModel.installUpdate(it) },
+                                downloadPiper = { viewModel.downloadPiper(it) },
+                            ),
+                            updateState = updateState,
+                            micCompare = micCompare,
+                            piperState = piperState,
+                        )
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text("Velocidad de la voz: ${(s.speechRate * 100).toInt()} %", color = TextMain)
-        androidx.compose.material3.Slider(value = s.speechRate, onValueChange = { v -> c.settings.update { it.copy(speechRate = v) } }, valueRange = 0.7f..1.4f)
-        Spacer(Modifier.height(10.dp))
-        SwitchRow("Repetir tu orden cuando la menciones", "Encendido: dice lo que hizo la computadora («Volumen al 30 %»). Apagado: cuando la hace suena un tono corto. Las respuestas a tus preguntas las dice siempre.", s.repeatCommands) { on ->
-            c.settings.update { it.copy(repeatCommands = on) }
-        }
-        Spacer(Modifier.height(10.dp))
-        SwitchRow("Pedir «Ey Lucy»", "En lugar de «Lucy» sola: menos activaciones por error.", s.heyPrefix) { on ->
-            c.settings.update { it.copy(heyPrefix = on) }
-            c.orchestrator.setWakeWordEnabled(false)
-            c.refreshWake(androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
-        }
-        Spacer(Modifier.height(6.dp))
-        Text("Sensibilidad para escuchar «Lucy»: ${(s.sensitivity * 100).toInt()} %", color = TextMain)
-        Text("Más = te escucha desde más lejos, pero se activa más por error.", color = Muted, fontSize = 13.sp)
-        androidx.compose.material3.Slider(value = s.sensitivity, onValueChange = { v -> c.settings.update { it.copy(sensitivity = v) } }, valueRange = 0.1f..0.9f,
-            onValueChangeFinished = { c.orchestrator.setWakeWordEnabled(false); c.refreshWake(true) })
-        Spacer(Modifier.height(10.dp))
-        SwitchRow("Respuesta rápida", "Hace las órdenes cortas apenas las entiende.", s.quickResponse) { on -> c.settings.update { it.copy(quickResponse = on) } }
-        Spacer(Modifier.height(10.dp))
-        SwitchRow("Charlar", "Después de una pregunta sigue escuchando sin decir «Lucy».", s.chatFollowUp) { on -> c.settings.update { it.copy(chatFollowUp = on) } }
-        Spacer(Modifier.height(14.dp))
-        Text("Clave gratis de Google (Gemini) para preguntas", color = TextMain)
-        Text("Sin clave, Lucy igual controla la PC y contesta lo básico.", color = Muted, fontSize = 13.sp)
-        OutlinedTextField(value = key, onValueChange = { key = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text("Clave") })
-        TextButton(onClick = { if (!key.startsWith("•")) c.secrets.put(SecretStore.GEMINI_KEY, key.trim()) }) { Text("Guardar clave") }
-    }
-}
-
-@Composable
-private fun LogPanel() {
-    val c = androidx.compose.ui.platform.LocalContext.current.container
-    val lines by c.logger.lines.collectAsState()
-    Panel {
-        lines.takeLast(60).reversed().forEach { Text(it, color = Muted, fontSize = 12.sp) }
-        if (lines.isEmpty()) Text("Sin registros todavía.", color = Muted)
     }
 }

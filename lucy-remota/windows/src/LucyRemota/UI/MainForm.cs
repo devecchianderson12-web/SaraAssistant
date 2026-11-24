@@ -52,8 +52,7 @@ sealed class MainForm : LucyForm
         this.store = store;
         this.history = history;
         this.startHidden = startHidden;
-        var version = Application.ProductVersion.Split('+')[0];
-        Text = $"Lucy Remota · V{version.Split('.').Last()}";
+        Text = $"Lucy Remota · V{Updater.CurrentName}";
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
         MinimumSize = new Size(420, 560);
         Size = new Size(540, 680);
@@ -138,17 +137,17 @@ sealed class MainForm : LucyForm
         var release = await Updater.AvailableAsync();
         if (release == null || IsDisposed || pendingUpdate?.Version == release.Version) return;
         pendingUpdate = release;
-        updateButton.Text = $"Actualizar a V{release.Version}";
+        updateButton.Text = $"Actualizar a V{release.Label}";
         updateButton.Size = updateButton.GetPreferredSize(Size.Empty);
         updateButton.Visible = true;
-        tray.ShowBalloonTip(5000, "Lucy Remota", $"Hay una versión nueva (V{release.Version}). Abrí Lucy Remota y tocá «Actualizar».", ToolTipIcon.Info);
+        tray.ShowBalloonTip(5000, "Lucy Remota", $"Hay una versión nueva (V{release.Label}). Abrí Lucy Remota y tocá «Actualizar».", ToolTipIcon.Info);
     }
 
     /// <summary>Baja la versión nueva, la abre y cierra ésta. false si no se pudo (avisa por qué).</summary>
     internal async Task<bool> InstallUpdateAsync(Updater.Release release)
     {
         if (installing) return false;
-        if (MessageBox.Show(this, $"¿Actualizo Lucy Remota a la V{release.Version}? Se cierra un momento y se vuelve a abrir sola; los teléfonos vinculados se mantienen.",
+        if (MessageBox.Show(this, $"¿Actualizo Lucy Remota a la V{release.Label}? Se cierra un momento y se vuelve a abrir sola; los teléfonos vinculados se mantienen.",
                 "Lucy Remota", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
         installing = true;
         ShowFromTray();
@@ -183,7 +182,7 @@ sealed class MainForm : LucyForm
         {
             var latest = await Updater.LatestAsync();
             if (latest == null) MessageBox.Show(this, "No pude buscar actualizaciones. Revisá la conexión a Internet.", "Lucy Remota");
-            else if (latest.Version <= Updater.CurrentVersion) MessageBox.Show(this, $"Lucy Remota está al día (V{Updater.CurrentVersion}).", "Lucy Remota");
+            else if (latest.Version <= Updater.CurrentVersion) MessageBox.Show(this, $"Lucy Remota está al día (V{Updater.CurrentName}).", "Lucy Remota");
             else await InstallUpdateAsync(latest);
         });
         m.Items.Add("Ver registro", null, (_, _) => Modules.M.ShellOpen(Paths.File("registro.txt")));

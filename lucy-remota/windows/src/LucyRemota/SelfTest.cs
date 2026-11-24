@@ -139,7 +139,7 @@ static class SelfTest
 
         // Actualizaciones: encuentra el .exe en el release (como lo haría el botón «Actualizar»).
         var latest = await Updater.LatestAsync();
-        if (latest != null) Ok("buscar actualizaciones", $"última publicada: {latest.Name} (esta: V{Updater.CurrentVersion})");
+        if (latest != null) Ok("buscar actualizaciones", $"última publicada: {latest.Name} (esta: V{Updater.CurrentName})");
         else Info("buscar actualizaciones", "no se pudo consultar GitHub desde acá");
 
         await WebAppTest(dir, Shot, phone, apps);

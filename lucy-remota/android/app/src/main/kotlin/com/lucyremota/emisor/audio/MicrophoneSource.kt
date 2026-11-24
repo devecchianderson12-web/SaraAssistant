@@ -70,7 +70,7 @@ class MicrophoneSource(
         onChunk: (ByteArray, Int) -> Boolean,
     ): CaptureOutcome = withContext(Dispatchers.IO) {
         if (!hasPermission()) {
-            return@withContext CaptureOutcome.Failed(EngineError(EngineErrorType.PERMISSION, "Sara no tiene permiso para usar el micrófono."))
+            return@withContext CaptureOutcome.Failed(EngineError(EngineErrorType.PERMISSION, "Lucy no tiene permiso para usar el micrófono."))
         }
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = try {

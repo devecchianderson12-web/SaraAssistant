@@ -64,7 +64,7 @@ sealed class SettingsDialog : LucyForm
             relay, Caption("Dirección del relé"), relayUrl,
             Note("En la misma red Wi-Fi se conectan directo. En redes distintas pasan por el relé de Cloudflare: las órdenes van cifradas de punta a punta y el relé no puede leerlas."));
         Add(Section("Órdenes"), saveHistory, notify);
-        var version = Theme.Label($"Versión instalada: V{Updater.CurrentVersion}", 10f);
+        var version = Theme.Label($"Versión instalada: V{Updater.CurrentName}", 10f);
         var check = new PillButton("Buscar actualizaciones");
         check.Click += async (_, _) => await CheckNow();
         updateNow.Click += async (_, _) => { if (found != null && await main.InstallUpdateAsync(found)) Close(); };
@@ -111,10 +111,10 @@ sealed class SettingsDialog : LucyForm
         var latest = await Updater.LatestAsync();
         if (IsDisposed) return;
         if (latest == null) { updateStatus.Text = "No pude buscar actualizaciones. Revisá la conexión a Internet."; return; }
-        if (latest.Version <= Updater.CurrentVersion) { updateStatus.Text = $"Está al día (la última es la V{latest.Version})."; return; }
+        if (latest.Version <= Updater.CurrentVersion) { updateStatus.Text = $"Está al día (la última es la V{latest.Label})."; return; }
         found = latest;
-        updateStatus.Text = $"Hay una versión nueva: V{latest.Version}.";
-        updateNow.Text = $"Actualizar a V{latest.Version}";
+        updateStatus.Text = $"Hay una versión nueva: V{latest.Label}.";
+        updateNow.Text = $"Actualizar a V{latest.Label}";
         updateNow.Size = updateNow.GetPreferredSize(Size.Empty);
         updateNow.Visible = true;
     }

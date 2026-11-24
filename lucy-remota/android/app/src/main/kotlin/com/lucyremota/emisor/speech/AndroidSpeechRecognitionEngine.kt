@@ -97,7 +97,7 @@ class AndroidSpeechRecognitionEngine(
 
                 recognizer.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
-                        android.util.Log.d("Sara/Recognizer", "Listo para escuchar en ${System.currentTimeMillis() - requestedAt} ms")
+                        android.util.Log.d("Lucy/Recognizer", "Listo para escuchar en ${System.currentTimeMillis() - requestedAt} ms")
                     }
                     override fun onBeginningOfSpeech() = Unit
                     override fun onRmsChanged(rmsdB: Float) = levels.update((rmsdB + 2f) / 12f)

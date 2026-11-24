@@ -11,8 +11,8 @@ existe. Las tres apps pueden convivir.
 
 | App | Archivo en el release | Dónde va |
 |---|---|---|
-| **Lucy Remota · Emisor** | `LucyRemota-v1.0.N.apk` | El teléfono (Android 10 o más nuevo) |
-| **Lucy Remota · Receptor** | `LucyRemota-v1.0.N.exe` | La computadora (Windows 10/11, 64 bits) |
+| **Lucy Remota · Emisor** | `LucyRemota-vX.Y.Z.apk` | El teléfono (Android 10 o más nuevo) |
+| **Lucy Remota · Receptor** | `LucyRemota-vX.Y.Z.exe` | La computadora (Windows 10/11, 64 bits) |
 
 ## Instalar y vincular (una sola vez)
 

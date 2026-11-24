@@ -98,14 +98,17 @@ class RemotoTest {
         withTimeout(15_000) { while (link.state.value !is LinkState.Connected || link.catalog.value.isEmpty()) delay(100) }
         val orders = OrderLog()
         val local = DefaultCommandExecutor(NoMedia, NoVolume, memory = InMemoryStore())
-        val exec = RemoteExecutor(link, local, orders) { "prueba" }
+        val exec = RemoteExecutor(link, local, orders, { "prueba" })
         suspend fun say(text: String) = exec.execute(interpreter.interpret(text).intent)
 
         val up = say("Lucy, poné el volumen al 30")
         assertTrue(up.response, up.success)
-        assertEquals("Volumen al 30 %", up.response)
+        // Las órdenes hechas sólo dicen «Okey»; lo que hizo la PC queda en las órdenes enviadas.
+        assertEquals("Okey.", up.response)
+        assertTrue(orders.orders.value.any { it.message == "Volumen al 30 %" })
         val more = say("subí el volumen")
-        assertEquals("Volumen al 40 %", more.response)
+        assertEquals("Okey.", more.response)
+        assertTrue(orders.orders.value.any { it.message == "Volumen al 40 %" })
         // Sensible: pide confirmación y sólo con «sí» la hace.
         val off = say("apagá la computadora")
         assertNotNull(off.confirmation)
