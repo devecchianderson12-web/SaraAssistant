@@ -64,7 +64,7 @@ fun HomeScreen(
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Lucy Remota", style = MaterialTheme.typography.headlineMedium)
+                Text("Lucy", style = MaterialTheme.typography.headlineMedium)
                 Text("Tu asistente de voz", style = MaterialTheme.typography.bodyMedium, color = SaraColors.Muted)
             }
             // Con el reconocedor de Google el micrófono lo usa el sistema, no Sara: igual está escuchando.

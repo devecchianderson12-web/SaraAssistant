@@ -231,7 +231,7 @@ class MainActivity : ComponentActivity() {
 
     private enum class Tab(val label: String, val icon: ImageVector) {
         HOME("Lucy", Icons.Filled.Home),
-        PCS("Computadoras", MonitorIcon),
+        PCS("PC", MonitorIcon),
         HISTORY("Historial", Icons.AutoMirrored.Filled.List),
         SETTINGS("Ajustes", Icons.Filled.Settings),
     }
