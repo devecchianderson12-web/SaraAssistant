@@ -120,12 +120,22 @@ class MainActivity : ComponentActivity() {
         continueWizard()
     }
 
+    private fun PermissionKind_ALL_RUNTIME(): List<String> =
+        com.lucyremota.nucleo.model.PermissionKind.entries.mapNotNull { com.lucyremota.emisor.permissions.PermissionCenter.runtimePermission(it) }
+
+    /** Ya se destrabaron los «ajustes restringidos» en esta ronda (o no hacía falta). */
+    private var restrictedAsked = false
+
     private fun startGrantAll() {
         wizardActive = true
+        restrictedAsked = false
         wizardTried.clear()
         val runtime = com.lucyremota.emisor.permissions.PermissionCenter.missing(this)
             .mapNotNull { com.lucyremota.emisor.permissions.PermissionCenter.runtimePermission(it) }
             .plus(if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList())
+            .plus(Manifest.permission.CAMERA)
+            // Todos los de una vez (también los que se usan sólo a veces: contactos, ubicación, llamadas…).
+            .plus(PermissionKind_ALL_RUNTIME())
             .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
             .distinct()
         if (runtime.isNotEmpty()) wizardRuntimeLauncher.launch(runtime.toTypedArray()) else continueWizard()
@@ -149,10 +159,44 @@ class MainActivity : ComponentActivity() {
             ).show()
             return
         }
+        // Android bloquea notificaciones y accesibilidad en apps instaladas desde un archivo: primero
+        // se destraba (una vez) y al volver se siguen pidiendo.
+        if (com.lucyremota.emisor.permissions.PermissionCenter.isRestricted(next) && com.lucyremota.emisor.permissions.PermissionCenter.restrictedSettingsBlocked(this)) {
+            if (!restrictedAsked) { restrictedAsked = true; grant(next); return }
+            wizardTried += com.lucyremota.nucleo.model.PermissionKind.NOTIFICATION_ACCESS
+            wizardTried += com.lucyremota.nucleo.model.PermissionKind.ACCESSIBILITY
+            continueWizard()
+            return
+        }
         wizardTried += next
         val info = com.lucyremota.emisor.permissions.PermissionCenter.info(next)
         Toast.makeText(this, "Activá «${info.title}» y volvé con Atrás.", Toast.LENGTH_LONG).show()
         grant(next)
+    }
+
+    /**
+     * Primera vez que se abre (o después de actualizar a esta versión): explica y pide TODOS los
+     * permisos seguidos, una sola vez, para que después no tenga que pedir nada sobre la marcha.
+     */
+    private fun askAllOnFirstLaunch() {
+        val prefs = getSharedPreferences("arranque", MODE_PRIVATE)
+        if (prefs.getBoolean("permisos_pedidos_v1", false)) return
+        val missing = com.lucyremota.emisor.permissions.PermissionCenter.missing(this).filter { it != com.lucyremota.nucleo.model.PermissionKind.AI_KEY }
+        if (missing.isEmpty()) { prefs.edit().putBoolean("permisos_pedidos_v1", true).apply(); return }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Activemos todo una sola vez")
+            .setMessage(
+                "Para que Lucy funcione siempre (con la pantalla bloqueada, en el bolsillo, leyendo WhatsApp, abriendo apps…) " +
+                    "te pido ahora todos los permisos seguidos.\n\nAceptá cada uno; en las pantallas de Ajustes, activalo y volvé con Atrás. " +
+                    "Después no te pido nada más.",
+            )
+            .setCancelable(false)
+            .setPositiveButton("Empezar") { _, _ ->
+                prefs.edit().putBoolean("permisos_pedidos_v1", true).apply()
+                startGrantAll()
+            }
+            .setNegativeButton("Más tarde") { _, _ -> prefs.edit().putBoolean("permisos_pedidos_v1", true).apply() }
+            .show()
     }
 
     private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(viewModel::importModel) }
@@ -167,6 +211,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         setContent { SaraTheme { SaraApp() } }
+        askAllOnFirstLaunch()
         handleAssistIntent(intent)
         handleGrantIntent(intent)
     }
