@@ -259,21 +259,25 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Descargar código (para ver qué cambió)
+      - name: Descargar código (para leer las versiones)
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       # Cada plataforma se actualiza por separado: sólo se publica la que cambió en este envío.
-      - name: Qué cambió
+      # Cada plataforma se publica cuando sube su número (VERSION): si el release ya tiene esa versión,
+      # no se toca (así actualizar el teléfono no obliga a actualizar la PC, y al revés).
+      - name: Qué hay que publicar
         id: cambios
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          BEFORE="${{ github.event.before }}"
-          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then CHANGED="lucy-remota/windows lucy-remota/android"; else CHANGED=$(git diff --name-only "$BEFORE" "${{ github.sha }}"); fi
-          W=false; A=false
-          echo "$CHANGED" | grep -qE '^lucy-remota/(windows|protocol)/' && W=true
-          echo "$CHANGED" | grep -qE '^lucy-remota/(android|protocol)/' && A=true
+          TAG=$(gh api "repos/$REPO/releases/latest" -q .tag_name)
+          ASSETS=$(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name')
+          WV=$(tr -d '[:space:]' < lucy-remota/windows/VERSION); AV=$(tr -d '[:space:]' < lucy-remota/android/VERSION)
+          W=true; A=true
+          echo "$ASSETS" | grep -qx "LucyRemota-v$WV.exe" && W=false
+          echo "$ASSETS" | grep -qx "LucyRemota-v$AV.apk" && A=false
           echo "windows=$W" >> "$GITHUB_OUTPUT"; echo "android=$A" >> "$GITHUB_OUTPUT"
-          echo "Windows: $W · Android: $A"
+          echo "Windows $WV: $W · Android $AV: $A"
       - name: Descargar el .exe
         uses: actions/download-artifact@v4
         with:
