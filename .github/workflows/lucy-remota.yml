@@ -303,5 +303,5 @@ jobs:
           for a in $(gh api "repos/$REPO/releases/tags/$TAG" -q '.assets[].name' | grep -E "^LucyRemota-.*\.($PAT)$" || true); do gh release delete-asset "$TAG" "$a" -R "$REPO" -y; done
           gh release upload "$TAG" $UP -R "$REPO" --clobber
           FILES=$(gh api "repos/$REPO/releases/tags/$TAG" -q '[.assets[].name] | join("\n- ")')
-          printf 'Sara para Android, Lucy para Windows y Lucy Remota (el teléfono controla la computadora).\n\n- %s\n\nSara: SaraAssistant-…apk (Android).\nLucy: Lucy-Windows-…exe (Windows).\nLucy Remota: LucyRemota-…apk en el teléfono + LucyRemota-…exe en la computadora.\n' "$FILES" > notas.md
+          printf 'Sara (Android) y Lucy Remota (teléfono + PC).\n\n- %s\n\nSara: SaraAssistant-…apk.\nLucy Remota: LucyRemota-…apk en el teléfono y LucyRemota-…exe en la PC.\nLucyRemota-Local-…zip: «Lucy en esta PC» (lo baja solo Lucy Remota al activarla; no hace falta descargarlo).\n' "$FILES" > notas.md
           gh release edit "$TAG" -R "$REPO" --title "SaraAssistant" --notes-file notas.md

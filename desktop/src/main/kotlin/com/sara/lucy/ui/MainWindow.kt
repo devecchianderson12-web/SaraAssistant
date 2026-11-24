@@ -86,7 +86,11 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
     private var trayWakeItem: JCheckBoxMenuItem? = null
 
     init {
-        title = if (LucyLocation.version > 0) "Lucy · V${LucyLocation.version}" else "Lucy"
+        title = when {
+            com.sara.lucy.win.Embedded.active -> "Lucy · en esta PC"
+            LucyLocation.version > 0 -> "Lucy · V${LucyLocation.version}"
+            else -> "Lucy"
+        }
         defaultCloseOperation = DO_NOTHING_ON_CLOSE
         iconImages = listOf(16, 32, 48, 64, 128, 256).map { SpherePainter.icon(it) }
         minimumSize = Dimension(420, 560)
@@ -297,7 +301,8 @@ class MainWindow(private val app: LucyApp) : JFrame("Lucy") {
 
     // ---------------------------------------------------------------- Bandeja del sistema
     private fun setupTray() {
-        if (!SystemTray.isSupported()) return
+        // Dentro de Lucy Remota no hay un segundo ícono en la bandeja: se maneja desde Lucy Remota.
+        if (!SystemTray.isSupported() || com.sara.lucy.win.Embedded.active) return
         val menu = JPopupMenu()
         fun item(text: String, action: () -> Unit) = javax.swing.JMenuItem(text).apply { addActionListener { action() } }
         menu.add(item("Abrir Lucy") { showWindow() })

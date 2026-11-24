@@ -91,7 +91,7 @@ sealed class PillButton : Control
 {
     bool hover;
     bool down;
-    public bool Primary { get; init; }
+    public bool Primary { get; set; }
 
     public PillButton(string text)
     {

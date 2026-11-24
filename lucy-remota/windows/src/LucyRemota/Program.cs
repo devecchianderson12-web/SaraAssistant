@@ -63,7 +63,10 @@ static class Program
         link.Start();
 
         var minimized = args.Contains("--minimizada") || AppSettings.Current.StartMinimized;
-        var form = new MainForm(link, store, history, apps, startHidden: minimized);
+        // «Lucy en esta PC»: si estaba activada, se abre sola con Lucy Remota.
+        var local = new LocalLucy();
+        if (AppSettings.Current.LocalLucy) _ = local.StartAsync();
+        var form = new MainForm(link, store, history, apps, local, startHidden: minimized);
         // Otra copia pidió mostrarse.
         ThreadPool.RegisterWaitForSingleObject(showSignal, (_, _) => form.BeginInvoke(form.ShowFromTray), null, -1, false);
         Application.Run(form);

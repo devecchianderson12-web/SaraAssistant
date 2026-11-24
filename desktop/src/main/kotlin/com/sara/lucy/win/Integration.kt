@@ -30,6 +30,14 @@ object LucyLocation {
 }
 
 /** «Iniciar con Windows» sólo para este usuario (HKCU\…\Run): no necesita administrador. */
+/**
+ * Lucy local dentro de Lucy Remota («Lucy en esta PC»): la abre y la cierra Lucy Remota, que también
+ * la actualiza y la inicia con Windows. Sin ícono propio en la bandeja.
+ */
+object Embedded {
+    @Volatile var active = false
+}
+
 object Autostart {
     private const val KEY = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
     private const val NAME = "Lucy"
@@ -37,6 +45,8 @@ object Autostart {
     fun isEnabled(): Boolean = runCatching { Advapi32Util.registryValueExists(WinReg.HKEY_CURRENT_USER, KEY, NAME) }.getOrDefault(false)
 
     fun set(enabled: Boolean): Boolean = runCatching {
+        // Dentro de Lucy Remota el inicio con Windows lo maneja ella (y se borra el de la Lucy vieja).
+        if (Embedded.active) { if (isEnabled()) Advapi32Util.registryDeleteValue(WinReg.HKEY_CURRENT_USER, KEY, NAME); return@runCatching true }
         if (enabled) {
             val exe = LucyLocation.executable() ?: return false
             Advapi32Util.registrySetStringValue(WinReg.HKEY_CURRENT_USER, KEY, NAME, "\"${exe.absolutePath}\" --hidden")
@@ -76,6 +86,9 @@ class SingleInstance(private val dir: File) {
     private var lock: FileLock? = null
     private var channel: FileChannel? = null
 
+    /** Órdenes de Lucy Remota (por el mismo canal): «settings», «talk», «quit». */
+    @Volatile var onCommand: (String) -> Unit = {}
+
     fun acquire(onShowRequest: () -> Unit): Boolean {
         val ch = FileChannel.open(File(dir, "lucy.lock").toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
         val l = runCatching { ch.tryLock() }.getOrNull()
@@ -94,7 +107,13 @@ class SingleInstance(private val dir: File) {
         thread(isDaemon = true, name = "lucy-instance") {
             while (true) {
                 runCatching {
-                    server.accept().use { s -> if (s.getInputStream().bufferedReader().readLine() == "show") onShowRequest() }
+                    server.accept().use { s ->
+                        when (val line = s.getInputStream().bufferedReader().readLine()?.trim()) {
+                            "show" -> onShowRequest()
+                            null, "" -> Unit
+                            else -> onCommand(line)
+                        }
+                    }
                 }
             }
         }

@@ -115,7 +115,7 @@ static class SelfTest
             using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(screen.Location, Point.Empty, screen.Size);
             bmp.Save(Path.Combine(dir, name));
         }
-        var form = new MainForm(link, store, history, apps, startHidden: false);
+        var form = new MainForm(link, store, history, apps, new LocalLucy(), startHidden: false);
         form.Show();
         Shot("receptor.png");
         var dialog = new PairDialog(link.StartPairing(), store);

@@ -3,14 +3,20 @@ using System.Drawing.Drawing2D;
 namespace LucyRemota.UI;
 
 /// <summary>
-/// La esfera de Lucy: partículas que forman una esfera iluminada que gira, de un solo color que va
-/// recorriendo el espectro. Late cuando llega una orden. Se detiene cuando la ventana no se ve.
+/// La burbuja de Lucy (la misma del teléfono): un ANILLO en arte ASCII que gira en 3D, en tonos
+/// fucsia → dorado, con «L U C Y» debajo. Late cuando llega una orden. Se detiene cuando la ventana
+/// no se ve.
 /// </summary>
 sealed class SphereView : Control
 {
     readonly System.Windows.Forms.Timer timer = new() { Interval = 33 };
     readonly DateTime start = DateTime.UtcNow;
     double pulse;
+    const int Rows = 40;
+    readonly double[] depth = new double[Rows * Rows];
+    readonly double[] light = new double[Rows * Rows];
+    readonly double[] tone = new double[Rows * Rows];
+    const string Ramp = " .,-~:;=!*#$@";
 
     /// <summary>0,25 = esperando; 0,7 = conectada.</summary>
     public float Energy { get; set; } = 0.3f;
@@ -27,17 +33,12 @@ sealed class SphereView : Control
     /// <summary>Un latido (llegó una orden).</summary>
     public void Pulse() => pulse = 1.0;
 
-    static Color Hue(double t, double alpha)
+    /// <summary>Va y viene entre fucsia y dorado (nunca el arcoíris de Sara).</summary>
+    static Color Tone(double t, double alpha, double shift = 0)
     {
-        var h = (t * 36) % 360 / 60.0;
-        var x = 1 - Math.Abs(h % 2 - 1);
-        (double r, double g, double b) = (int)h switch
-        {
-            0 => (1.0, x, 0.0), 1 => (x, 1.0, 0.0), 2 => (0.0, 1.0, x), 3 => (0.0, x, 1.0), 4 => (x, 0.0, 1.0), _ => (1.0, 0.0, x),
-        };
-        // Saturación 0,85 (como la de Lucy).
-        static int C(double v) => (int)((0.15 + 0.85 * v) * 255);
-        return Color.FromArgb((int)(Math.Clamp(alpha, 0, 1) * 255), C(r), C(g), C(b));
+        var k = Math.Clamp(0.5 + 0.5 * Math.Sin(t * 0.9 + shift * 3), 0, 1);
+        static int Mix(int a, int b, double k) => (int)(a + (b - a) * k);
+        return Color.FromArgb((int)(Math.Clamp(alpha, 0, 1) * 255), 0xFF, Mix(0x2E, 0xB4, k), Mix(0xA6, 0x2E, k));
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -56,53 +57,76 @@ sealed class SphereView : Control
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
         var t = (DateTime.UtcNow - start).TotalSeconds;
         pulse *= 0.93;
         var energy = Math.Clamp(Energy + pulse * 0.6, 0, 1);
         var cx = Width / 2.0;
-        var cy = Height / 2.0;
-        var r = Math.Min(Width, Height) * 0.36 * (1 + pulse * 0.12 + 0.012 * Math.Sin(t * 2));
+        var r = Math.Min(Width, Height) * 0.34 * (1 + pulse * 0.14 + 0.015 * Math.Sin(t * 2.2));
         if (r <= 4) return;
+        var cy = Height / 2.0 - r * 0.14;
 
-        // Halo.
-        var glow = (float)(r * 1.45);
+        var glow = (float)(r * 1.5);
         using (var path = new GraphicsPath())
         {
             path.AddEllipse((float)(cx - glow), (float)(cy - glow), glow * 2, glow * 2);
-            using var brush = new PathGradientBrush(path) { CenterColor = Hue(t, (40 + 120 * pulse + 50 * energy) / 255), SurroundColors = [Color.FromArgb(0, 0, 0, 0)] };
+            using var brush = new PathGradientBrush(path) { CenterColor = Tone(t, (50 + 120 * pulse + 40 * energy) / 255), SurroundColors = [Color.FromArgb(0, 0, 0, 0)] };
             g.FillPath(brush, path);
         }
 
-        const int rows = 34;
-        var cell = 2 * r / rows;
-        var lightAngle = t * (0.5 + 0.8 * energy);
-        double lx = Math.Cos(lightAngle) * 0.65, ly = -0.45, lz = Math.Sin(lightAngle) * 0.35 + 0.65;
-        var ll = Math.Sqrt(lx * lx + ly * ly + lz * lz);
-        var spin = t * (0.35 + 0.9 * pulse);
-        double cs = Math.Cos(spin), sn = Math.Sin(spin);
-        using var brushDot = new SolidBrush(Color.White);
-        for (var row = 0; row < rows; row++)
+        // Anillo 3D (como el clásico «donut» ASCII) proyectado a una grilla con profundidad.
+        Array.Clear(depth);
+        var a = t * (0.55 + 1.1 * energy + 1.4 * pulse);
+        var b = t * (0.3 + 0.6 * energy);
+        double cosA = Math.Cos(a), sinA = Math.Sin(a), cosB = Math.Cos(b), sinB = Math.Sin(b);
+        const double k2 = 5, tube = 1, ring = 2;
+        var k1 = Rows * k2 * 3 / (8 * (tube + ring));
+        for (var theta = 0.0; theta < Math.Tau; theta += 0.11)
         {
-            var y = (row + 0.5) / rows * 2 - 1;
-            for (var col = 0; col < rows; col++)
+            double ct = Math.Cos(theta), st = Math.Sin(theta);
+            for (var phi = 0.0; phi < Math.Tau; phi += 0.045)
             {
-                var x = (col + 0.5) / rows * 2 - 1;
-                var d2 = x * x + y * y;
-                if (d2 > 1) continue;
-                var z = Math.Sqrt(1 - d2);
-                var light = Math.Max(0, (x * lx + y * ly + z * lz) / ll) * 0.75 + 0.18;
-                var tx = x * cs + z * sn;
-                var tz = -x * sn + z * cs;
-                var bands = 0.5 + 0.5 * Math.Sin(tx * 7 + y * 3 + t * 0.8) * Math.Cos(y * 6 - tz * 4);
-                var wave = pulse * (0.5 + 0.5 * Math.Sin(Math.Sqrt(d2) * 14 - t * 9));
-                var value = (light * (0.6 + 0.4 * bands) + wave * 0.55) * (0.45 + 0.55 * energy);
-                if (value < 0.1) continue;
-                // Como el arte ASCII de Lucy: más «tinta» donde hay más luz.
-                var size = (float)(cell * Math.Clamp(0.18 + value * 0.75, 0.2, 0.95));
-                brushDot.Color = Hue(t, (70 + 185 * Math.Clamp(value, 0, 1)) / 255);
-                g.FillEllipse(brushDot, (float)(cx + x * r - size / 2), (float)(cy + y * r - size / 2), size, size);
+                double cp = Math.Cos(phi), sp = Math.Sin(phi);
+                var circleX = ring + tube * ct;
+                var circleY = tube * st;
+                var x = circleX * (cosB * cp + sinA * sinB * sp) - circleY * cosA * sinB;
+                var y = circleX * (sinB * cp - sinA * cosB * sp) + circleY * cosA * cosB;
+                var z = k2 + cosA * circleX * sp + circleY * sinA;
+                var ooz = 1 / z;
+                var col = (int)(Rows / 2.0 + k1 * ooz * x);
+                var row = (int)(Rows / 2.0 - k1 * ooz * y);
+                if (col < 0 || col >= Rows || row < 0 || row >= Rows) continue;
+                var i = row * Rows + col;
+                if (ooz <= depth[i]) continue;
+                depth[i] = ooz;
+                light[i] = cp * ct * sinB - cosA * ct * sp - sinA * st + cosB * (cosA * st - ct * sinA * sp);
+                tone[i] = phi / Math.Tau;
             }
         }
+
+        var cell = 2 * r / Rows;
+        using var font = new Font(FontFamily.GenericMonospace, (float)Math.Max(4, cell * 1.15), FontStyle.Bold, GraphicsUnit.Pixel);
+        using var brushText = new SolidBrush(Color.White);
+        using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        var dim = 0.5 + 0.5 * energy;
+        for (var row = 0; row < Rows; row++)
+        {
+            for (var col = 0; col < Rows; col++)
+            {
+                var i = row * Rows + col;
+                if (depth[i] == 0) continue;
+                var wave = pulse * (0.5 + 0.5 * Math.Sin(tone[i] * 18 - t * 10));
+                var value = Math.Clamp(Math.Max(0, light[i]) / 1.42 * 0.8 + 0.2 + wave * 0.45, 0, 1) * dim;
+                var index = Math.Clamp((int)(value * (Ramp.Length - 1)), 1, Ramp.Length - 1);
+                brushText.Color = Tone(t, (90 + 165 * value) / 255, tone[i]);
+                var x = cx + ((col + 0.5) / Rows * 2 - 1) * r;
+                var y = cy + ((row + 0.5) / Rows * 2 - 1) * r;
+                g.DrawString(Ramp[index].ToString(), font, brushText, (float)x, (float)y, fmt);
+            }
+        }
+        using var nameFont = new Font(FontFamily.GenericMonospace, (float)Math.Max(6, r * 0.26), FontStyle.Bold, GraphicsUnit.Pixel);
+        brushText.Color = Tone(t + 1.5, (170 + 85 * energy) / 255);
+        g.DrawString("L U C Y", nameFont, brushText, (float)cx, (float)(cy + r * 1.15), fmt);
     }
 
     protected override void Dispose(bool disposing)

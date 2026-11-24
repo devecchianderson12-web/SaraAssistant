@@ -14,6 +14,16 @@ sealed class MainForm : LucyForm
     readonly IPcStore store;
     readonly History history;
     readonly Modules.AppsModule apps;
+    readonly LocalLucy local;
+    readonly Label localStatus = Theme.Label("", 14f, style: FontStyle.Bold);
+    readonly Label localDetail = Theme.Label("", 10.5f, Theme.Muted);
+    readonly PillButton localToggle = new("Activar") { Primary = true };
+    readonly ComboBox micBox = new()
+    {
+        Width = 300, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Theme.SurfaceSolid,
+        ForeColor = Theme.Text, Font = Theme.Ui(10f),
+    };
+    bool micsLoaded;
     readonly PillButton updateButton = new("Actualizar") { Primary = true, Visible = false };
     Updater.Release? pendingUpdate;
     bool installing;
@@ -45,9 +55,10 @@ sealed class MainForm : LucyForm
         [Status.Unauthorized] = ("No autorizado", Theme.Bad), [Status.Busy] = ("Ocupada", Theme.Warn),
     };
 
-    public MainForm(PcLink link, IPcStore store, History history, Modules.AppsModule apps, bool startHidden)
+    public MainForm(PcLink link, IPcStore store, History history, Modules.AppsModule apps, LocalLucy local, bool startHidden)
     {
         this.apps = apps;
+        this.local = local;
         this.link = link;
         this.store = store;
         this.history = history;
@@ -60,7 +71,14 @@ sealed class MainForm : LucyForm
 
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, Padding = new Padding(20, 16, 20, 0), BackColor = Color.Transparent, WrapContents = false };
         top.Controls.Add(Theme.Label("Lucy Remota", 15f, style: FontStyle.Bold));
-        top.Controls.Add(Theme.Label("Receptor · tu teléfono manda, esta computadora hace", 9.5f, Theme.Muted));
+        var subtitle = Theme.Label("Receptor · tu teléfono manda, esta computadora hace", 9.5f, Theme.Muted);
+        top.Controls.Add(subtitle);
+        // Dos apartados: con el teléfono (remoto) o Lucy completa en esta PC (sin teléfono).
+        var tabs = new FlowLayoutPanel { AutoSize = true, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0), WrapContents = false };
+        var phoneTab = new PillButton("Con el teléfono") { Primary = true };
+        var localTab = new PillButton("Lucy en esta PC");
+        foreach (var b in new[] { phoneTab, localTab }) { b.Size = b.GetPreferredSize(Size.Empty); b.Margin = new Padding(0, 0, 8, 0); tabs.Controls.Add(b); }
+        top.Controls.Add(tabs);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 1, Padding = new Padding(16, 0, 16, 16), BackColor = Color.Transparent };
         bottom.Controls.Add(Centered(status));
@@ -80,8 +98,54 @@ sealed class MainForm : LucyForm
         foreach (var b in new PillButton[] { pair, phones, orders, settings, more, updateButton }) { b.Size = b.GetPreferredSize(Size.Empty); buttons.Controls.Add(b); }
         bottom.Controls.Add(buttons);
 
+        // ---- «Lucy en esta PC»: la Lucy de Windows completa, sin teléfono.
+        var localBottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 1, Padding = new Padding(16, 0, 16, 16), BackColor = Color.Transparent, Visible = false };
+        localBottom.Controls.Add(Centered(localStatus));
+        localBottom.Controls.Add(Centered(localDetail));
+        var localButtons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.None, BackColor = Color.Transparent, Margin = new Padding(0, 12, 0, 0), WrapContents = true };
+        var openLocal = new PillButton("Abrir Lucy");
+        openLocal.Click += async (_, _) => { if (local.IsRunning) local.Show(); else await local.StartAsync(showWindow: true); };
+        var localSettings = new PillButton("Ajustes de Lucy");
+        localSettings.Click += async (_, _) => { if (!local.IsRunning) await local.StartAsync(); local.OpenSettings(); };
+        var talk = new PillButton("Hablar");
+        talk.Click += (_, _) => local.Talk();
+        localToggle.Click += async (_, _) => await ToggleLocalAsync();
+        foreach (var b in new[] { localToggle, openLocal, localSettings, talk }) { b.Size = b.GetPreferredSize(Size.Empty); localButtons.Controls.Add(b); }
+        localBottom.Controls.Add(localButtons);
+        var micRow = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.None, BackColor = Color.Transparent, Margin = new Padding(0, 10, 0, 0), WrapContents = false };
+        var micLabel = Theme.Label("Micrófono", 10f, Theme.Muted);
+        micLabel.Margin = new Padding(0, 6, 8, 0);
+        var useMic = new PillButton("Usar");
+        useMic.Size = useMic.GetPreferredSize(Size.Empty);
+        useMic.Click += async (_, _) =>
+        {
+            if (micBox.SelectedItem is not string choice) return;
+            await local.SetMicrophoneAsync(choice == DefaultMic ? "" : choice);
+            RefreshLocal();
+        };
+        micRow.Controls.Add(micLabel);
+        micRow.Controls.Add(micBox);
+        micRow.Controls.Add(useMic);
+        localBottom.Controls.Add(micRow);
+
+        void ShowTab(bool phone)
+        {
+            phoneTab.Primary = phone;
+            localTab.Primary = !phone;
+            phoneTab.Invalidate();
+            localTab.Invalidate();
+            bottom.Visible = phone;
+            localBottom.Visible = !phone;
+            subtitle.Text = phone ? "Receptor · tu teléfono manda, esta computadora hace" : "Lucy completa en esta PC · decí «Lucy», sin teléfono";
+            if (!phone) { RefreshLocal(); _ = LoadMicrophonesAsync(); }
+        }
+        phoneTab.Click += (_, _) => ShowTab(true);
+        localTab.Click += (_, _) => ShowTab(false);
+        local.Changed += () => Ui(() => { RefreshLocal(); if (local.Current == LocalLucy.State.Running) _ = LoadMicrophonesAsync(); });
+
         Controls.Add(sphere);
         Controls.Add(bottom);
+        Controls.Add(localBottom);
         Controls.Add(top);
 
         tray = new NotifyIcon { Icon = Icon, Text = "Lucy Remota", Visible = true };
@@ -89,6 +153,9 @@ sealed class MainForm : LucyForm
         menu.Items.Add("Abrir", null, (_, _) => ShowFromTray());
         menu.Items.Add("Vincular teléfono", null, (_, _) => { ShowFromTray(); OpenPairing(); });
         menu.Items.Add("Ajustes", null, (_, _) => { ShowFromTray(); OpenSettings(); });
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Lucy en esta PC: abrir", null, async (_, _) => { if (local.IsRunning) local.Show(); else await local.StartAsync(showWindow: true); });
+        menu.Items.Add("Lucy en esta PC: hablar", null, (_, _) => local.Talk());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Salir", null, (_, _) => ExitApp());
         tray.ContextMenuStrip = menu;
@@ -120,9 +187,52 @@ sealed class MainForm : LucyForm
         updates.Tick += async (_, _) =>
         {
             updates.Interval = (int)TimeSpan.FromHours(6).TotalMilliseconds;
+            if (AppSettings.Current.CheckUpdates) await local.UpdateIfNeededAsync();
             if (AppSettings.Current.CheckUpdates) await CheckUpdatesAsync();
         };
         updates.Start();
+    }
+
+    const string DefaultMic = "El predeterminado de Windows";
+
+    async Task ToggleLocalAsync()
+    {
+        var on = !AppSettings.Current.LocalLucy;
+        var s = AppSettings.Current.Copy();
+        s.LocalLucy = on;
+        AppSettings.Save(s);
+        if (on) await local.StartAsync(); else await local.StopAsync();
+        RefreshLocal();
+    }
+
+    void RefreshLocal()
+    {
+        var on = AppSettings.Current.LocalLucy;
+        localToggle.Text = on ? "Desactivar" : "Activar";
+        localToggle.Size = localToggle.GetPreferredSize(Size.Empty);
+        (localStatus.Text, localStatus.ForeColor) = local.Current switch
+        {
+            LocalLucy.State.Running => ("Lucy está escuchando en esta PC", Theme.Ok),
+            LocalLucy.State.Downloading or LocalLucy.State.Starting => ("Preparando Lucy…", Theme.Text),
+            LocalLucy.State.Failed => ("No se pudo abrir Lucy", Theme.Bad),
+            _ => (on ? "Activada" : "Lucy en esta PC está apagada", on ? Theme.Text : Theme.Warn),
+        };
+        localDetail.Text = local.Detail.Length > 0 && local.Current != LocalLucy.State.Off
+            ? local.Detail
+            : on ? "Decí «Lucy» cerca de la PC." : "Activala para usar a Lucy sin el teléfono: escucha «Lucy», habla, responde y hace todo lo de siempre en esta PC.";
+    }
+
+    async Task LoadMicrophonesAsync()
+    {
+        if (micsLoaded || LocalLucy.Installed() == null) return;
+        micsLoaded = true;
+        var mics = await local.MicrophonesAsync();
+        if (IsDisposed) return;
+        micBox.Items.Clear();
+        micBox.Items.Add(DefaultMic);
+        foreach (var m in mics) micBox.Items.Add(m);
+        var current = LocalLucy.CurrentMicrophone();
+        micBox.SelectedItem = current.Length > 0 && micBox.Items.Contains(current) ? current : DefaultMic;
     }
 
     void OpenSettings()
@@ -231,6 +341,7 @@ sealed class MainForm : LucyForm
     void ExitApp()
     {
         exiting = true;
+        try { local.StopAsync().Wait(5000); } catch { }
         tray.Visible = false;
         Close();
         Application.Exit();

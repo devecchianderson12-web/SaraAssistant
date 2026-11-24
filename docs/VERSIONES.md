@@ -7,7 +7,7 @@ Cada app lleva su propio número y sólo sube cuando esa app cambia:
 | Lucy Remota (Android) | `lucy-remota/android/VERSION` | `LucyRemota-vX.Y.Z.apk` |
 | Lucy Remota (Windows) | `lucy-remota/windows/VERSION` | `LucyRemota-vX.Y.Z.exe` |
 | Sara (Android) | `app/VERSION` | `SaraAssistant-vX.Y.Z.apk` |
-| Lucy de Windows | (ídem) | `Lucy-Windows-vX.Y.Z.exe` |
+| Lucy en esta PC (componente de Lucy Remota) | `desktop/VERSION` | `LucyRemota-Local-vX.Y.Z.zip` |
 
 Reglas (pedidas por el usuario):
 

@@ -27,29 +27,30 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * La esfera de Sara/Lucy: cáscara de partículas conectadas que gira en 3D, cintas de luz adentro,
- * colores que recorren el espectro y que late con la voz.
+ * La burbuja de Lucy (la misma que en el teléfono): un ANILLO en arte ASCII que gira en 3D, en tonos
+ * fucsia → dorado, con «L U C Y» escrito debajo. Late con la voz: crece, gira más rápido y se
+ * ilumina cuando hablás o cuando Lucy habla.
  */
-class SpherePainter {
+class SpherePainter(private val showName: Boolean = true) {
     @Volatile var level = 0f
     @Volatile var energy = 0.35f
     @Volatile var speaking = false
 
     private val start = System.nanoTime()
     private var smooth = 0.0
-    private val rows = 38
+    private val rows = 40
+    private val depth = DoubleArray(rows * rows)
+    private val light = DoubleArray(rows * rows)
+    private val tone = DoubleArray(rows * rows)
 
-    /** Toda la esfera es de un solo color que recorre el espectro (una vuelta cada 10 s). */
-    private fun hue(t: Double, alpha: Double): Color {
-        val c = Color.getHSBColor(((t * 36) % 360 / 360).toFloat(), 0.85f, 1f)
-        return Color(c.red, c.green, c.blue, (alpha.coerceIn(0.0, 1.0) * 255).toInt())
+    /** Va y viene entre fucsia y dorado (nunca el arcoíris de Sara). */
+    private fun color(t: Double, alpha: Double, shift: Double = 0.0): Color {
+        val k = (0.5 + 0.5 * sin(t * 0.9 + shift * 3)).coerceIn(0.0, 1.0)
+        fun mix(a: Int, b: Int) = (a + (b - a) * k).toInt()
+        return Color(mix(0xFF, 0xFF), mix(0x2E, 0xB4), mix(0xA6, 0x2E), (alpha.coerceIn(0.0, 1.0) * 255).toInt())
     }
 
-    /**
-     * La misma esfera de Sara en Android: arte ASCII apretado (« .:-=+*#%@») que forma una esfera
-     * iluminada que gira, de un solo color RGB que va cambiando, y que late con la voz.
-     */
-    fun paint(g: Graphics2D, w: Int, h: Int, time: Double = (System.nanoTime() - start) / 1e9) {
+    fun paint(g: Graphics2D, w: Int, h: Int, time: Double = (System.nanoTime() - start) / 1e9, tilt: Double? = null, turn: Double? = null) {
         if (w <= 0 || h <= 0) return
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
@@ -58,74 +59,106 @@ class SpherePainter {
         smooth += (target.coerceIn(0.0, 1.0) - smooth) * 0.25
         val pulse = (smooth * energy).coerceIn(0.0, 1.0)
         val cx = w / 2.0
-        val cy = h / 2.0
-        val r = min(w, h) * 0.36 * (1 + pulse * 0.14 + 0.012 * sin(t * 2))
+        val r = min(w, h) * 0.34 * (1 + pulse * 0.16 + 0.015 * sin(t * 2.2))
+        val cy = if (showName) h / 2.0 - r * 0.14 else h / 2.0
 
-        val glowR = (r * 1.45).toFloat()
+        val glowR = (r * 1.5).toFloat()
         g.paint = RadialGradientPaint(
             Point2D.Double(cx, cy), glowR, floatArrayOf(0f, 1f),
-            arrayOf(hue(t, (40 + 120 * pulse + 40 * energy) / 255), Color(0, 0, 0, 0)), MultipleGradientPaint.CycleMethod.NO_CYCLE,
+            arrayOf(color(t, (50 + 120 * pulse + 40 * energy) / 255), Color(0, 0, 0, 0)), MultipleGradientPaint.CycleMethod.NO_CYCLE,
         )
         g.fill(Ellipse2D.Double(cx - glowR, cy - glowR, glowR * 2.0, glowR * 2.0))
 
-        val cell = 2 * r / rows
-        g.font = Font(Font.MONOSPACED, Font.BOLD, max(4, (cell * 1.18).toInt()))
-        val fm = g.fontMetrics
-        val lightAngle = t * (0.5 + 0.8 * energy)
-        val lx = cos(lightAngle) * 0.65
-        val ly = -0.45
-        val lz = sin(lightAngle) * 0.35 + 0.65
-        val ll = sqrt(lx * lx + ly * ly + lz * lz)
-        val spin = t * (0.35 + 0.9 * pulse)
-        val cosS = cos(spin)
-        val sinS = sin(spin)
-        for (row in 0 until rows) {
-            val y = (row + 0.5) / rows * 2 - 1
-            for (col in 0 until rows) {
-                val x = (col + 0.5) / rows * 2 - 1
-                val d2 = x * x + y * y
-                if (d2 > 1) continue
-                val z = sqrt(1 - d2)
-                val light = max(0.0, (x * lx + y * ly + z * lz) / ll) * 0.75 + 0.18
-                val tx = x * cosS + z * sinS
-                val tz = -x * sinS + z * cosS
-                val bands = 0.5 + 0.5 * sin(tx * 7 + y * 3 + t * 0.8) * cos(y * 6 - tz * 4)
-                val wave = pulse * (0.5 + 0.5 * sin(sqrt(d2) * 14 - t * 9))
-                val value = (light * (0.6 + 0.4 * bands) + wave * 0.55) * (0.45 + 0.55 * energy)
-                val index = (value * (RAMP.length - 1)).toInt().coerceIn(0, RAMP.length - 1)
-                if (index == 0) continue
-                g.color = hue(t, (70 + 185 * value.coerceIn(0.0, 1.0)) / 255)
-                val ch = RAMP[index].toString()
-                g.drawString(ch, (cx + x * r - fm.stringWidth(ch) / 2.0).toFloat(), (cy + y * r + fm.ascent * 0.36).toFloat())
+        java.util.Arrays.fill(depth, 0.0)
+        val a = tilt ?: (t * (0.55 + 1.1 * energy + 1.4 * pulse))
+        val b = turn ?: (t * (0.3 + 0.6 * energy))
+        val cosA = cos(a); val sinA = sin(a); val cosB = cos(b); val sinB = sin(b)
+        val k2 = 5.0
+        val k1 = rows * k2 * 3 / (8 * (TUBE + RING))
+        var theta = 0.0
+        while (theta < TWO_PI) {
+            val ct = cos(theta); val st = sin(theta)
+            var phi = 0.0
+            while (phi < TWO_PI) {
+                val cp = cos(phi); val sp = sin(phi)
+                val circleX = RING + TUBE * ct
+                val circleY = TUBE * st
+                val x = circleX * (cosB * cp + sinA * sinB * sp) - circleY * cosA * sinB
+                val y = circleX * (sinB * cp - sinA * cosB * sp) + circleY * cosA * cosB
+                val z = k2 + cosA * circleX * sp + circleY * sinA
+                val ooz = 1 / z
+                val col = (rows / 2.0 + k1 * ooz * x).toInt()
+                val row = (rows / 2.0 - k1 * ooz * y).toInt()
+                if (col in 0 until rows && row in 0 until rows) {
+                    val i = row * rows + col
+                    if (ooz > depth[i]) {
+                        depth[i] = ooz
+                        light[i] = cp * ct * sinB - cosA * ct * sp - sinA * st + cosB * (cosA * st - ct * sinA * sp)
+                        tone[i] = phi / TWO_PI
+                    }
+                }
+                phi += 0.045
             }
+            theta += 0.11
+        }
+
+        val cell = 2 * r / rows
+        g.font = Font(Font.MONOSPACED, Font.BOLD, max(4, (cell * 1.25).toInt()))
+        val fm = g.fontMetrics
+        val dim = 0.5 + 0.5 * energy.toDouble()
+        for (row in 0 until rows) {
+            for (col in 0 until rows) {
+                val i = row * rows + col
+                if (depth[i] == 0.0) continue
+                val wave = pulse * (0.5 + 0.5 * sin(tone[i] * 18 - t * 10))
+                val value = ((max(0.0, light[i]) / 1.42) * 0.8 + 0.2 + wave * 0.45).coerceIn(0.0, 1.0) * dim
+                val index = (value * (RAMP.length - 1)).toInt().coerceIn(1, RAMP.length - 1)
+                g.color = color(t, (90 + 165 * value) / 255, tone[i])
+                val ch = RAMP[index].toString()
+                val x = cx + ((col + 0.5) / rows * 2 - 1) * r
+                val y = cy + ((row + 0.5) / rows * 2 - 1) * r
+                g.drawString(ch, (x - fm.stringWidth(ch) / 2.0).toFloat(), (y + fm.ascent * 0.36).toFloat())
+            }
+        }
+        if (showName) {
+            g.font = Font(Font.MONOSPACED, Font.BOLD, max(6, (r * 0.26).toInt()))
+            val name = "L U C Y"
+            val nfm = g.fontMetrics
+            g.color = color(t + 1.5, (170 + 85 * energy.toDouble()) / 255)
+            g.drawString(name, (cx - nfm.stringWidth(name) / 2.0).toFloat(), (cy + r * 1.12 + nfm.ascent * 0.35).toFloat())
         }
     }
 
     companion object {
-        /** De vacío a lleno. */
-        private const val RAMP = " .:-=+*#%@"
+        /** De tenue a brillante (la rampa del «donut» ASCII clásico). */
+        private const val RAMP = " .,-~:;=!*#$@"
+        private const val TWO_PI = 6.283185307179586
+        private const val TUBE = 1.0
+        private const val RING = 2.0
 
-        /** Ícono (ventana, bandeja, .exe): la esfera sobre un círculo oscuro. */
-        /** Ícono de Lucy (ventana, bandeja y .exe): la esfera de Lucy sobre fondo oscuro (el de antes, amarillo). */
+        /**
+         * Ícono de Lucy (ventana, bandeja y .exe): el anillo ASCII con «L U C Y» sobre fondo oscuro.
+         * A tamaño chico (donde las letras no se leen) se dibuja el anillo fucsia-dorado con una «L».
+         */
         fun icon(size: Int): BufferedImage {
             val img = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
             val g = img.createGraphics()
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g.color = Color(8, 6, 20)
+            g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
+            g.color = Color(18, 8, 22)
             g.fillOval(0, 0, size, size)
-            if (size <= 32) {
-                // A tamaño chico, una esfera de color se ve mejor que las partículas.
-                val r = size / 2f
-                g.paint = RadialGradientPaint(
-                    Point2D.Float(r * 0.8f, r * 0.75f), r * 0.85f, floatArrayOf(0f, 0.55f, 1f),
-                    arrayOf(Color(255, 255, 255), Color(170, 90, 255), Color(30, 140, 255, 0)),
-                )
-                g.fillOval((size * 0.12).toInt(), (size * 0.12).toInt(), (size * 0.76).toInt(), (size * 0.76).toInt())
+            if (size < 48) {
+                val s = size / 108.0
+                g.stroke = java.awt.BasicStroke((9 * s).toFloat())
+                g.paint = java.awt.GradientPaint((32 * s).toFloat(), (32 * s).toFloat(), Color(0xFF, 0x2E, 0xA6), (76 * s).toFloat(), (76 * s).toFloat(), Color(0xFF, 0xB4, 0x2E))
+                g.draw(Ellipse2D.Double(25 * s, 25 * s, 58 * s, 58 * s))
+                g.stroke = java.awt.BasicStroke((7 * s).toFloat(), java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND)
+                g.color = Color.WHITE
+                val l = java.awt.geom.Path2D.Double().apply { moveTo(47 * s, 40 * s); lineTo(47 * s, 66 * s); lineTo(64 * s, 66 * s) }
+                g.draw(l)
             } else {
-                // La esfera ocupa un tercio del área que se le da: se dibuja más grande y centrada.
-                val big = (size * 1.45).toInt()
-                g.translate((size - big) / 2, (size - big) / 2)
-                SpherePainter().apply { energy = 1f; level = 0.6f }.paint(g, big, big, 1.3)
+                // De frente y apenas inclinado: se ve el agujero del anillo.
+                SpherePainter().apply { energy = 1f; level = 0.5f }.paint(g, size, size, 1.3, tilt = 1.2, turn = 0.15)
             }
             g.dispose()
             return img

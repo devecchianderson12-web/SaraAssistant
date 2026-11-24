@@ -31,6 +31,12 @@ fun main(args: Array<String>) {
     arg("--write-icon")?.let { writeIcon(File(it)); return }
     arg("--launcher")?.let { LucyLocation.portableExe = File(it) }
     arg("--selftest")?.let { exitProcess(SelfTest(File(it)).run()) }
+    // Lucy Remota pregunta qué micrófonos hay (los mismos nombres que usa Lucy).
+    if ("--microfonos" in args) {
+        println(org.json.JSONArray(com.sara.lucy.audio.Microphone.available()).toString())
+        return
+    }
+    if ("--embebida" in args) com.sara.lucy.win.Embedded.active = true
 
     val firstRun = !File(LucyPaths.home, "settings.json").exists()
     var window: MainWindow? = null
@@ -46,7 +52,7 @@ fun main(args: Array<String>) {
     LucyTheme.install()
     val app = LucyApp()
     replacing?.let { old -> Updater(app.logger).cleanup(File(old)) }
-    if (firstRun) Autostart.set(true) else Autostart.refresh()
+    if (com.sara.lucy.win.Embedded.active) Autostart.set(false) else if (firstRun) Autostart.set(true) else Autostart.refresh()
     app.logger.d("Lucy", "Inicio V${LucyLocation.version} (${LucyLocation.executable()})")
 
     SwingUtilities.invokeAndWait {
@@ -54,9 +60,18 @@ fun main(args: Array<String>) {
         window = w
         app.start()
         if (app.settings.current.hotkey) Hotkey.register(app.logger) { SwingUtilities.invokeLater { w.talk() } }
-        val hidden = "--hidden" in args || (app.settings.current.startMinimized && !firstRun && replacing == null)
+        val embedded = com.sara.lucy.win.Embedded.active
+        instance.onCommand = { cmd ->
+            when (cmd) {
+                "settings" -> { w.showWindow(); SwingUtilities.invokeLater { w.openSettings() } }
+                "talk" -> SwingUtilities.invokeLater { w.talk() }
+                "quit" -> SwingUtilities.invokeLater { w.exit() }
+            }
+        }
+        val hidden = "--hidden" in args || (embedded && "--mostrar" !in args) || (app.settings.current.startMinimized && !firstRun && replacing == null)
         if (!hidden) w.showWindow()
-        w.checkUpdates(Updater(app.logger))
+        // Dentro de Lucy Remota, las actualizaciones las baja ella.
+        if (!embedded) w.checkUpdates(Updater(app.logger))
     }
 }
 
