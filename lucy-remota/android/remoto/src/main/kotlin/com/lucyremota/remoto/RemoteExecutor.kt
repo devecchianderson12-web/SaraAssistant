@@ -111,7 +111,11 @@ class RemoteExecutor(
         }
         val heard = lastHeard()
         var orderId = ""
-        val final = link.send(remote.intent, remote.params, confirmed = confirmed) { st ->
+        // Las órdenes comunes contestan «Okey» apenas la PC la recibe (no se espera a que termine);
+        // las que piden un dato o confirmación esperan la respuesta.
+        val sensitive = link.catalog.value.firstOrNull { it.name == remote.intent }?.risk == "sensitive"
+        val instant = !confirmed && !sensitive && remote.intent !in INFO_INTENTS
+        val final = link.send(remote.intent, remote.params, confirmed = confirmed, returnWhenReceived = instant) { st ->
             orderId = st.commandId
             orders.upsert(SentOrder(st.commandId, System.currentTimeMillis(), heard, remote.intent, st.status, st.message))
         }
@@ -121,6 +125,7 @@ class RemoteExecutor(
         // Lo que pide información (qué suena, la hora de la PC…) se dice; lo demás, sólo «Okey».
         val asks = remote.intent in INFO_INTENTS
         return when (final.status) {
+            CommandStatus.RECEIVED, CommandStatus.PROCESSING -> ExecutionResult(true, "Okey.")
             CommandStatus.SUCCESS -> ExecutionResult(true, if (asks) final.message.ifBlank { "Okey." } else "Okey.", informative = asks)
             CommandStatus.NEEDS_CONFIRMATION -> ExecutionResult(
                 true, "",

@@ -368,6 +368,7 @@ class AppContainer(private val app: Application) {
     )
 
     fun isDefaultAssistant(): Boolean {
+        if (Build.VERSION.SDK_INT < 29) return false
         val roleManager = app.getSystemService(RoleManager::class.java) ?: return false
         return runCatching { roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT) }.getOrDefault(false)
     }
@@ -392,7 +393,7 @@ class SaraApp : Application() {
         // Lucy: todo lo de Sara en el teléfono, y además maneja tus computadoras.
         com.lucyremota.nucleo.model.AssistantIdentity.name = "Lucy"
         com.lucyremota.nucleo.model.AssistantIdentity.capabilities =
-            "Todo lo de Sara en el teléfono (música, WhatsApp, llamadas, alarmas, preguntas) y además manejo tu computadora: música, volumen, programas, ventanas y apagado."
+            "En el teléfono hago de todo (música, WhatsApp, llamadas, alarmas, preguntas) y además manejo tu computadora: música, volumen, programas, ventanas y apagado."
         com.lucyremota.nucleo.util.WakeWordTuning.profile = com.lucyremota.nucleo.util.WakeWordProfile.LUCY
         container = AppContainer(this)
         com.lucyremota.emisor.services.SaraNotifications.createChannels(this)

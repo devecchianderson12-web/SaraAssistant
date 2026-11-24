@@ -76,7 +76,7 @@ object ServiceStartPolicy {
                     StartDecision.StartNow
                 } else {
                     StartDecision.AskUserViaNotification(
-                        "Android no permite abrir el micrófono desde segundo plano. Tocá la notificación para activar a Sara.",
+                        "Android no permite abrir el micrófono desde segundo plano. Tocá la notificación para activar a ${com.sara.core.model.AssistantIdentity.name}.",
                     )
                 }
         }

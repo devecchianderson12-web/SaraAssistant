@@ -25,7 +25,7 @@ android {
 
     defaultConfig {
         applicationId = "com.sara.assistant"
-        minSdk = 29
+        minSdk = 26
         targetSdk = 35
         // Versión propia de Sara (archivo app/VERSION: 1.5.2 → versionCode 10502; ver docs/VERSIONES.md).
         versionCode = saraVersion.let { (a, b, c) -> a * 10_000 + b * 100 + c }

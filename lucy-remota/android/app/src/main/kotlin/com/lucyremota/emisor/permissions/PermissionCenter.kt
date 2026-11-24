@@ -85,7 +85,8 @@ object PermissionCenter {
         PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isEnabled(context)
         PermissionKind.BATTERY -> context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         PermissionKind.AI_KEY -> com.lucyremota.emisor.SaraApp.containerOrNull(context)?.ai?.isAvailable() == true
-        PermissionKind.DEFAULT_ASSISTANT -> runCatching {
+        // Antes de Android 10 no hay «rol» de asistente que pedir: se da por resuelto.
+        PermissionKind.DEFAULT_ASSISTANT -> Build.VERSION.SDK_INT < 29 || runCatching {
             context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
         }.getOrDefault(false)
     }
@@ -113,7 +114,9 @@ object PermissionCenter {
         runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(context, SaraNotificationListener::class.java)) }
     }
 
-    fun missing(context: Context): List<PermissionKind> = PermissionKind.entries.filterNot { isGranted(context, it) }
+    /** Lucy no pide ser el asistente predeterminado: ese lugar es de Sara. */
+    fun missing(context: Context): List<PermissionKind> =
+        PermissionKind.entries.filterNot { it == PermissionKind.DEFAULT_ASSISTANT || isGranted(context, it) }
 
     private fun granted(context: Context, permission: String) =
         context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED

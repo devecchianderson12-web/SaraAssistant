@@ -112,6 +112,12 @@ object SkillParser {
                 return skill("dispositivo", "bluetooth", "estado" to "conectar", "dispositivo" to target)
             }
         }
+        // «Desconectate del Gol G3», «desconectá el auto»: corta ese dispositivo y deja el Bluetooth prendido.
+        Regex("^(?:desconecta|desconectate|desconectame|desconectar|desvincula)(?:\\s+(?:el\\s+(?:bluetooth|blutu)\\s+)?(?:(?:de la|de los|del|de|el|la|los|al|a)\\s+)?(.*))?$").find(n)?.let { m ->
+            val target = m.groupValues[1].trim()
+            if (target.isEmpty() || TextNormalizer.normalize(target) in GENERIC_BLUETOOTH) return skill("dispositivo", "bluetooth", "estado" to "desconectar")
+            if (!target.startsWith("wifi") && target != "internet") return skill("dispositivo", "bluetooth", "estado" to "desconectar", "dispositivo" to target)
+        }
         if (has("bluetooth", "blutu", "bluetu")) return skill("dispositivo", "bluetooth", "estado" to when { off -> "apagar"; on || has("conecta") -> "prender"; else -> "consultar" })
         if (has("no molestar", "modo no molestar")) return skill("dispositivo", "no_molestar", "estado" to when { off -> "apagar"; on -> "prender"; else -> "consultar" })
         if (has("que musica me gusta", "que musica escucho", "que artistas me gustan", "que artistas escucho", "mis gustos musicales",

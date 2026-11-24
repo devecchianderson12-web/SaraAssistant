@@ -26,7 +26,7 @@ android {
     defaultConfig {
         // Lucy (todo lo de Sara + manejar tus computadoras). Otra app: no reemplaza a Sara.
         applicationId = "com.lucyremota.emisor"
-        minSdk = 29
+        minSdk = 26
         targetSdk = 35
         // Versión propia de Lucy en el teléfono (archivo VERSION: 1.5.2 → versionCode 10502).
         versionCode = lucyVersion.let { (a, b, c) -> a * 10_000 + b * 100 + c }

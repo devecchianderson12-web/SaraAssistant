@@ -212,7 +212,7 @@ fun SettingsScreen(
         // ---------------------------------------------------------------- Activación
         SectionCard("Activación", Modifier.anchor("Activación"), "Cómo y cuándo te escucha", SaraColors.Violet) {
             SubHeader("Palabra de activación")
-            SwitchRow("Detectar «${if (settings.heySara) "Ey Sara" else "Sara"}»", "Escucha continua procesada en el teléfono", settings.wakeWordEnabled, onChange = actions.onWakeToggle)
+            SwitchRow("Detectar «${if (settings.heySara) "Ey Lucy" else "Lucy"}»", "Escucha continua procesada en el teléfono", settings.wakeWordEnabled, onChange = actions.onWakeToggle)
             OptionChips(
                 "Palabra",
                 listOf(false to "«Lucy» (reacciona al toque)", true to "«Ey Lucy» (más estricto)"),

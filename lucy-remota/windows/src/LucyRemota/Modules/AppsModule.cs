@@ -104,10 +104,13 @@ sealed class AppsModule : ISkillModule
     {
         var list = cache ?? Apps().GetAwaiter().GetResult();
         InstalledApp? Match(string[] names) => list.FirstOrDefault(a => names.Any(n => NameMatcher.Normalize(a.Name).Contains(n)));
+        // «YouTube Music» que no se reconoce como app web (otro tipo de acceso directo): igual se usa
+        // YouTube Music en una ventana de app, nunca YouTube común ni una carpeta.
+        InstalledApp? Fix(InstalledApp? a) => a != null && !a.IsWebApp && NameMatcher.Normalize(a.Name).Contains("youtube") ? BrowserMusic : a;
         if (wanted == "spotify") return Match(["spotify"]);
-        if (wanted == "youtube") return Match(["youtube music"]);
-        if (AppSettings.Current.MusicApp is { Length: > 0 } chosen && list.FirstOrDefault(a => a.Name == chosen) is { } picked) return picked;
-        return MusicPriority.Select(Match).FirstOrDefault(a => a != null) ?? BrowserMusic;
+        if (wanted == "youtube") return Fix(Match(["youtube music"])) ?? BrowserMusic;
+        if (AppSettings.Current.MusicApp is { Length: > 0 } chosen && list.FirstOrDefault(a => a.Name == chosen) is { } picked) return Fix(picked);
+        return Fix(MusicPriority.Select(Match).FirstOrDefault(a => a != null)) ?? BrowserMusic;
     }
 
     /// <summary>Las apps de música instaladas (para elegir en Ajustes).</summary>
@@ -130,7 +133,25 @@ sealed class AppsModule : ISkillModule
             else M.ShellOpen(w[4..]);
         }
         else if (Path.IsPathRooted(app.AppId) && File.Exists(app.AppId)) M.ShellOpen(app.AppId);
-        else M.ShellOpen("explorer.exe", "shell:AppsFolder\\" + app.AppId);
+        else if (ResolveKnownFolder(app.AppId) is { } path) M.ShellOpen(path);
+        // Un id de Windows de verdad (no una ruta): si no, el Explorador abriría Documentos.
+        else if (!app.AppId.Contains('\\') && !app.AppId.Contains(':')) M.ShellOpen("explorer.exe", "shell:AppsFolder\\" + app.AppId);
+        else throw new InvalidOperationException($"no sé cómo abrir {app.Name}");
+    }
+
+    /// <summary>«{6D809377-…}\Google\Chrome\chrome.exe» (así lista Windows algunos programas) → la ruta real.</summary>
+    static string? ResolveKnownFolder(string id)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(id, @"^\{([0-9A-Fa-f-]{36})\}\\(.+)$");
+        if (!m.Success) return null;
+        try
+        {
+            var guid = Guid.Parse(m.Groups[1].Value);
+            if (Native.KnownFolders.Path(guid) is not { } root) return null;
+            var full = Path.Combine(root, m.Groups[2].Value);
+            return File.Exists(full) ? full : null;
+        }
+        catch (Exception) { return null; }
     }
 
     static string? BrowserPath(string exe)

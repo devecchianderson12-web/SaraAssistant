@@ -105,10 +105,10 @@ class RemotoTest {
         assertTrue(up.response, up.success)
         // Las órdenes hechas sólo dicen «Okey»; lo que hizo la PC queda en las órdenes enviadas.
         assertEquals("Okey.", up.response)
-        assertTrue(orders.orders.value.any { it.message == "Volumen al 30 %" })
+        withTimeout(5_000) { while (orders.orders.value.none { it.message == "Volumen al 30 %" }) delay(50) }
         val more = say("subí el volumen")
         assertEquals("Okey.", more.response)
-        assertTrue(orders.orders.value.any { it.message == "Volumen al 40 %" })
+        withTimeout(5_000) { while (orders.orders.value.none { it.message == "Volumen al 40 %" }) delay(50) }
         // Sensible: pide confirmación y sólo con «sí» la hace.
         val off = say("apagá la computadora")
         assertNotNull(off.confirmation)

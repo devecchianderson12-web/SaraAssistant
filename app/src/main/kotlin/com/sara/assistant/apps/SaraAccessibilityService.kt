@@ -232,6 +232,41 @@ class SaraAccessibilityService : AccessibilityService() {
         null
     }
 
+    /**
+     * En Ajustes › Bluetooth: busca la fila del dispositivo, toca su engranaje (o la fila) y después
+     * «Desconectar» (o «Aceptar» si pregunta). No toca el interruptor del Bluetooth.
+     */
+    private suspend fun disconnectLabel(name: String): Boolean = withContext(Dispatchers.Main) {
+        delay(900)
+        val texts = activeNodes().filter { n -> !n.text.isNullOrBlank() && n.isVisibleToUser && !n.isCheckable && n.text.toString().trim().lowercase() !in FIXED_LABELS }
+        val candidates = texts.mapIndexed { i, n -> com.sara.core.apps.InstalledApp(n.text.toString(), i.toString()) }
+        val best = com.sara.core.apps.AppMatcher.best(name, candidates, threshold = 0.7) ?: run {
+            log("Desconectar: no encontré «$name»"); return@withContext false
+        }
+        val label = texts[best.id.toInt()]
+        val row = label.clickableSelfOrParent()
+        // Engranaje de la fila (detalles del dispositivo).
+        val gear = row?.parent?.let { listOf(it) + it.descendants() }.orEmpty().firstOrNull { n ->
+            n != row && n.isClickable && n.isVisibleToUser &&
+                (n.contentDescription?.toString()?.lowercase()?.let { d -> GEAR.containsMatchIn(d) } == true || n.className?.toString()?.contains("Image") == true)
+        }
+        if (!(gear?.let { tap(it) } ?: tap(row ?: label))) return@withContext false
+        repeat(8) {
+            delay(400)
+            activeNodes().firstOrNull { n -> n.isVisibleToUser && n.labels().any { DISCONNECT.matches(it) } }?.let { button ->
+                val target = button.clickableSelfOrParent() ?: button
+                if (tap(target)) {
+                    delay(500)
+                    // Algunos teléfonos preguntan «¿Desconectar?»: se confirma.
+                    activeNodes().firstOrNull { n -> n.isVisibleToUser && n.isClickable && n.labels().any { CONFIRM.matches(it) } }?.let { tap(it) }
+                    return@withContext true
+                }
+            }
+        }
+        log("Desconectar: no encontré el botón. En pantalla: ${activeNodes().flatMap { it.labels() }.distinct().take(40)}")
+        false
+    }
+
     private fun screenSummary(pkg: String) =
         pkgNodes(pkg).flatMap { it.labels() + listOfNotNull(it.viewIdResourceName?.substringAfter(":id/")) }.distinct().take(50)
 
@@ -420,6 +455,9 @@ class SaraAccessibilityService : AccessibilityService() {
             return instance
         }
 
+        private val GEAR = Regex("config|ajust|detalle|setting|info|preferen")
+        private val DISCONNECT = Regex("^(desconectar|disconnect|desvincular la conexion|desconectar dispositivo)$")
+        private val CONFIRM = Regex("^(aceptar|ok|desconectar|disconnect|si|sí)$")
         private val FIXED_LABELS = setOf(
             "bluetooth", "wi-fi", "wifi", "nombre del dispositivo", "configuración adicional", "configuracion adicional",
             "dispositivos disponibles", "dispositivos vinculados", "vincular nuevo dispositivo", "device name", "paired devices",
@@ -456,6 +494,12 @@ class SaraAccessibilityService : AccessibilityService() {
         suspend fun lockScreen(context: Context): Boolean? {
             val service = awaitInstance(context) ?: return null
             return service.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+        }
+
+        /** Desconecta un dispositivo desde la pantalla de Bluetooth (su engranaje › «Desconectar»). */
+        suspend fun disconnectDevice(context: Context, name: String): Boolean? {
+            val service = awaitInstance(context) ?: return null
+            return service.disconnectLabel(name)
         }
 
         fun back(context: Context) {

@@ -413,7 +413,7 @@ class DeviceSkill(
         SkillAction(
             "bluetooth", "Prende, apaga o consulta el Bluetooth, o se conecta a un dispositivo vinculado (auriculares, parlante, auto).",
             listOf(
-                Param("estado", ParamType.STRING, "Qué hacer.", options = listOf("prender", "apagar", "consultar", "conectar")),
+                Param("estado", ParamType.STRING, "Qué hacer.", options = listOf("prender", "apagar", "consultar", "conectar", "desconectar")),
                 Param("dispositivo", ParamType.STRING, "Nombre del dispositivo para «conectar».", required = false),
             ),
             Risk.CHANGE, verification = "Relee el estado del Bluetooth y si hay un dispositivo de audio conectado.",
@@ -672,8 +672,9 @@ class DeviceSkill(
             "prender" -> when {
                 enabled == true -> SkillResult.Done("El Bluetooth ya está prendido.")
                 btOnOrTurningOn() -> if (waitUntil(8_000) { btEnabled() == true }) SkillResult.Done("Bluetooth prendido.") else SkillResult.Failed("No terminó de prenderse.")
-                else -> autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", true) { btEnabled() == true }
+                else -> turnBluetoothOn()
             }
+            "desconectar" -> disconnect(device)
             "apagar" -> if (enabled == false) SkillResult.Done("El Bluetooth ya está apagado.") else autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", false) { btEnabled() == true }
             else -> device?.takeIf { it.isNotBlank() }?.let { connect(it) } ?: connectAny()
         }
@@ -700,6 +701,49 @@ class DeviceSkill(
             return SkillResult.Done("Conectado${connectedAudioNames()?.firstOrNull()?.let { " a $it" } ?: ""}.")
         }
         return SkillResult.Failed("Prendí el Bluetooth pero no se conectó solo. Decime a cuál: ${devicesList()}.")
+    }
+
+    /**
+     * Prender el Bluetooth: en Android 12 o anterior lo hace directo; después, con Accesibilidad toca
+     * el interruptor; sin ella, el pedido del sistema «¿Permitir que se active el Bluetooth?» (un toque).
+     */
+    @Suppress("MissingPermission", "DEPRECATION")
+    private suspend fun turnBluetoothOn(): SkillResult {
+        if (Build.VERSION.SDK_INT < 33 && btPermission() && runCatching { btAdapter?.enable() }.getOrNull() == true) {
+            if (waitUntil(8_000) { btEnabled() == true }) return SkillResult.Done("Bluetooth prendido.")
+        }
+        if (com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) {
+            val r = autoToggle(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth", true) { btEnabled() == true }
+            if (r is SkillResult.Done) return r
+        }
+        val ask = open(starter, Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE), "Bluetooth", "", "Tocá la notificación para prender el Bluetooth.")
+        if (ask !is SkillResult.Partial || ask.message.isNotEmpty()) return ask
+        return if (waitUntil(15_000) { btEnabled() == true }) SkillResult.Done("Bluetooth prendido.") else SkillResult.Failed("No se prendió el Bluetooth.")
+    }
+
+    /** Se desconecta de [device] (o del que esté conectado) y deja el Bluetooth prendido. */
+    private suspend fun disconnect(device: String?): SkillResult {
+        if (btEnabled() != true) return SkillResult.Done("El Bluetooth está apagado: no hay nada conectado.")
+        val connected = connectedAudioNames().orEmpty()
+        val name = device?.takeIf { it.isNotBlank() }?.let { d -> connected.firstOrNull { AppMatcher.best(d, listOf(InstalledApp(it, it))) != null } ?: bondedName(d) }
+            ?: connected.firstOrNull()
+            ?: return SkillResult.Done("No hay nada conectado por Bluetooth.")
+        if (connected.isNotEmpty() && connected.none { it.equals(name, true) }) return SkillResult.Done("No estás conectado a $name.")
+        if (!com.sara.assistant.apps.SaraAccessibilityService.isEnabled(context)) {
+            return SkillResult.NeedsPermission(PermissionKind.ACCESSIBILITY, "Para desconectarme sola necesito Accesibilidad. Te dejé el botón.")
+        }
+        val opened = open(starter, Intent(Settings.ACTION_BLUETOOTH_SETTINGS), "Bluetooth", "", "Tocá la notificación para abrir el Bluetooth.")
+        if (opened !is SkillResult.Partial || opened.message.isNotEmpty()) return opened
+        val done = com.sara.assistant.apps.SaraAccessibilityService.disconnectDevice(context, name)
+        var gone = false
+        val until = System.currentTimeMillis() + 6_000
+        while (!gone && System.currentTimeMillis() < until) { gone = isConnectedTo(name) == false; if (!gone) delay(400) }
+        repeat(2) { com.sara.assistant.apps.SaraAccessibilityService.back(context); delay(250) }
+        return when {
+            gone -> SkillResult.Done("Desconectado de $name. El Bluetooth sigue prendido.")
+            done == true -> SkillResult.Done("Toqué desconectar en $name.", verified = false)
+            else -> SkillResult.Failed("No encontré cómo desconectar $name en esta pantalla.")
+        }
     }
 
     private suspend fun connect(device: String): SkillResult {
@@ -1012,7 +1056,7 @@ class NotificationsSkill(private val context: Context) : Skill {
                         ?: extras.getCharSequence(android.app.Notification.EXTRA_TITLE))?.toString()?.trim().orEmpty()
                     val lines = mutableListOf<String>()
                     // Mensajería (WhatsApp, Telegram…): cada mensaje con quién lo mandó.
-                    val messages = runCatching {
+                    val messages = if (Build.VERSION.SDK_INT < 30) emptyList() else runCatching {
                         android.app.Notification.MessagingStyle.Message.getMessagesFromBundleArray(
                             extras.getParcelableArray(android.app.Notification.EXTRA_MESSAGES),
                         )
@@ -1020,7 +1064,7 @@ class NotificationsSkill(private val context: Context) : Skill {
                     val isGroup = extras.getBoolean(android.app.Notification.EXTRA_IS_GROUP_CONVERSATION)
                     for (m in messages) {
                         val text = m.text?.toString()?.takeIf { it.isNotBlank() } ?: continue
-                        val sender = m.senderPerson?.name?.toString()
+                        val sender = if (Build.VERSION.SDK_INT >= 28) m.senderPerson?.name?.toString() else null
                         lines += if (isGroup && sender != null) "$sender dice $text" else text
                     }
                     if (lines.isEmpty()) {

@@ -158,15 +158,9 @@ sealed partial class MediaModule(AppsModule apps) : ISkillModule
                 return outcome;
             }
         }
-        // Sin app de música instalada: YouTube en el navegador.
-        var id = await FirstVideo(query, ct);
-        if (id != null)
-        {
-            M.ShellOpen("https://www.youtube.com/watch?v=" + id);
-            return Outcome.Ok($"Listo, pongo «{query}».", new JsonObject { ["query"] = query, ["source"] = "youtube" });
-        }
-        M.ShellOpen("https://www.youtube.com/results?search_query=" + Uri.EscapeDataString(query));
-        return Outcome.Ok($"Te busqué «{query}» en YouTube.");
+        // Nunca YouTube común: YouTube Music en una ventana de app del navegador.
+        return await SearchInWebApp(AppsModule.BrowserMusic, query, ct)
+            ?? Outcome.Fail("No pude abrir YouTube Music en el navegador.", "no_browser");
     }
 
     static async Task<string?> FirstVideo(string query, CancellationToken ct)

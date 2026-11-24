@@ -51,7 +51,7 @@ object MemoryKeys {
  * música», «cuando te diga buenas noches, sacá la música», «acordate que …», «¿qué recordás?».
  */
 object MemoryParser {
-    private val LEAD = Regex("^\\s*(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?")
+    private val LEAD = Regex("^\\s*(?:(?:ey|hey|oye|hola)\\s*,?\\s+)?(?:(?:${AssistantIdentity.NAMES})\\s*[,.]?\\s+)?")
     private val WHEN = Regex("\\b(?:cada vez|cada que|siempre|cuando|de ahora en m[aá]s|a partir de ahora|desde ahora)\\b")
     private val MUSIC = Regex("\\b(?:m[uú]sica|canci[oó]n|canciones|temas)\\b")
     private val APP_AFTER = Regex(
@@ -61,7 +61,9 @@ object MemoryParser {
     private val APP_BEFORE = Regex(
         "^(?:(?:siempre|de ahora en m[aá]s|a partir de ahora)\\s*,?\\s+)?(?:us[aá]|abr[ií]|pon[eé])\\s+(?:la\\s+app\\s+(?:de\\s+)?)?(.+?)\\s+(?:para|con)\\s+(?:la\\s+|las\\s+|los\\s+)?(?:m[uú]sica|canciones|temas)",
     )
-    private val TRIGGER_START = "^(?:cada\\s+vez\\s+que|cada\\s+que|siempre\\s+que|cuando|si)\\s+(?:yo\\s+)?(?:te\\s+)?(?:diga|digo)\\s+(?:que\\s+)?"
+    private val TRIGGER_START = "^(?:cada\\s+vez\\s+que|cada\\s+que|siempre\\s+que|cuando|si)\\s+(?:yo\\s+)?(?:te\\s+)?(?:diga|digo|pida|pido)\\s+(?:que\\s+)?"
+    /** «Guardá en tu memoria (que) …», «anotá que …», «aprendé que …» delante de una rutina. */
+    private val SAVE_LEAD = Regex("^(?:guard[aá](?:lo)?|anot[aá]|aprend[eé]|record[aá]|acordate)\\s+(?:en\\s+tu\\s+memoria|esto)?\\s*,?\\s*(?:que\\s+)?")
     /** «Cuando te diga X, hacé Y», «cada que te diga "X" quiero que Y», «si te digo X tenés que Y». */
     private val ROUTINE = Regex(
         TRIGGER_START + "[\"«“]?(.+?)[\"»”]?\\s*,?\\s*(?:hac[eé]|haz|que\\s+hagas|quiero\\s+que|necesito\\s+que|ten[eé]s\\s+que|tienes\\s+que|deb[eé]s|vos)\\s+(.+)$",
@@ -94,13 +96,15 @@ object MemoryParser {
 
     fun parse(text: String): CommandIntent? {
         val lower = text.trim().lowercase().trimEnd('.', '!', '?')
-        val body = lower.substring(LEAD.find(lower)?.value?.length ?: 0).trimStart('¿', '¡')
+        var body = lower.substring(LEAD.find(lower)?.value?.length ?: 0).trimStart('¿', '¡')
+        // «Guardá en tu memoria, cada vez que te pida …»: lo de adelante no es parte de la rutina.
+        SAVE_LEAD.find(body)?.let { lead -> body.substring(lead.value.length).trimStart(',', ' ').takeIf { WHEN.containsMatchIn(it.take(20)) }?.let { body = it } }
 
         if (RECALL.containsMatchIn(body)) return CommandIntent.RecallMemory
         // «Yesica se escribe con y griega», «cuando digo Ceci me refiero a Yessi».
         Spelling.parse(text)?.let { return it }
-        (ROUTINE.find(body) ?: ROUTINE_QUOTED.find(body))?.let { m ->
-            return CommandIntent.Remember(MemoryKeys.routineKey(clean(m.groupValues[1])), toOrder(clean(m.groupValues[2])))
+        (ROUTINE.find(body) ?: ROUTINE_QUOTED.find(body))?.takeUnless { MUSIC.containsMatchIn(it.groupValues[1]) }?.let { m ->
+            return CommandIntent.Remember(MemoryKeys.routineKey(clean(m.groupValues[1])), simplify(toOrder(clean(m.groupValues[2]))))
         }
         if (FORGET_MUSIC.containsMatchIn(body) && !WHEN.containsMatchIn(body)) return CommandIntent.Forget(MemoryKeys.MUSIC_APP)
 
@@ -126,6 +130,17 @@ object MemoryParser {
         }
         FORGET.find(body)?.let { m -> return CommandIntent.Forget(m.groupValues[1].trim()) }
         return null
+    }
+
+    /**
+     * «si el bluetooth está apagado lo enciendas y te conectes al gol g3 y si está encendido sólo
+     * conectate al gol g3» → «conectate al gol g3» (conectarse ya prende el Bluetooth si hace falta).
+     */
+    internal fun simplify(action: String): String {
+        val lower = action.lowercase()
+        if (!Regex("\\bsi\\b").containsMatchIn(lower) || !Regex("blue|blutu").containsMatchIn(lower)) return action
+        val target = Regex("conect(?:a|e|es|ate|á|ás|arte|ate)?\\s+(?:a|al|con)\\s+(?:la\\s+|el\\s+|los\\s+)?([\\p{L}0-9 ]+?)(?=\\s+y\\s+si\\b|\\s*[,.]|$)").findAll(lower).lastOrNull()?.groupValues?.get(1)?.trim()
+        return target?.let { "conectate a $it" } ?: action
     }
 
     private fun clean(text: String) = text.trim().trim('"', '«', '»', '“', '”', ',', '.', ' ')

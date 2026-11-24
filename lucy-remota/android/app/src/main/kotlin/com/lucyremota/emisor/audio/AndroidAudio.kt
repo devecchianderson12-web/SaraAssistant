@@ -149,7 +149,7 @@ class AndroidVolumeControl(context: Context) : VolumeControl {
 
     override fun state(): VolumeState = VolumeState(
         current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
-        min = audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC),
+        min = if (android.os.Build.VERSION.SDK_INT >= 28) audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC) else 0,
         max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),
         isFixed = audioManager.isVolumeFixed,
         isMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC),

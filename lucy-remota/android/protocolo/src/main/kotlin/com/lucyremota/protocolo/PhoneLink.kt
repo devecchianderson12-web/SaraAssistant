@@ -118,6 +118,21 @@ class PhoneLink(
     private var server: ServerSocket? = null
     private val waiters = ConcurrentHashMap<String, (CommandStatus) -> Unit>()
     @Volatile private var relay: RelayClient? = null
+    /** De dónde llegó el último anuncio de cada PC (para avisarle enseguida «acá estoy»). */
+    private val lastBeacon = ConcurrentHashMap<String, java.net.SocketAddress>()
+
+    /**
+     * Le avisa a la PC elegida que el teléfono la está esperando, sin esperar su próximo anuncio:
+     * así se reconecta en milisegundos cuando hay que mandar una orden.
+     */
+    private fun poke() {
+        val pc = store.pairedPc ?: return
+        val to = lastBeacon[pc.id] ?: return
+        val socket = udp ?: return
+        val reply = JSONObject().put("lr", Proto.MAJOR).put("t", "here").put("pc", pc.id).put("dev", store.deviceId).put("port", listeningPort)
+            .toString().toByteArray()
+        scope.launch { runCatching { socket.send(DatagramPacket(reply, reply.size, to)) } }
+    }
 
     /** Puerto TCP en el que escucha (el habitual, u otro si estaba ocupado). */
     val listeningPort: Int get() = server?.localPort ?: -1
@@ -216,6 +231,7 @@ class PhoneLink(
             try { socket.receive(packet) } catch (e: SocketException) { return } catch (e: Exception) { continue }
             val msg = runCatching { JSONObject(String(packet.data, 0, packet.length)) }.getOrNull() ?: continue
             msg.optString("pc").takeIf { id -> id.isNotEmpty() && store.pairedPcs.any { it.id == id } }?.let { id ->
+                if (msg.optString("t") == "beacon") lastBeacon[id] = packet.socketAddress
                 val now = System.currentTimeMillis()
                 if (now - (_seen.value[id] ?: 0) > 2_000) _seen.value = _seen.value + (id to now)
             }
@@ -418,6 +434,8 @@ class PhoneLink(
         params: JSONObject = JSONObject(),
         confirmed: Boolean = false,
         expiresMs: Int = 10_000,
+        /** Volver apenas la PC confirma que la recibió (la hace igual; los estados siguen llegando a [onStatus]). */
+        returnWhenReceived: Boolean = false,
         onStatus: (CommandStatus) -> Unit = {},
     ): CommandStatus {
         val id = UUID.randomUUID().toString()
@@ -425,34 +443,46 @@ class PhoneLink(
         val cmd = JSONObject().put("t", "command").put("v", Proto.MAJOR).put("command_id", id).put("intent", intent)
             .put("params", params).put("sent_at", sentAt).put("expires_ms", expiresMs).put("confirmed", confirmed)
         val final = CompletableDeferred<CommandStatus>()
-        var received = false
+        val received = CompletableDeferred<CommandStatus>()
         waiters[id] = { st ->
-            if (st.status == CommandStatus.RECEIVED) received = true
+            if (st.status == CommandStatus.RECEIVED || st.status == CommandStatus.PROCESSING) received.complete(st)
             onStatus(st)
-            if (st.final) final.complete(st)
+            if (st.final) { received.complete(st); final.complete(st) }
         }
+        var keepWaiter = false
         try {
-            while (!final.isCompleted) {
-                val s = session ?: awaitSession(sentAt + expiresMs - System.currentTimeMillis())
-                if (s == null) return CommandStatus(id, CommandStatus.NOT_CONNECTED, "La computadora no está conectada.", null, null)
+            while (true) {
+                val left = sentAt + expiresMs - System.currentTimeMillis()
+                val s = session ?: run { poke(); awaitSession(left) }
+                    ?: return CommandStatus(id, CommandStatus.NOT_CONNECTED, "La computadora no está conectada.", null, null)
                 runCatching { s.send(cmd) }
-                // Si la PC la recibió, se espera el resultado (la ejecución puede tardar).
-                val answer = withTimeoutOrNull(if (received) 30_000 else 4_000) { final.await() }
-                if (answer != null) return answer
-                if (received) return CommandStatus(id, CommandStatus.NO_ANSWER, "La computadora no contestó.", null, null)
-                if (System.currentTimeMillis() - sentAt > expiresMs) return CommandStatus(id, CommandStatus.NO_ANSWER, "La computadora no contestó.", null, null)
-                // No llegó: se reintenta con el mismo id (si llegó y se perdió la respuesta, la PC devuelve el resultado guardado).
+                // En la red local la PC confirma en milisegundos: si no llega enseguida, la conexión quedó
+                // muerta (Wi‑Fi dormido): se corta, se reconecta y se reenvía con el mismo id (no se repite).
+                if (withTimeoutOrNull(RECEIPT_MS) { received.await() } == null) {
+                    if (System.currentTimeMillis() - sentAt > expiresMs) return CommandStatus(id, CommandStatus.NO_ANSWER, "La computadora no contestó.", null, null)
+                    if (session === s && !s.viaRelay) s.close()
+                    poke()
+                    continue
+                }
+                if (final.isCompleted) return final.await()
+                if (returnWhenReceived) {
+                    keepWaiter = true
+                    scope.launch { withTimeoutOrNull(120_000) { final.await() }; waiters.remove(id) }
+                    return received.await()
+                }
+                return withTimeoutOrNull(60_000) { final.await() }
+                    ?: CommandStatus(id, CommandStatus.NO_ANSWER, "La computadora no contestó.", null, null)
             }
-            return final.await()
         } finally {
-            waiters.remove(id)
+            if (!keepWaiter) waiters.remove(id)
         }
     }
 
     private suspend fun awaitSession(maxMs: Long): Session? {
         if (store.pairedPc == null || maxMs <= 0) return null
         return withTimeoutOrNull(maxMs.coerceAtMost(6_000)) {
-            while (session == null) delay(100)
+            var n = 0
+            while (session == null) { delay(50); if (++n % 10 == 0) poke() }
             session
         }
     }
@@ -522,6 +552,11 @@ class PhoneLink(
     private fun parseCatalog(arr: JSONArray?): List<RemoteIntent> = (0 until (arr?.length() ?: 0)).mapNotNull { i ->
         val o = arr!!.optJSONObject(i) ?: return@mapNotNull null
         RemoteIntent(o.optString("intent"), o.optString("module"), o.optString("description"), o.optString("risk"), o.optJSONObject("params")?.keySet() ?: emptySet())
+    }
+
+    private companion object {
+        /** Cuánto se espera el «recibida» de la PC antes de dar la conexión por muerta (relé incluido). */
+        const val RECEIPT_MS = 2_500L
     }
 
     override fun close() {

@@ -113,3 +113,17 @@ static class WinUi
         if (inputs.Count > 0) Send(inputs.ToArray());
     }
 }
+
+/// <summary>Carpetas conocidas de Windows («Archivos de programa»…) por su identificador.</summary>
+static class KnownFolders
+{
+    [System.Runtime.InteropServices.DllImport("shell32.dll")]
+    static extern int SHGetKnownFolderPath([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStruct)] Guid id, uint flags, nint token, out nint path);
+
+    public static string? Path(Guid id)
+    {
+        if (SHGetKnownFolderPath(id, 0, 0, out var p) != 0) return null;
+        try { return System.Runtime.InteropServices.Marshal.PtrToStringUni(p); }
+        finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(p); }
+    }
+}

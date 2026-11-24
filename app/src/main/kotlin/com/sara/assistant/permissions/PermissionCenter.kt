@@ -85,7 +85,8 @@ object PermissionCenter {
         PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isEnabled(context)
         PermissionKind.BATTERY -> context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         PermissionKind.AI_KEY -> com.sara.assistant.SaraApp.containerOrNull(context)?.ai?.isAvailable() == true
-        PermissionKind.DEFAULT_ASSISTANT -> runCatching {
+        // Antes de Android 10 no hay «rol» de asistente que pedir: se da por resuelto.
+        PermissionKind.DEFAULT_ASSISTANT -> Build.VERSION.SDK_INT < 29 || runCatching {
             context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
         }.getOrDefault(false)
     }

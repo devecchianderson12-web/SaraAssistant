@@ -123,6 +123,7 @@ class SaraListeningService : LifecycleService() {
         if (lastBluetooth == false && bluetooth && appOpen) {
             c.logger.d(TAG, "Conectado a un Bluetooth: Sara se quita de Recientes y sigue escuchando")
             c.appTaskAlive.value = false
+            autoRemoved = true
             runCatching { getSystemService(android.app.ActivityManager::class.java).appTasks.forEach { it.finishAndRemoveTask() } }
         }
         lastBluetooth = bluetooth
@@ -131,6 +132,7 @@ class SaraListeningService : LifecycleService() {
             if (c.orchestrator.isInteractionActive) return
             c.logger.d(TAG, "Sin la app abierta ni Bluetooth: Sara se apaga del todo")
             c.orchestrator.setWakeWordEnabled(false)
+            runCatching { androidx.core.app.NotificationManagerCompat.from(this).cancelAll() }
             stopSelfSafely()
             return
         }
@@ -189,8 +191,29 @@ class SaraListeningService : LifecycleService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         container.appTaskAlive.value = false
-        evaluate()
+        // La quitó la propia app (Bluetooth del auto): sigue escuchando.
+        if (autoRemoved) { autoRemoved = false; evaluate(); return }
+        // La cerraste vos (la sacaste de Recientes): se cierra del todo, sin dejar notificaciones.
+        shutDownCompletely()
     }
+
+    /** Apaga la escucha, borra todas las notificaciones y termina el proceso. */
+    private fun shutDownCompletely() {
+        val c = container
+        c.logger.d(TAG, "Cerrada desde Recientes: se apaga del todo")
+        runCatching { c.orchestrator.setWakeWordEnabled(false) }
+        runCatching { c.orchestrator.cancelInteraction() }
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        runCatching { androidx.core.app.NotificationManagerCompat.from(this).cancelAll() }
+        stopSelf()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            runCatching { androidx.core.app.NotificationManagerCompat.from(this).cancelAll() }
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, 400)
+    }
+
+    /** La app se sacó sola de Recientes (al conectarse al Bluetooth): no es un cierre. */
+    @Volatile private var autoRemoved = false
 
     private var observing = false
 
@@ -323,7 +346,7 @@ class BootReceiver : BroadcastReceiver() {
         val c = context.container
         c.scope.launch {
             try {
-                if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) SaraNotifications.postUpdated(context)
+                // Sin notificaciones con la app cerrada (tampoco la de «se actualizó»).
             } finally {
                 pending.finish()
             }

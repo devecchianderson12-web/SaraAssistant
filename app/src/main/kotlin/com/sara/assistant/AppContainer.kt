@@ -232,6 +232,12 @@ class AppContainer(private val app: Application) {
     )
 
     init {
+        // Programado a pedido: «conectate al auto» (prende el Bluetooth si hace falta y se conecta al
+        // Gol G3) y «desconectate» (se desconecta del Gol G3 y deja el Bluetooth prendido).
+        listOf("conectate al auto" to "conectate al gol g3", "desconectate" to "desconectate del gol g3").forEach { (say, order) ->
+            val key = com.sara.core.memory.MemoryKeys.routineKey(say)
+            if (memory.get(key) == null) memory.put(key, order)
+        }
         scope.launch { history.load() }
         ensurePiper()
         if (mediaControl.hasNotificationAccess()) musicUsage.start()
@@ -331,6 +337,7 @@ class AppContainer(private val app: Application) {
     )
 
     fun isDefaultAssistant(): Boolean {
+        if (Build.VERSION.SDK_INT < 29) return false
         val roleManager = app.getSystemService(RoleManager::class.java) ?: return false
         return runCatching { roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT) }.getOrDefault(false)
     }
