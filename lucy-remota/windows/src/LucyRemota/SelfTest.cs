@@ -173,7 +173,7 @@ static class SelfTest
                 dynamic wsh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
                 dynamic sc = wsh.CreateShortcut(lnk);
                 sc.TargetPath = chrome;
-                sc.Arguments = $"--user-data-dir=\"{profile}\" --no-first-run --no-default-browser-check --window-size=900,700 --app={new Uri(html).AbsoluteUri}";
+                sc.Arguments = $"--lang=es --disable-features=Translate --user-data-dir=\"{profile}\" --no-first-run --no-default-browser-check --window-size=900,700 --app={new Uri(html).AbsoluteUri}";
                 sc.Save();
                 return 0;
             });
