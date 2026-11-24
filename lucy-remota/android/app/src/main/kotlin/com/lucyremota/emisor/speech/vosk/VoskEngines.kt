@@ -53,6 +53,8 @@ class VoskWakeWordEngine(
             // Si empieza o termina la música se reabre el micrófono con la fuente adecuada.
             val echoCancellation = microphone.echoCancellationWanted()
             val recognizer = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), if (config.requirePrefix) PREFIXED_GRAMMAR else GRAMMAR).apply { setWords(true) }
+            // Verificador rápido, creado una vez (no por cada candidato): gramática chica de palabras parecidas.
+            val quick = Recognizer(model, MicrophoneSource.SAMPLE_RATE.toFloat(), if (config.requirePrefix) PREFIXED_COMPETITORS else COMPETITORS)
             val gate = WakeWordGate(config.sensitivity)
             val energy = EnergyGate()
             // Últimos ~2,4 s de audio, sólo en memoria.
@@ -90,7 +92,10 @@ class VoskWakeWordEngine(
                         gate.onPartial(JSONObject(recognizer.partialResult).optString("partial").split(' '))
                     }
                     if (candidate) {
-                        if (verify(model, window, echoCancellation, config.sensitivity, config.requirePrefix)) {
+                        val t0 = System.currentTimeMillis()
+                        val ok = verify(model, quick, window, config.sensitivity, config.requirePrefix)
+                        logger.d(TAG, "Verificación ${if (ok) "aceptada" else "rechazada"} en ${System.currentTimeMillis() - t0} ms")
+                        if (ok) {
                             detected = true
                         } else {
                             gate.rejected()
@@ -111,30 +116,34 @@ class VoskWakeWordEngine(
                 }
             } finally {
                 recognizer.close()
+                quick.close()
             }
         }
     }
 
     /**
-     * Segunda etapa sobre la ventana de audio: transcripción libre (estricta). Con música, como la
-     * transcripción libre se confunde, también vale ganarle a palabras parecidas («para», «cara»…).
+     * Segunda etapa, pensada para que Lucy conteste al toque aun en teléfonos lentos: sólo el último
+     * segundo y medio de audio, y primero la gramática chica de palabras parecidas («luz», «lucas»,
+     * «luego»…), que se decodifica en milisegundos. Sólo si ahí no gana «Lucy» se prueba la
+     * transcripción libre (más lenta, pero rescata los «Lucy» dichos raro).
      */
-    private fun verify(model: Model, window: ArrayDeque<ByteArray>, musicPlaying: Boolean, sensitivity: Float, requirePrefix: Boolean): Boolean {
-        val raw = ByteArrayOutputStream(window.sumOf { it.size }).apply { window.forEach { write(it) } }.toByteArray()
+    private fun verify(model: Model, quick: Recognizer, window: ArrayDeque<ByteArray>, sensitivity: Float, requirePrefix: Boolean): Boolean {
+        val recent = window.toList().takeLast(VERIFY_CHUNKS)
+        val raw = ByteArrayOutputStream(recent.sumOf { it.size }).apply { recent.forEach { write(it) } }.toByteArray()
         val audio = WakeWordTuning.applyGain(raw, raw.size, WakeWordTuning.gainFor(WakeWordTuning.peakOf(raw, raw.size)))
-        val free = transcribe(model, audio, null)
+        val fast = runCatching {
+            quick.reset()
+            quick.acceptWaveForm(audio, audio.size)
+            JSONObject(quick.finalResult).optString("text")
+        }.getOrDefault("")
         if (requirePrefix) {
-            // «Ey Sara»: el llamado tiene que estar justo antes del nombre. El modelo chico casi nunca
-            // escribe «ey», así que también vale que «y/e/hay sara» le gane a las palabras parecidas.
-            if (WakeWordTuning.verifiedWithPrefix(free)) return true
-            if (sensitivity < 0.3f) return false
-            return WakeWordTuning.verifiedWithPrefix(transcribe(model, audio, PREFIXED_COMPETITORS))
+            if (WakeWordTuning.verifiedWithPrefix(fast)) return true
+        } else if (WakeWordTuning.profile.keyword in fast.split(' ')) {
+            return true
         }
-        if (WakeWordTuning.verifiedByTranscript(free)) return true
-        // La transcripción libre del modelo chico falla seguido con «Sara» dicha rápido o bajo:
-        // si «Sara» le gana a las palabras parecidas («para», «cara»…), se acepta.
         if (sensitivity < 0.3f) return false
-        return WakeWordTuning.profile.keyword in transcribe(model, audio, COMPETITORS).split(' ')
+        val free = transcribe(model, audio, null)
+        return if (requirePrefix) WakeWordTuning.verifiedWithPrefix(free) else WakeWordTuning.verifiedByTranscript(free)
     }
 
     private fun parseWords(json: String): List<Pair<String, Float>> {
@@ -167,6 +176,8 @@ class VoskWakeWordEngine(
         val GRAMMAR: String get() = "[\"${WakeWordTuning.profile.keyword}\", \"[unk]\"]"
         const val WINDOW_CHUNKS = 24 // 2,4 s
         const val PREROLL_CHUNKS = 5
+        /** Lo que se vuelve a mirar para confirmar el nombre: el último segundo y medio. */
+        const val VERIFY_CHUNKS = 15
         const val MUSIC_CHECK_CHUNKS = 20 // cada 2 s
         val COMPETITORS: String get() = WakeWordTuning.COMPETITOR_GRAMMAR.joinToString(",", "[", "]") { "\"$it\"" }
         /** Primera etapa de «Ey Sara»: el nombre solo o con el llamado delante. */
