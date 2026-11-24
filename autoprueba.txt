@@ -1,0 +1,45 @@
+     · Vinculación abierta (5 minutos)
+     · Teléfono vinculado: Teléfono de prueba
+     · Conectada con Teléfono de prueba (127.0.0.1)
+OK   vinculación por QR en 115 ms
+OK   catálogo de intenciones 27 intenciones
+OK   GET_TIME success «Son las 20 y 22.» (31 ms) {"time":"20:22","date":"2026-11-24"}
+OK   GET_SYSTEM_INFO success «No tiene batería: está enchufada, 29 GB libres de 150 en el disco, y la memoria está usada al 22 %.» (7 ms) {"disk_free_gb":29.2,"memory_load":22}
+INFO GET_VOLUME error «No pude hacerlo: Element not found. (0x80070490)» (6 ms) 
+INFO SET_VOLUME error «No pude hacerlo: Element not found. (0x80070490)» (1 ms) 
+OK   LIST_APPLICATIONS success «Hay 166 programas.» (245 ms) {"apps":["Firefox","Firefox Private Browsing","Anaconda Prompt","Anaconda PowerShell Prompt","Blend for Visual Studio","Python 3.11 Manuals (64-bit)","Python 3.11 (64-bit)","Python 3.12 Manuals (64-bit)","Python 3.12 (64-bit)","Python 3.13 Manuals (64-bit)","Python 3.13 (64-bit)","Python 3.14 Manuals (64-bit)","Python 3.14 (64-bit)","Python 3.15 Manuals (64-bit)","Python 3.15 (64-bit)","Rtools45 Bash","CPAN Client","Create local library areas","CPAN Module Search","Learning Perl (tutorials, examples)","Live Support (chat)","MetaCPAN Search Engine","Perl Documentation","Strawberry Perl Release Notes","Strawberry Perl Website","Google Chrome","Unity Hub","Installation notes","PostgreSQL documentation","PostgreSQL release notes","pgAdmin documentation","WiX Home Page","Git FAQs (Frequently Asked Questions)","Node.js website","Node.js documentation","Windows OpenSSL Website","Official OpenSSL Website","Official OpenSSL Documentation","Inno Setup Compiler","Install Additional Tools for Node.js","IDLE (Python 3.15 64-bit)","Git Bash","Python 3.11 Module Docs (64-bit)","R 4.6.2","Git CMD","Windows Software Development Kit","Developer PowerShell for VS","x86 Native Tools Command Prompt for VS","Node.js command prompt","Python 3.15 Module Docs (64-bit)","Reload Configuration","x64 Native Tools Command Prompt for VS","Python 3.13 Module Docs (64-bit)","Python 3.12 Module Docs (64-bit)","x86_x64 Cross Tools Command Prompt for VS","x64_x86 Cross Tools Command Prompt for VS","IDLE (Python 3.11 64-bit)","Performance Monitor","Computer Management","IDLE (Python 3.12 64-bit)","Task Manager","Debuggable Package Manager","PowerShell 7 (x64)","MySQL 8.4 Command Line Client","Event Viewer","Local Security Policy","IDLE (Python 3.13 64-bit)","Task Scheduler","Resource Monitor","Developer Command Prompt for VS","IDLE (Python 3.14 64-bit)","Python 3.14 Module Docs (64-bit)","MySQL 8.4 Command Line Client - Unicode","Visual Studio Installer","Windows Tools","Control Panel","File Explorer","Windows Media Player Legacy","Remote Desktop Connection","Run","WSL","Microsoft Edge","Visual Studio","Application Verifier (X64)","Character Map","Disk Cleanup","Command Prompt","Component Services","Defragment and Optimize Drives","iSCSI Initiator","Live captions","Magnifier","Windows Memory Diagnostic","System Configuration","System Information","Paint","Narrator","Notepad","ODBC Data Sources (64-bit)","On-Screen Keyboard","Steps Recorder","Recovery Drive","Server Manager","Services","Snipping Tool","Voice access","Windows Server Backup","Windows Defender Firewall with Advanced Security","Calculator","Windows PowerShell 5.1","Windows PowerShell ISE 5.1","XPS Viewer","7-Zip File Manager","Azure Cosmos DB Emulator","CMake (cmake-gui)","CMake Documentation","Git GUI","Git Release Notes","ImageMagick Web Pages","Service Fabric Local Cluster Manager","Microsoft Web Platform Installer","MySQL 8.4 Configurator","Node.js","Win64 OpenSSL Command Prompt","Application Stack Builder","pgAdmin 4","SQL Shell (psql)","WSL Settings","Inno Setup Example Scripts","Inno Setup Documentation (Dark)","Inno Setup Documentation","Inno Setup FAQ","Inno Setup Revision History","Windows App Cert Kit","Global Flags (ARM64)","WinDbg (ARM64)","Global Flags (X64)","WinDbg (X64)","Global Flags (X86)","WinDbg (X86)","Documentation for Desktop Apps","Sample Desktop Apps","Tools for Desktop Apps","Documentation for UWP Apps","Sample UWP Apps","Tools for UWP Apps","GPUView","Windows Performance Analyzer","Windows Performance Recorder","DTF Documentation","MSI SDK Documentation","WiX Documentation","Application Verifier (WOW)","Perl (command line)","ODBC Data Sources (32-bit)","Windows PowerShell 5.1 (x86)","Windows PowerShell ISE 5.1 (x86)","Azure Arc Setup","Registry Editor","Windows Admin Center Setup","Get Started","Windows Backup","Settings","Feedback Hub","Terminal","Windows Security"]}
+OK   apps del menú Inicio 166: Firefox, Firefox Private Browsing, Anaconda Prompt, Anaconda PowerShell Prompt, Blend for Visual Studio, Python 3.11 Manuals (64-bit), Python 3.11 (64-bit), Python 3.12 Manuals (64-bit)
+OK   MEDIA_NOW_PLAYING success «No está sonando nada en la computadora.» (133 ms) {"playing":false}
+OK   TAKE_SCREENSHOT success «Listo, saqué una captura. Está en Imágenes, carpeta Lucy Remota.» (69 ms) {"path":"C:\\Users\\runneradmin\\Pictures\\Lucy Remota\\Captura 2026-11-24 20.22.32.png"}
+OK   captura guardada C:\Users\runneradmin\Pictures\Lucy Remota\Captura 2026-11-24 20.22.32.png
+OK   MINIMIZE_WINDOWS success «Listo, minimicé todas las ventanas.» (6 ms) 
+OK   RESTORE_WINDOWS success «Listo, volví a mostrar las ventanas.» (6 ms) 
+OK   OPEN_APPLICATION success «Abriendo Notepad en tu computadora.» (31 ms) {"app":"Notepad"}
+OK   CLOSE_APPLICATION success «Listo, cerré Notepad.» (10 ms) {"app":"Notepad","windows":1}
+OK   OPEN_APPLICATION error «No encontré Photoshop instalado en la computadora.» (4 ms) 
+OK   FORMAT_DISK unsupported «Eso todavía no lo sé hacer en la computadora.» (1 ms) 
+OK   SET_VOLUME invalid «La orden vino mal: «level» fuera de rango (0…100)» (1 ms) 
+OK   OPEN_SYSTEM_PAGE invalid «La orden vino mal: «page» no admite «cmd.exe /c del»» (1 ms) 
+OK   SHUTDOWN needs_confirmation «¿Apago la computadora? (en 30 segundos)» (1 ms) 
+OK   GET_TIME success «Son las 20 y 22.» (2 ms) {"time":"20:22","date":"2026-11-24"}
+OK   orden repetida no se ejecutó dos veces
+INFO memoria 104 MB en uso, 37 MB privados
+     · Vinculación abierta (5 minutos)
+OK   ventanas capturas: receptor, vincular, telefonos, historial, ajustes
+OK   buscar actualizaciones última publicada: LucyRemota-v1.5.3.exe (esta: V1.5.4)
+OK   app web instalada «Música de prueba» reconocida por su acceso directo (app:file:///D:/a/Sar…)
+OK   poné Queen (app cerrada) «Listo, pongo «queen bohemian» en Música de prueba.» en 9182 ms
+OK   sin pestañas nuevas una sola ventana de Chrome
+OK   poné ABBA (app abierta) «Listo, pongo «abba» en Música de prueba.» en 2145 ms
+OK   sin pestañas nuevas una sola ventana de Chrome
+OK   poné música, sin decir qué (app abierta) «Listo, pongo «abba» en Música de prueba.» en 2130 ms
+OK   sin pestañas nuevas una sola ventana de Chrome
+INFO sin app de música usa: YouTube Music (app:https://music.youtube.com/)
+INFO YouTube Music real success «Listo, pongo «queen bohemian rhapsody» en YouTube Music.» en 5377 ms
+INFO YouTube Music real · qué suena No está sonando nada en la computadora.
+INFO YouTube Music real · ventanas YouTube Music
+INFO YouTube Music real · botones ventana 10,10-1014,710; [ControlType.Button «» @22,17 16x16] [ControlType.Button «Minimize» @869,11 45x31] [ControlType.Button «Maximize» @914,11 46x31] [ControlType.Button «Close» @960,11 46x31] [ControlType.Edit «Address and search bar» =«music.youtube.com/watch?v=fJ9rUzIMcZQ» @-2147483648,-2147483648 -2147483648x-2147483648] [ControlType.Button «Guide» @42,61 24x24] [ControlType.Button «Initiate search» @333,57 33x32] [ControlType.Button «Clear» @760,57 33x32] [ControlType.Button «Connect to a device» @775,57 41x32] [ControlType.Button «» @823,61 25x24] [ControlType.Button «Sign in» @42,306 192x36] [ControlType.Button «Sign in» @510,451 75x37] [ControlType.Button «» @906,129 48x48] [ControlType.Button «Autoplay» @887,271 46x22] [ControlType.Button «Play Bohemian Rhapsody (Digital Remaster)» @705,340 33x32] [ControlType.Button «Action menu» @882,338 36x36] [ControlType.Button «Play Somebody To Love» @705,532 33x33] [ControlType.Button «Play The Beatles - Eleanor Rigby (From "Yellow Submarine") [Official Music Video]» @705,589 33x33] [ControlType.Button «Play Hotel California (Live 1976)» @705,646 33x33] [ControlType.Button «Play Dream On (2024 Mix)» @705,703 33x33] [ControlType.Button «Play Don't Stop Me Now» @705,760 33x33] [ControlType.Button «Play Sweet Child O' Mine (Alternate Version)» @705,817 33x33] [ControlType.Button «Play Don't Stop Believin' (Live at The Summit, Houston, Texas, November 6, 1981)» @705,874 33x33] [ControlType.Button «Play Stairway To Heaven - Rema
+     · Sesión con Teléfono de prueba terminada: The operation was canceled.
+     · Se cortó la conexión con Teléfono de prueba
+Tiempo total: 39460 ms
+RESULTADO: todo OK
