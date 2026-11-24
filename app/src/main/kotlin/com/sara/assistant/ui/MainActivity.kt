@@ -84,6 +84,19 @@ class MainActivity : ComponentActivity() {
             aiDialogRequested.value = true
         } else if (runtime != null) {
             grantLauncher.launch(runtime)
+        } else if (com.sara.assistant.permissions.PermissionCenter.isRestricted(kind) && com.sara.assistant.permissions.PermissionCenter.restrictedSettingsBlocked(this)) {
+            // Android lo tiene bloqueado (app instalada desde un archivo): primero hay que destrabarlo.
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Android bloqueó este permiso")
+                .setMessage(
+                    "Pasa con las apps instaladas desde un archivo (no desde Play Store).\n\n" +
+                        "1. En la pantalla que se abre, tocá ⋮ (arriba a la derecha).\n" +
+                        "2. Elegí «Permitir ajustes restringidos» y confirmá.\n" +
+                        "3. Volvé a Sara y tocá «Activar» otra vez: ahora sí se puede prender.",
+                )
+                .setPositiveButton("Abrir") { _, _ -> openAppSettings() }
+                .setNegativeButton("Cancelar", null)
+                .show()
         } else {
             openSafely(*com.sara.assistant.permissions.PermissionCenter.settingsIntents(this, kind).toTypedArray())
         }
@@ -165,6 +178,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() {
+        com.sara.assistant.permissions.PermissionCenter.rebindNotificationListener(this)
         super.onResume()
         viewModel.onResume()
         // Al volver de una pantalla de Ajustes, sigue con el próximo permiso.

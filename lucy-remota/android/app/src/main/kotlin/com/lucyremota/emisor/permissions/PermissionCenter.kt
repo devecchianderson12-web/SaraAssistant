@@ -81,12 +81,36 @@ object PermissionCenter {
         PermissionKind.DND_ACCESS -> context.getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted
         PermissionKind.NOTIFICATION_ACCESS -> NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         PermissionKind.OVERLAY -> Settings.canDrawOverlays(context)
-        PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isWorking(context)
+        // Activada en Ajustes alcanza: si el sistema la frena (Xiaomi), se reconecta sola al usarla.
+        PermissionKind.ACCESSIBILITY -> SaraAccessibilityService.isEnabled(context)
         PermissionKind.BATTERY -> context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         PermissionKind.AI_KEY -> com.lucyremota.emisor.SaraApp.containerOrNull(context)?.ai?.isAvailable() == true
         PermissionKind.DEFAULT_ASSISTANT -> runCatching {
             context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
         }.getOrDefault(false)
+    }
+
+    /**
+     * Android 13+ bloquea «Acceso a notificaciones» y «Accesibilidad» en apps instaladas desde un
+     * archivo (no desde Play Store): el interruptor aparece gris o no queda prendido. Se habilita en
+     * Info de la app › ⋮ › «Permitir ajustes restringidos».
+     */
+    fun restrictedSettingsBlocked(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        val ops = context.getSystemService(android.app.AppOpsManager::class.java) ?: return false
+        val mode = runCatching {
+            ops.unsafeCheckOpNoThrow("android:access_restricted_settings", android.os.Process.myUid(), context.packageName)
+        }.getOrNull() ?: return false
+        return mode == android.app.AppOpsManager.MODE_ERRORED || mode == android.app.AppOpsManager.MODE_IGNORED
+    }
+
+    /** Estos dos permisos son los que Android bloquea en apps instaladas desde un archivo. */
+    fun isRestricted(kind: PermissionKind) = kind == PermissionKind.NOTIFICATION_ACCESS || kind == PermissionKind.ACCESSIBILITY
+
+    /** Pide al sistema que vuelva a conectar el lector de notificaciones (a veces queda activado pero desconectado). */
+    fun rebindNotificationListener(context: Context) {
+        if (!isGranted(context, PermissionKind.NOTIFICATION_ACCESS)) return
+        runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(context, SaraNotificationListener::class.java)) }
     }
 
     fun missing(context: Context): List<PermissionKind> = PermissionKind.entries.filterNot { isGranted(context, it) }
@@ -100,6 +124,8 @@ object PermissionCenter {
         if (kind == PermissionKind.AI_KEY) return emptyList()
         val pkg = Uri.parse("package:" + context.packageName)
         val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
+        // Bloqueado por Android: primero Info de la app (⋮ › Permitir ajustes restringidos).
+        if (isRestricted(kind) && restrictedSettingsBlocked(context)) return listOf(appDetails)
         return when (kind) {
             PermissionKind.NOTIFICATION_ACCESS -> listOfNotNull(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
