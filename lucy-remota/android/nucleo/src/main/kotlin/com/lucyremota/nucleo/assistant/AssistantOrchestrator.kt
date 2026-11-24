@@ -315,7 +315,8 @@ class AssistantOrchestrator(
                 feedback.chime()
                 speak(responses.listening(), cfg, cacheable = true)
             }
-            cfg.acknowledgement != Acknowledgement.NONE -> feedback.chime()
+            // La señal suena mientras ya se abre el micrófono: sin esperar a que termine.
+            cfg.acknowledgement != Acknowledgement.NONE -> scope.launch { feedback.chime() }
         }
 
         var retried = false

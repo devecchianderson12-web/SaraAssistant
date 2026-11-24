@@ -31,7 +31,8 @@ data class SaraSettings(
     val manualActivationEnabled: Boolean = true,
     val wakeEngine: WakeEngineType = WakeEngineType.VOSK,
     val sensitivity: Float = WakeWordTuning.DEFAULT_SENSITIVITY,
-    val acknowledgement: Acknowledgement = Acknowledgement.VOICE,
+    // Lucy contesta al toque: sólo una señal (decir «¿Sí?» demora y en teléfonos lentos se nota).
+    val acknowledgement: Acknowledgement = Acknowledgement.CHIME,
     val echoCancellation: Boolean = true,
     /** Silencio tolerado dentro de una orden (pausas al hablar). */
     val speechPauseMillis: Int = 1_700,
@@ -109,7 +110,7 @@ class SettingsRepository(context: Context, scope: CoroutineScope) {
         val manualActivation = booleanPreferencesKey("manual_enabled")
         val wakeEngine = stringPreferencesKey("wake_engine")
         val sensitivity = floatPreferencesKey("sensitivity")
-        val acknowledgement = stringPreferencesKey("ack")
+        val acknowledgement = stringPreferencesKey("ack_v2")
         val echoCancellation = booleanPreferencesKey("echo_cancellation")
         val speechPause = androidx.datastore.preferences.core.intPreferencesKey("speech_pause_ms")
         val voiceMode = stringPreferencesKey("voice_mode")
